@@ -85,9 +85,10 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
         className={clsx(styles.row, styles.file, selected && styles.selected)}
         style={indent}
         onClick={open}
+        title={name}
       >
         <span className={styles.gap} />
-        {name}
+        <span className={styles.label}>{name}</span>
       </button>
     )
   }
@@ -101,9 +102,9 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
 
   return (
     <>
-      <button type="button" className={styles.row} style={indent} onClick={onToggle}>
-        <span className={styles.chevron}>{expanded ? '▾' : '▸'}</span>
-        {name}
+      <button type="button" className={styles.row} style={indent} onClick={onToggle} title={name}>
+        <Chevron open={expanded} />
+        <span className={styles.label}>{name}</span>
       </button>
       {expanded &&
         children?.map((child) => (
@@ -117,5 +118,25 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
           />
         ))}
     </>
+  )
+}
+
+/** Disclosure chevron: points right when collapsed, rotates down when open. */
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={clsx(styles.chevron, open && styles.chevronOpen)}
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   )
 }

@@ -3,19 +3,29 @@
   align-items: center;
   gap: 6px;
   width: 100%;
+  box-sizing: border-box;
   padding: 4px 8px;
   border: none;
   background: none;
   text-align: left;
   font-size: 12px;
   cursor: pointer;
-  white-space: nowrap;
+  overflow: hidden;
   color: var(--soromi-text);
   transition: background 0.1s;
 }
 
 .row:hover {
   background: var(--soromi-bg-hover);
+}
+
+/* The name: truncates with an ellipsis instead of forcing horizontal scroll. */
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file {
@@ -29,15 +39,23 @@
 }
 
 .chevron {
-  width: 10px;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
   color: var(--soromi-text-faint);
-  font-size: 9px;
+  transition: transform 0.12s ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
 }
 
 .gap {
-  width: 10px;
+  flex-shrink: 0;
+  width: 12px;
 }
 
 .empty {
+  padding: 4px 8px;
   color: var(--soromi-text-faint);
 }
