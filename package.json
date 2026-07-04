@@ -16,10 +16,11 @@
     "format:check": "biome format .",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "clean": "turbo run clean && rm -rf node_modules",
-    "postinstall": "node scripts/fix-node-pty.mjs"
+    "daemon": "cargo run -p soromi-daemon",
+    "gen:protocol": "cargo test -p soromi-protocol --features ts",
+    "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",

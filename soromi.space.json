@@ -1,6 +1,6 @@
 {
   "name": "soromi",
-  "folders": ["packages/protocol", "packages/daemon", "packages/gui"],
+  "folders": ["crates/protocol", "crates/daemon", "packages/gui"],
   "agent": "claude",
   "account": "personal"
 }

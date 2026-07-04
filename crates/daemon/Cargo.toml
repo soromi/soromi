@@ -1,0 +1,30 @@
+[package]
+name = "soromi-daemon"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+soromi-protocol = { path = "../protocol" }
+regex = "1"
+portable-pty = "0.8"
+tokio = { version = "1", features = [
+    "sync",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+    "io-util",
+    "signal",
+] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"

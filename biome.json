@@ -6,7 +6,8 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": true
+    "ignoreUnknown": true,
+    "includes": ["**", "!packages/protocol/src/generated/**"]
   },
   "formatter": {
     "enabled": true,
@@ -25,7 +26,10 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "suspicious": {
+        "useBiomeIgnoreFolder": "off"
+      }
     }
   },
   "javascript": {

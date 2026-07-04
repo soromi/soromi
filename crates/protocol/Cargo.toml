@@ -1,0 +1,16 @@
+[package]
+name = "soromi-protocol"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "10", optional = true }
+
+[features]
+# Enables generating the GUI's TypeScript types: `cargo test -p soromi-protocol --features ts`.
+ts = ["dep:ts-rs"]
+
+[dev-dependencies]
+serde_json = "1"

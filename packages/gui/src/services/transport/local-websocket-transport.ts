@@ -1,6 +1,5 @@
-import { type ClientMessage, type ServerMessage, ServerMessageSchema } from '@soromi/protocol'
-
 //Types
+import type { ClientMessage, ServerMessage } from '@soromi/protocol'
 import type { Transport } from './transport'
 
 const INITIAL_DELAY = 500
@@ -29,9 +28,10 @@ export class LocalWebSocketTransport implements Transport {
       for (const listener of this.openListeners) listener()
     }
     socket.onmessage = (event) => {
-      const parsed = ServerMessageSchema.safeParse(parseJson(event.data))
-      if (!parsed.success) return
-      for (const listener of this.messageListeners) listener(parsed.data)
+      // The daemon is local and trusted; parse and trust the generated types.
+      const message = parseJson(event.data) as ServerMessage | null
+      if (message === null) return
+      for (const listener of this.messageListeners) listener(message)
     }
     socket.onclose = () => {
       for (const listener of this.closeListeners) listener()
