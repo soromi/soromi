@@ -48,6 +48,9 @@ export function TerminalHeader() {
     setKeepAwakeMode(mode)
     transport.send({ type: 'set-keep-awake-mode', mode })
   }
+  const exportSpace = () => {
+    transport.send({ type: 'export-space', workspace: name })
+  }
   const removeSpace = () => {
     if (window.confirm(`Remove "${name}"? This stops its agent.`)) {
       transport.send({ type: 'remove-space', workspace: name })
@@ -104,6 +107,7 @@ export function TerminalHeader() {
           </button>
         </Menu.Target>
         <Menu.Dropdown>
+          <Menu.Item onClick={exportSpace}>Export soromi.space.json</Menu.Item>
           <Menu.Item color="red" onClick={removeSpace}>
             Remove workspace
           </Menu.Item>

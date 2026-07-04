@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import clsx from 'clsx'
@@ -44,6 +45,16 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
     term.open(container)
     termRef.current = term
     fitRef.current = fit
+
+    // GPU renderer for smooth scrolling; fall back to the DOM renderer if WebGL is
+    // unavailable or its context is lost.
+    try {
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => webgl.dispose())
+      term.loadAddon(webgl)
+    } catch {
+      // DOM renderer stays.
+    }
 
     const offMessage = transport.onMessage((message) => {
       if (message.type === 'output' && message.workspace === workspace) {

@@ -1,5 +1,6 @@
 import { Button, Group, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 
 //Services
 import { useTransport } from '@/services/transport/transport-context'
@@ -16,8 +17,16 @@ import styles from './settings.module.css'
 /** Settings overlay: manage account profiles (isolated per-provider logins). */
 export function Settings() {
   const transport = useTransport()
-  const accounts = useAppStore((s) => s.accounts)
+  const { accounts, workspaces, muted, setMuted } = useAppStore(
+    useShallow((s) => ({
+      accounts: s.accounts,
+      workspaces: s.workspaces,
+      muted: s.muted,
+      setMuted: s.setMuted,
+    })),
+  )
   const [name, setName] = useState('')
+  const mutedNames = workspaces.filter((w) => muted[w.name]).map((w) => w.name)
 
   useEffect(() => {
     transport.send({ type: 'list-accounts' })
@@ -41,6 +50,11 @@ export function Settings() {
     if (window.confirm(`Delete account "${account}"? This removes its stored logins.`)) {
       transport.send({ type: 'delete-account', name: account })
     }
+  }
+
+  const unmute = (workspace: string) => {
+    setMuted(workspace, false)
+    transport.send({ type: 'mute-workspace', workspace, muted: false })
   }
 
   return (
@@ -96,6 +110,30 @@ export function Settings() {
               Add account
             </Button>
           </Group>
+
+          <div>
+            <Title order={4}>Muted workspaces</Title>
+            <Text c="dimmed" size="sm">
+              Workspaces with notifications silenced.
+            </Text>
+          </div>
+
+          <Stack gap="xs">
+            {mutedNames.length === 0 ? (
+              <Text c="dimmed" size="sm">
+                No muted workspaces.
+              </Text>
+            ) : (
+              mutedNames.map((workspace) => (
+                <Group key={workspace} justify="space-between" className={styles.row}>
+                  <Text fw={500}>{workspace}</Text>
+                  <Button variant="subtle" size="compact-sm" onClick={() => unmute(workspace)}>
+                    Unmute
+                  </Button>
+                </Group>
+              ))
+            )}
+          </Stack>
         </Stack>
       </div>
     </OverlayShell>

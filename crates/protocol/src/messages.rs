@@ -108,6 +108,9 @@ pub enum ClientMessage {
     SetKeepAwakeMode {
         mode: KeepAwakeMode,
     },
+    ExportSpace {
+        workspace: String,
+    },
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -166,5 +169,9 @@ pub enum ServerMessage {
     },
     AccountList {
         accounts: Vec<AccountProfile>,
+    },
+    SpaceExported {
+        workspace: String,
+        path: String,
     },
 }

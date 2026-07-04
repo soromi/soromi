@@ -4,6 +4,11 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react()],
+  // Fixed port so the Tauri shell's devUrl always matches.
+  server: {
+    port: 1420,
+    strictPort: true,
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

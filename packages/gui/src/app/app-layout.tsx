@@ -11,6 +11,7 @@ import { TerminalDeck } from '@/features/terminal/terminal-deck'
 import { TerminalHeader } from '@/features/terminal/terminal-header'
 import { Welcome } from '@/features/welcome/welcome'
 import { OverlayHost } from './overlay-host'
+import { StatusBanner } from './status-banner'
 
 //Styles
 import styles from './app-layout.module.css'
@@ -28,6 +29,7 @@ export function AppLayout() {
       <Rail />
       <Sidebar />
       <main className={styles.content}>
+        <StatusBanner />
         {active !== null ? (
           <>
             <TerminalHeader />

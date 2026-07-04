@@ -14,7 +14,7 @@ use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::workspaces::agent_command::parse_agent_command;
-use crate::workspaces::config::{PersistedSpace, WorkspaceDefaults};
+use crate::workspaces::config::{PersistedSpace, Workspace, WorkspaceDefaults};
 use crate::workspaces::space_store::{load_spaces, save_spaces};
 use crate::workspaces::workspace_loader::load_workspace;
 
@@ -65,8 +65,18 @@ impl WorkspaceService {
             keep_awake,
             change_tx,
         });
-        for space in load_spaces() {
+        let mut pruned_any = false;
+        for mut space in load_spaces() {
+            let kept = existing_folders(&space.root, &space.folders);
+            if kept != space.folders {
+                pruned_any = true;
+                space.folders = kept;
+            }
             service.spawn_space(space);
+        }
+        // Persist once if any space had folders that no longer exist on disk.
+        if pruned_any {
+            service.persist();
         }
         service
     }
@@ -171,6 +181,26 @@ impl WorkspaceService {
                 binary: false,
             },
         }
+    }
+
+    /// Writes the space's committable config to `<root>/soromi.space.json`. Returns the path.
+    pub fn export_space(&self, workspace: &str) -> anyhow::Result<String> {
+        let metadata = self.metadata.lock().unwrap();
+        let (_, meta) = metadata
+            .iter()
+            .find(|(name, _)| name == workspace)
+            .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
+        let config = Workspace {
+            name: workspace.to_string(),
+            folders: meta.folders.clone(),
+            agent: meta.agent.clone(),
+            account: meta.account.clone(),
+            defaults: meta.defaults.clone(),
+        };
+        let path = Path::new(&meta.root).join("soromi.space.json");
+        let json = serde_json::to_string_pretty(&config)?;
+        fs::write(&path, format!("{json}\n"))?;
+        Ok(path.to_string_lossy().into_owned())
     }
 
     pub fn keep_awake_active(&self) -> bool {
@@ -294,6 +324,21 @@ fn basename(command: &str) -> &str {
     command.rsplit(['/', '\\']).next().unwrap_or(command)
 }
 
+/// Keeps only folders that still exist on disk. `.` (the whole work folder) is always kept;
+/// if pruning removes everything, falls back to `["."]`.
+fn existing_folders(root: &str, folders: &[String]) -> Vec<String> {
+    let kept: Vec<String> = folders
+        .iter()
+        .filter(|folder| folder.as_str() == "." || Path::new(root).join(folder).is_dir())
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        vec![".".to_string()]
+    } else {
+        kept
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,6 +389,26 @@ mod tests {
 
         service.dispose();
         std::env::remove_var("SOROMI_HOME");
+    }
+
+    #[test]
+    fn existing_folders_drops_missing_and_falls_back_to_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("api")).unwrap();
+        let root = dir.path().to_string_lossy().into_owned();
+
+        assert_eq!(
+            existing_folders(&root, &["api".into(), "gone".into()]),
+            vec!["api".to_string()]
+        );
+        assert_eq!(
+            existing_folders(&root, &["gone".into()]),
+            vec![".".to_string()]
+        );
+        assert_eq!(
+            existing_folders(&root, &[".".into()]),
+            vec![".".to_string()]
+        );
     }
 
     #[tokio::test]

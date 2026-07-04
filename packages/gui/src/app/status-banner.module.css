@@ -1,0 +1,38 @@
+.banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--soromi-border);
+}
+
+.warn {
+  color: var(--soromi-accent-on);
+  background: var(--soromi-accent-dim);
+}
+
+.notice {
+  color: #f0d9a8;
+  background: #3a3016;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.dismiss {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+.dismiss:hover {
+  opacity: 1;
+}

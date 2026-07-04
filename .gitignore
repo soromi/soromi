@@ -6,6 +6,7 @@ dist/
 .turbo/
 coverage/
 target/
+apps/desktop/src-tauri/gen/
 *.log
 .DS_Store
 .env

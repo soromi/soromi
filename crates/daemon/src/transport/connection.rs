@@ -68,6 +68,12 @@ impl Connection {
                 }),
             },
             ClientMessage::RemoveSpace { workspace } => self.hub.remove_space(&workspace),
+            ClientMessage::ExportSpace { workspace } => match self.hub.export_space(&workspace) {
+                Ok(path) => self.send(ServerMessage::SpaceExported { workspace, path }),
+                Err(error) => self.send(ServerMessage::Error {
+                    message: error.to_string(),
+                }),
+            },
             ClientMessage::MuteWorkspace { workspace, muted } => {
                 self.hub.set_muted(&workspace, muted)
             }

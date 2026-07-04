@@ -1,0 +1,14 @@
+[package]
+name = "soromi-desktop"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread"] }
+soromi-daemon = { path = "../../../crates/daemon" }
+soromi-protocol = { path = "../../../crates/protocol" }

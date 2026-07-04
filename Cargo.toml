@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/daemon"]
+members = ["crates/protocol", "crates/daemon", "apps/desktop/src-tauri"]
+# Bare `cargo build`/`test` targets only the daemon + protocol (fast); the Tauri shell (a
+# large dep tree) is built explicitly with `-p soromi-desktop`.
+default-members = ["crates/protocol", "crates/daemon"]

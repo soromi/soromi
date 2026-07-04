@@ -132,6 +132,31 @@ fn client_save_account_nests_provider_config() {
 }
 
 #[test]
+fn client_export_space() {
+    assert_client(
+        ClientMessage::ExportSpace {
+            workspace: "kazomi".into(),
+        },
+        json!({ "type": "export-space", "workspace": "kazomi" }),
+    );
+}
+
+#[test]
+fn server_space_exported() {
+    assert_server(
+        ServerMessage::SpaceExported {
+            workspace: "kazomi".into(),
+            path: "/w/kazomi/soromi.space.json".into(),
+        },
+        json!({
+            "type": "space-exported",
+            "workspace": "kazomi",
+            "path": "/w/kazomi/soromi.space.json"
+        }),
+    );
+}
+
+#[test]
 fn server_status_uses_kebab_status_value() {
     assert_server(
         ServerMessage::Status {

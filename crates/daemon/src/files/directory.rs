@@ -15,8 +15,11 @@ pub fn list_directory(root: &Path, folders: &[String], path: &str) -> Vec<DirEnt
         if folders.len() == 1 && folders[0] == "." {
             return read_entries(root);
         }
+        // Skip declared folders that no longer exist on disk (e.g. deleted since the space
+        // was created), so the tree never shows a phantom node.
         return folders
             .iter()
+            .filter(|name| root.join(name).is_dir())
             .map(|name| DirEntry {
                 name: name.clone(),
                 kind: EntryKind::Dir,
@@ -69,6 +72,7 @@ mod tests {
     fn setup() -> TempDir {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("api/src")).unwrap();
+        fs::create_dir_all(dir.path().join("web")).unwrap();
         fs::write(dir.path().join("api/package.json"), "{}").unwrap();
         fs::write(dir.path().join("api/src/index.ts"), "").unwrap();
         dir
@@ -98,11 +102,21 @@ mod tests {
     }
 
     #[test]
-    fn lists_the_root_contents_when_the_only_folder_is_dot() {
+    fn filters_out_declared_folders_that_no_longer_exist() {
         let dir = setup();
         assert_eq!(
-            list_directory(dir.path(), &[".".into()], ""),
+            list_directory(dir.path(), &["api".into(), "gone".into()], ""),
             vec![folder("api")]
+        );
+    }
+
+    #[test]
+    fn lists_the_root_contents_when_the_only_folder_is_dot() {
+        let dir = setup();
+        // The `.` space lists the root's own contents (both real folders here).
+        assert_eq!(
+            list_directory(dir.path(), &[".".into()], ""),
+            vec![folder("api"), folder("web")]
         );
     }
 

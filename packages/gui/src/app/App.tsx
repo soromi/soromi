@@ -41,6 +41,9 @@ export function App() {
           store.select(message.workspace)
           store.setNotice(message.warning ?? null)
           break
+        case 'space-exported':
+          store.setNotice(`Exported soromi.space.json to ${message.path}`)
+          break
         case 'dir-listing':
           store.setListing(message.workspace, message.path, message.entries)
           break
