@@ -1,0 +1,43 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--soromi-text);
+  transition: background 0.1s;
+}
+
+.row:hover {
+  background: var(--soromi-bg-hover);
+}
+
+.file {
+  color: var(--soromi-text-dim);
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.file.selected {
+  background: var(--soromi-bg-active);
+  color: var(--soromi-text);
+}
+
+.chevron {
+  width: 10px;
+  color: var(--soromi-text-faint);
+  font-size: 9px;
+}
+
+.gap {
+  width: 10px;
+}
+
+.empty {
+  color: var(--soromi-text-faint);
+}

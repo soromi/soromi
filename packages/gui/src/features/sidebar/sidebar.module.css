@@ -1,0 +1,18 @@
+.sidebar {
+  width: 230px;
+  flex-shrink: 0;
+  background: var(--soromi-bg-sidebar);
+  border-right: 1px solid var(--soromi-border);
+  padding: 14px 8px;
+  font-size: 13px;
+  color: var(--soromi-text-dim);
+  overflow-y: auto;
+}
+
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--soromi-text-faint);
+  padding: 0 8px 10px;
+}

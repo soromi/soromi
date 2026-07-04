@@ -1,0 +1,101 @@
+.rail {
+  width: 64px;
+  flex-shrink: 0;
+  background: var(--soromi-bg-rail);
+  border-right: 1px solid var(--soromi-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0;
+  gap: 10px;
+}
+
+.icon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--soromi-bg-hover);
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+
+.icon:hover {
+  background: var(--soromi-bg-active);
+  color: var(--soromi-text);
+}
+
+.icon.active {
+  background: var(--soromi-accent-dim);
+  color: var(--soromi-accent-on);
+  border-color: var(--soromi-accent);
+}
+
+.dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2.5px solid var(--soromi-bg-rail);
+  background: var(--soromi-text-faint);
+}
+
+.dot.warn {
+  background: var(--soromi-warn);
+}
+
+.dot.ok {
+  background: var(--soromi-ok);
+}
+
+.add {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1.5px dashed var(--soromi-border);
+  color: var(--soromi-text-faint);
+  cursor: pointer;
+  font-size: 18px;
+  transition:
+    border-color 0.12s,
+    color 0.12s;
+}
+
+.add:hover {
+  border-color: var(--soromi-text-faint);
+  color: var(--soromi-text-dim);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.gear {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--soromi-text-faint);
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+
+.gear:hover {
+  background: var(--soromi-bg-hover);
+  color: var(--soromi-text-dim);
+}

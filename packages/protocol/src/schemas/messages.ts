@@ -1,7 +1,12 @@
 import { z } from 'zod'
 
 //
+import { AccountProfileSchema } from './account'
 import { StatusSchema } from './status'
+
+/** How aggressively the daemon holds the machine awake. */
+export const KeepAwakeModeSchema = z.enum(['off', 'working', 'always'])
+export type KeepAwakeMode = z.infer<typeof KeepAwakeModeSchema>
 
 /**
  * WebSocket envelope between a viewport and the daemon.
@@ -64,6 +69,21 @@ export const ReadFileMessageSchema = z.object({
   workspace: z.string(),
   path: z.string(),
 })
+export const ListAccountsMessageSchema = z.object({
+  type: z.literal('list-accounts'),
+})
+export const SaveAccountMessageSchema = z.object({
+  type: z.literal('save-account'),
+  profile: AccountProfileSchema,
+})
+export const DeleteAccountMessageSchema = z.object({
+  type: z.literal('delete-account'),
+  name: z.string().min(1),
+})
+export const SetKeepAwakeModeMessageSchema = z.object({
+  type: z.literal('set-keep-awake-mode'),
+  mode: KeepAwakeModeSchema,
+})
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   AttachMessageSchema,
@@ -76,6 +96,10 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   MuteWorkspaceMessageSchema,
   ListDirMessageSchema,
   ReadFileMessageSchema,
+  ListAccountsMessageSchema,
+  SaveAccountMessageSchema,
+  DeleteAccountMessageSchema,
+  SetKeepAwakeModeMessageSchema,
 ])
 export type ClientMessage = z.infer<typeof ClientMessageSchema>
 
@@ -139,6 +163,15 @@ export const FileContentMessageSchema = z.object({
   truncated: z.boolean(),
   binary: z.boolean(),
 })
+export const KeepAwakeMessageSchema = z.object({
+  type: z.literal('keep-awake'),
+  active: z.boolean(),
+  mode: KeepAwakeModeSchema,
+})
+export const AccountListMessageSchema = z.object({
+  type: z.literal('account-list'),
+  accounts: z.array(AccountProfileSchema),
+})
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   OutputMessageSchema,
@@ -149,5 +182,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   ErrorMessageSchema,
   DirListingMessageSchema,
   FileContentMessageSchema,
+  KeepAwakeMessageSchema,
+  AccountListMessageSchema,
 ])
 export type ServerMessage = z.infer<typeof ServerMessageSchema>

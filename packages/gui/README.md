@@ -9,7 +9,7 @@ its own; the daemon owns all state.
 Three columns:
 
 - **Rail:** workspace switcher with status and notification badges, plus Files and Settings.
-- **Sidebar:** contextual. The read-only project tree across the active workspace's repos,
+- **Sidebar:** contextual. The read-only project tree across the active workspace's folders,
   or settings.
 - **Content:** the active workspace's terminal (xterm.js, WebGL renderer with a DOM
   fallback) and a read-only, syntax-highlighted file preview.

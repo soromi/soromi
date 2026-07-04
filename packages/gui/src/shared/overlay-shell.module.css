@@ -1,0 +1,36 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--soromi-bg-terminal);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--soromi-border);
+  background: var(--soromi-bg-app);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.close {
+  background: none;
+  border: none;
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  transition: color 0.12s;
+}
+
+.close:hover {
+  color: var(--soromi-text);
+}

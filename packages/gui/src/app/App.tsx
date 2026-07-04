@@ -1,11 +1,81 @@
-/**
- * Application shell. Composes the rail, sidebar, and content layout and mounts the
- * feature panels. Renders only from daemon state received over the transport.
- */
+import { MantineProvider } from '@mantine/core'
+import { useEffect, useMemo } from 'react'
+
+//Services
+import { LocalWebSocketTransport } from '@/services/transport/local-websocket-transport'
+import { TransportProvider } from '@/services/transport/transport-context'
+
+//Store
+import { useAppStore } from '@/stores/app-store'
+
+//Constants
+import { DAEMON_URL } from '@/config'
+import { theme } from '@/config/theme'
+
+//Components
+import { AppLayout } from './app-layout'
+
+/** Root: sets up the theme and transport, routes daemon messages into the store. */
 export function App() {
+  const transport = useMemo(() => new LocalWebSocketTransport(DAEMON_URL), [])
+
+  useEffect(() => {
+    const store = useAppStore.getState()
+
+    const offMessage = transport.onMessage((message) => {
+      switch (message.type) {
+        case 'workspace-list':
+          store.setWorkspaces(message.workspaces)
+          break
+        case 'keep-awake':
+          store.setKeepAwake(message.active)
+          store.setKeepAwakeMode(message.mode)
+          break
+        case 'account-list':
+          store.setAccounts(message.accounts)
+          break
+        case 'status':
+          store.setStatus(message.workspace, message.status)
+          break
+        case 'workspace-opened':
+          store.select(message.workspace)
+          store.setNotice(message.warning ?? null)
+          break
+        case 'dir-listing':
+          store.setListing(message.workspace, message.path, message.entries)
+          break
+        case 'file-content':
+          store.setFileContent(message.workspace, message.path, {
+            content: message.content,
+            truncated: message.truncated,
+            binary: message.binary,
+          })
+          break
+        case 'error':
+          store.setError(message.message)
+          break
+      }
+    })
+    // Re-sync on every (re)connect, so restored spaces reappear after a daemon restart.
+    const offOpen = transport.onOpen(() => {
+      store.setConnected(true)
+      transport.send({ type: 'list-workspaces' })
+    })
+    const offClose = transport.onClose(() => store.setConnected(false))
+    transport.connect()
+    return () => {
+      offMessage()
+      offOpen()
+      offClose()
+      transport.close()
+    }
+  }, [transport])
+
   return (
-    <main style={{ fontFamily: 'sans-serif', padding: 24 }}>
-      <h1>Soromi</h1>
-    </main>
+    <MantineProvider theme={theme} forceColorScheme="dark">
+      <TransportProvider value={transport}>
+        <AppLayout />
+      </TransportProvider>
+    </MantineProvider>
   )
 }

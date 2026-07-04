@@ -1,0 +1,27 @@
+.path {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 12px;
+  color: var(--soromi-text);
+}
+
+.readonly {
+  font-size: 11px;
+  color: var(--soromi-text-faint);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.message {
+  padding: 12px;
+  color: var(--soromi-text-faint);
+}
+
+.truncated {
+  color: var(--soromi-text-faint);
+  padding: 8px 12px;
+}

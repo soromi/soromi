@@ -1,0 +1,22 @@
+:root {
+  --soromi-bg-app: #201f1d;
+  --soromi-bg-rail: #1b1a19;
+  --soromi-bg-sidebar: #232220;
+  --soromi-bg-terminal: #161514;
+  --soromi-bg-hover: #2c2b28;
+  --soromi-bg-active: #34322e;
+  --soromi-border: #33312d;
+  --soromi-text: #e8e5df;
+  --soromi-text-dim: #a09c93;
+  --soromi-text-faint: #6b675f;
+  --soromi-accent: #4fae8d;
+  --soromi-accent-dim: #2d5c4b;
+  --soromi-accent-on: #cfeadd;
+  --soromi-warn: #d9a53f;
+  --soromi-ok: #4fae8d;
+
+  --soromi-badge-personal-fg: #5b9bd1;
+  --soromi-badge-personal-bg: #223345;
+  --soromi-badge-work-fg: #8b7ec8;
+  --soromi-badge-work-bg: #2e2a45;
+}

@@ -1,0 +1,15 @@
+.host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+}
+
+.host :global(.cm-editor) {
+  height: 100%;
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.host :global(.cm-scroller) {
+  overflow: auto;
+}

@@ -1,0 +1,23 @@
+.shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: var(--soromi-bg-app);
+  color: var(--soromi-text);
+}
+
+.content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--soromi-bg-terminal);
+}
+
+.terminalArea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
