@@ -11,7 +11,7 @@ export const ProviderConfigSchema = z.object({
 
 /**
  * A named account profile stored under `~/.soromi/accounts/<name>/`. Workspaces
- * reference it by name; secrets never enter the committable `workspace.json`.
+ * reference it by name; secrets never enter the committable `soromi.space.json`.
  */
 export const AccountProfileSchema = z.object({
   name: z.string().min(1),

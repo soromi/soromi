@@ -7,7 +7,7 @@ daemon/viewport boundary.
 
 Zod schemas (and the types inferred from them) for:
 
-- `workspace.json`, the committable workspace descriptor
+- `soromi.space.json`, the committable workspace descriptor
 - account profiles, named isolated per-provider config
 - the WebSocket message envelopes exchanged between a viewport and the daemon
 - the agent status enum (`thinking | done | blocked | waiting-input | idle`)
@@ -33,6 +33,6 @@ after a parse.
 | ---------------------- | ---------------------------------------------------------- |
 | `src/index.ts`         | public entry, re-exports everything in `schemas/`          |
 | `schemas/status.ts`    | `StatusSchema` / `Status`                                  |
-| `schemas/workspace.ts` | `WorkspaceSchema`, relative-path-only repo validation      |
+| `schemas/workspace.ts` | `WorkspaceSchema`, relative-path-only folder validation    |
 | `schemas/account.ts`   | `AccountProfileSchema`, profiles by name, no secrets       |
 | `schemas/messages.ts`  | client-to-daemon and daemon-to-client discriminated unions |

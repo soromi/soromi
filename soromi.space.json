@@ -1,0 +1,6 @@
+{
+  "name": "soromi",
+  "folders": ["packages/protocol", "packages/daemon", "packages/gui"],
+  "agent": "claude",
+  "account": "personal"
+}

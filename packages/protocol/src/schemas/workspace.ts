@@ -1,19 +1,19 @@
 import { z } from 'zod'
 
 /**
- * A repo path is always relative to the workspace root and must not escape it.
- * `workspace.json` is committable, so absolute paths (which leak machine layout)
+ * A folder path is always relative to the workspace root and must not escape it.
+ * `soromi.space.json` is committable, so absolute paths (which leak machine layout)
  * and parent traversal are rejected outright.
  */
-const RepoPathSchema = z
+const FolderPathSchema = z
   .string()
   .min(1)
-  .refine((p) => !p.startsWith('/'), { message: 'repo path must be relative, not absolute' })
+  .refine((p) => !p.startsWith('/'), { message: 'folder path must be relative, not absolute' })
   .refine((p) => !/^[a-zA-Z]:[\\/]/.test(p), {
-    message: 'repo path must be relative, not absolute',
+    message: 'folder path must be relative, not absolute',
   })
   .refine((p) => !p.split(/[\\/]/).includes('..'), {
-    message: 'repo path must not escape the workspace root',
+    message: 'folder path must not escape the workspace root',
   })
 
 /** Optional per-workspace defaults; the top-level fields win when both are set. */
@@ -28,7 +28,7 @@ export const WorkspaceDefaultsSchema = z.object({
  */
 export const WorkspaceSchema = z.object({
   name: z.string().min(1),
-  repos: z.array(RepoPathSchema).min(1),
+  folders: z.array(FolderPathSchema).min(1),
   agent: z.string().min(1),
   account: z.string().min(1),
   defaults: WorkspaceDefaultsSchema.optional(),

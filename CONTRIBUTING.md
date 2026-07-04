@@ -83,7 +83,7 @@ and build. A red gate does not ship.
   - example: `feat(daemon): resolve account profile env before PTY spawn`
 - One logical change per commit. The body explains why, wrapped at about 72 columns.
 - **Never commit secrets.** Account credentials live in `~/.soromi/accounts/`, never in the
-  repo; `workspace.json` references profiles by name only. Do commit `pnpm-lock.yaml`.
+  repo; `soromi.space.json` references profiles by name only. Do commit `pnpm-lock.yaml`.
 
 ---
 

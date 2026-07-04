@@ -12,14 +12,13 @@ Project rules and conventions live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ```
 packages/
-  protocol/   shared Zod schemas + types (workspace.json, accounts, WS messages, status)
+  protocol/   shared Zod schemas + types (soromi.space.json, accounts, WS messages, status)
   daemon/     Node daemon: PTY sessions, account resolution, status parser, WS server
-  gui/        React + Zustand + xterm.js viewport (browser tab at localhost for v1)
+  gui/        React + Zustand + xterm.js viewport (runs in the desktop app's webview)
 ```
 
-The `relay` package (remote PWA transport, E2EE) is deliberately the **last** feature; see
-the workplan. The protocol envelopes are transport-agnostic so it slots in without a
-rewrite.
+The `relay` package (remote PWA transport, E2EE) is deliberately the **last** feature. The
+protocol envelopes are transport-agnostic so it slots in without a rewrite.
 
 ## Development
 

@@ -1,4 +1,6 @@
 import { z } from 'zod'
+
+//
 import { StatusSchema } from './status'
 
 /**
@@ -30,12 +32,50 @@ export const ResizeMessageSchema = z.object({
 export const ListWorkspacesMessageSchema = z.object({
   type: z.literal('list-workspaces'),
 })
+export const OpenWorkspaceMessageSchema = z.object({
+  type: z.literal('open-workspace'),
+  dir: z.string().min(1),
+})
+export const CreateSpaceMessageSchema = z.object({
+  type: z.literal('create-space'),
+  name: z.string().min(1),
+  root: z.string().min(1),
+  agent: z.string().min(1),
+  account: z.string().min(1),
+  folders: z.array(z.string()).optional(),
+})
+export const RemoveSpaceMessageSchema = z.object({
+  type: z.literal('remove-space'),
+  workspace: z.string(),
+})
+export const MuteWorkspaceMessageSchema = z.object({
+  type: z.literal('mute-workspace'),
+  workspace: z.string(),
+  muted: z.boolean(),
+})
+export const ListDirMessageSchema = z.object({
+  type: z.literal('list-dir'),
+  workspace: z.string(),
+  /** Relative to the workspace root; empty lists the workspace's folders. */
+  path: z.string(),
+})
+export const ReadFileMessageSchema = z.object({
+  type: z.literal('read-file'),
+  workspace: z.string(),
+  path: z.string(),
+})
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   AttachMessageSchema,
   InputMessageSchema,
   ResizeMessageSchema,
   ListWorkspacesMessageSchema,
+  OpenWorkspaceMessageSchema,
+  CreateSpaceMessageSchema,
+  RemoveSpaceMessageSchema,
+  MuteWorkspaceMessageSchema,
+  ListDirMessageSchema,
+  ReadFileMessageSchema,
 ])
 export type ClientMessage = z.infer<typeof ClientMessageSchema>
 
@@ -56,9 +96,48 @@ export const NotifyMessageSchema = z.object({
   status: StatusSchema,
   message: z.string(),
 })
+export const WorkspaceSummarySchema = z.object({
+  name: z.string(),
+  status: StatusSchema,
+  agent: z.string(),
+  account: z.string(),
+  folders: z.array(z.string()),
+})
+export type WorkspaceSummary = z.infer<typeof WorkspaceSummarySchema>
+
 export const WorkspaceListMessageSchema = z.object({
   type: z.literal('workspace-list'),
-  workspaces: z.array(z.object({ name: z.string(), status: StatusSchema })),
+  workspaces: z.array(WorkspaceSummarySchema),
+})
+export const WorkspaceOpenedMessageSchema = z.object({
+  type: z.literal('workspace-opened'),
+  workspace: z.string(),
+  warning: z.string().optional(),
+})
+export const ErrorMessageSchema = z.object({
+  type: z.literal('error'),
+  message: z.string(),
+})
+
+export const DirEntrySchema = z.object({
+  name: z.string(),
+  type: z.enum(['file', 'dir']),
+})
+export type DirEntry = z.infer<typeof DirEntrySchema>
+
+export const DirListingMessageSchema = z.object({
+  type: z.literal('dir-listing'),
+  workspace: z.string(),
+  path: z.string(),
+  entries: z.array(DirEntrySchema),
+})
+export const FileContentMessageSchema = z.object({
+  type: z.literal('file-content'),
+  workspace: z.string(),
+  path: z.string(),
+  content: z.string(),
+  truncated: z.boolean(),
+  binary: z.boolean(),
 })
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
@@ -66,5 +145,9 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   StatusMessageSchema,
   NotifyMessageSchema,
   WorkspaceListMessageSchema,
+  WorkspaceOpenedMessageSchema,
+  ErrorMessageSchema,
+  DirListingMessageSchema,
+  FileContentMessageSchema,
 ])
 export type ServerMessage = z.infer<typeof ServerMessageSchema>
