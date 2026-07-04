@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
@@ -38,16 +39,20 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
       fontFamily: '"SF Mono", Menlo, Consolas, monospace',
       fontSize: 13,
       cursorBlink: true,
+      allowProposedApi: true,
       theme: { background: colors.bgTerminal, foreground: colors.text },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // Unicode 11 widths, so column counting matches modern CLIs.
+    const unicode11 = new Unicode11Addon()
+    term.loadAddon(unicode11)
+    term.unicode.activeVersion = '11'
     term.open(container)
     termRef.current = term
     fitRef.current = fit
 
-    // GPU renderer for smooth scrolling; fall back to the DOM renderer if WebGL is
-    // unavailable or its context is lost.
+    // GPU renderer; falls back to the DOM renderer on context loss.
     try {
       const webgl = new WebglAddon()
       webgl.onContextLoss(() => webgl.dispose())
@@ -65,13 +70,34 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
       transport.send({ type: 'input', workspace, data })
     })
 
-    // Attach once on the current connection and again on every reconnect. The daemon replays
-    // scrollback on attach, so a plain workspace switch never re-attaches.
-    const attach = () => transport.send({ type: 'attach', workspace })
-    const offOpen = transport.onOpen(attach)
-    if (transport.isOpen()) attach()
+    // Attach only after the terminal has real dimensions, so the snapshot replays at the right
+    // size (attaching first and resizing later reflows TUI content into garbage). Reconnect
+    // re-attaches; the snapshot's reset-prefix keeps that clean.
+    let attached = false
+    const syncSize = () => {
+      if (!term.element || container.clientWidth === 0 || container.clientHeight === 0) return
+      try {
+        fit.fit()
+      } catch {
+        return
+      }
+      transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
+      if (!attached && transport.isOpen()) {
+        attached = true
+        transport.send({ type: 'attach', workspace })
+      }
+    }
+
+    const observer = new ResizeObserver(syncSize)
+    observer.observe(container)
+    syncSize()
+    const offOpen = transport.onOpen(() => {
+      attached = false
+      syncSize()
+    })
 
     return () => {
+      observer.disconnect()
       offMessage()
       offOpen()
       inputSub.dispose()
@@ -81,35 +107,22 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
     }
   }, [transport, workspace])
 
-  // Fit and report size only while visible; a hidden pane has no dimensions to fit. A
-  // ResizeObserver refits on any container size change (activation, window resize, layout
-  // settling after mount), so the terminal always fills its pane.
+  // Refit and focus when this pane becomes the visible one (a hidden pane can't be fitted).
   useEffect(() => {
     if (!active) return
+    const term = termRef.current
+    const fit = fitRef.current
     const container = containerRef.current
-    if (!container) return
-
-    // Read refs fresh each call: the observer can fire after the terminal is disposed or
-    // swapped. Guard on the terminal being opened and never let fit() throw out of here
-    // (it reaches into an internal render service that isn't ready until the first paint).
-    const syncSize = () => {
-      const term = termRef.current
-      const fit = fitRef.current
-      if (!term || !fit || !term.element) return
-      if (container.clientWidth === 0 || container.clientHeight === 0) return
+    if (!term || !fit || !container || !term.element) return
+    if (container.clientWidth !== 0 && container.clientHeight !== 0) {
       try {
         fit.fit()
         transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
       } catch {
-        // Renderer not ready yet; the next resize will retry.
+        // Renderer not ready; the mount effect's observer will retry.
       }
     }
-    syncSize()
-    termRef.current?.focus()
-
-    const observer = new ResizeObserver(syncSize)
-    observer.observe(container)
-    return () => observer.disconnect()
+    term.focus()
   }, [active, transport, workspace])
 
   return (

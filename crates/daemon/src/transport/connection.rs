@@ -141,6 +141,8 @@ impl Connection {
 
     /// Replays scrollback and current status, then streams both. Re-attaching replaces the
     /// prior forwarder, so output is never streamed twice for one workspace on one connection.
+    /// The snapshot is prefixed with a terminal reset (`ESC c`) so a re-attach (reconnect) wipes
+    /// the old content instead of writing on top of it.
     fn attach(&mut self, workspace: &str) {
         let Some(session) = self.hub.get(workspace) else {
             return;
@@ -151,7 +153,7 @@ impl Connection {
 
         self.send(ServerMessage::Output {
             workspace: workspace.to_string(),
-            data: session.snapshot(),
+            data: format!("\u{1b}c{}", session.snapshot()),
         });
         self.send(ServerMessage::Status {
             workspace: workspace.to_string(),

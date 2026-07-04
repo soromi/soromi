@@ -66,4 +66,21 @@ mod tests {
         let mut decoder = Utf8Decoder::default();
         assert_eq!(decoder.push(&[0x68, 0xFF, 0x69]), "h\u{FFFD}i");
     }
+
+    #[test]
+    fn is_lossless_across_every_split() {
+        // A slice of what a TUI actually emits: ESC/CSI sequences plus dense multibyte
+        // (box drawing, blocks, CJK). Feeding it one byte at a time is the harshest split.
+        let text = "\u{1b}[59G Settings \u{1b}[?2026h ███░░░▓▓ café \u{1b}[0m 你好世界 \u{1b}[K";
+        let bytes = text.as_bytes();
+
+        for chunk_size in [1usize, 2, 3, 5, 7] {
+            let mut decoder = Utf8Decoder::default();
+            let mut out = String::new();
+            for chunk in bytes.chunks(chunk_size) {
+                out.push_str(&decoder.push(chunk));
+            }
+            assert_eq!(out, text, "lost bytes at chunk size {chunk_size}");
+        }
+    }
 }

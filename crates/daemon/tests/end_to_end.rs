@@ -48,6 +48,79 @@ where
 
 #[tokio::test]
 #[serial_test::serial]
+async fn resize_reaches_the_pty() {
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var("SOROMI_HOME", home.path());
+    let root = tempfile::tempdir().unwrap();
+
+    let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
+    let keep_awake = Arc::new(KeepAwakeController::new(
+        Arc::new(NoopKeepAwake),
+        KeepAwakeMode::Off,
+    ));
+    let hub = WorkspaceService::new(notifications, keep_awake);
+    let accounts = Arc::new(FileAccountManager);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve(listener, hub, accounts));
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .unwrap();
+
+    ws.send(Message::Text(
+        json!({
+            "type": "create-space",
+            "name": "kazomi",
+            "root": root.path().to_string_lossy(),
+            "agent": "/bin/sh",
+            "account": "personal"
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+    read_until(&mut ws, "workspace-opened").await;
+
+    ws.send(Message::Text(
+        json!({ "type": "attach", "workspace": "kazomi" }).to_string(),
+    ))
+    .await
+    .unwrap();
+    ws.send(Message::Text(
+        json!({ "type": "resize", "workspace": "kazomi", "cols": 120, "rows": 40 }).to_string(),
+    ))
+    .await
+    .unwrap();
+    // Give the shell a moment to receive SIGWINCH before it runs the command.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    ws.send(Message::Text(
+        json!({ "type": "input", "workspace": "kazomi", "data": "stty size\n" }).to_string(),
+    ))
+    .await
+    .unwrap();
+
+    // `stty size` prints "<rows> <cols>".
+    let got = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let value = next_json(&mut ws).await;
+            if value["type"] == "output"
+                && value["data"].as_str().is_some_and(|d| d.contains("40 120"))
+            {
+                break true;
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(got, "PTY did not report the resized dimensions");
+
+    std::env::remove_var("SOROMI_HOME");
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn gui_can_create_list_attach_and_exchange_io() {
     let home = tempfile::tempdir().unwrap();
     std::env::set_var("SOROMI_HOME", home.path());

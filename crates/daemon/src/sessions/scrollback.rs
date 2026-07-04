@@ -1,48 +1,44 @@
-/// A capped, append-only view of recent terminal output. Replayed to a viewport when it
-/// attaches, so a reconnecting client sees the recent screen without the daemon keeping
-/// unbounded history. Sized in characters.
+/// A capped, append-only view of recent terminal output, replayed to a viewport on attach.
+/// Sized in bytes; trims at a line boundary so a replayed snapshot never starts mid-escape-
+/// sequence (which would make the viewport's parser choke and garble the render).
 pub struct ScrollbackBuffer {
-    chunks: Vec<String>,
-    size: usize,
-    max_chars: usize,
+    buf: String,
+    max_bytes: usize,
 }
 
 impl ScrollbackBuffer {
-    pub fn new(max_chars: usize) -> Self {
+    pub fn new(max_bytes: usize) -> Self {
         Self {
-            chunks: Vec::new(),
-            size: 0,
-            max_chars,
+            buf: String::new(),
+            max_bytes,
         }
     }
 
     pub fn append(&mut self, data: &str) {
-        self.chunks.push(data.to_string());
-        self.size += data.chars().count();
-
-        while self.size > self.max_chars && self.chunks.len() > 1 {
-            let removed = self.chunks.remove(0);
-            self.size -= removed.chars().count();
+        self.buf.push_str(data);
+        if self.buf.len() <= self.max_bytes {
+            return;
         }
 
-        if self.size > self.max_chars && self.chunks.len() == 1 {
-            let only = &self.chunks[0];
-            let trimmed: String = only
-                .chars()
-                .skip(only.chars().count() - self.max_chars)
-                .collect();
-            self.size = trimmed.chars().count();
-            self.chunks[0] = trimmed;
+        // Drop at least this many oldest bytes; snap forward to a char boundary first.
+        let mut drop = self.buf.len() - self.max_bytes;
+        while drop < self.buf.len() && !self.buf.is_char_boundary(drop) {
+            drop += 1;
         }
+        // Prefer to start just after the next newline (a clean line, never mid-sequence).
+        let cut = match self.buf[drop..].find('\n') {
+            Some(pos) => drop + pos + 1,
+            None => drop,
+        };
+        self.buf.drain(..cut);
     }
 
     pub fn snapshot(&self) -> String {
-        self.chunks.concat()
+        self.buf.clone()
     }
 
     pub fn clear(&mut self) {
-        self.chunks.clear();
-        self.size = 0;
+        self.buf.clear();
     }
 }
 
@@ -59,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn drops_whole_leading_chunks_once_over_the_cap() {
+    fn keeps_the_tail_when_there_is_no_line_boundary() {
         let mut buf = ScrollbackBuffer::new(10);
         buf.append("aaaaa");
         buf.append("bbbbb");
@@ -68,10 +64,22 @@ mod tests {
     }
 
     #[test]
-    fn trims_a_single_oversized_chunk_to_the_cap_keeping_the_tail() {
-        let mut buf = ScrollbackBuffer::new(5);
-        buf.append("0123456789");
-        assert_eq!(buf.snapshot(), "56789");
+    fn trims_to_a_line_boundary_so_it_never_starts_mid_sequence() {
+        let mut buf = ScrollbackBuffer::new(10);
+        buf.append("line1\nline2\nline3\n");
+        // Over the cap; the trim lands just after a newline, keeping whole trailing lines.
+        let snapshot = buf.snapshot();
+        assert!(snapshot.starts_with("line3\n") || snapshot.starts_with("line2\n"));
+        assert!(!snapshot.contains("line1"));
+    }
+
+    #[test]
+    fn never_cuts_a_multibyte_char() {
+        let mut buf = ScrollbackBuffer::new(6);
+        // Each 'é' is 2 bytes; append past the cap and confirm the result stays valid UTF-8.
+        buf.append("ééééé");
+        let _ = buf.snapshot(); // would panic on a non-char-boundary drain
+        assert!(buf.snapshot().chars().all(|c| c == 'é'));
     }
 
     #[test]

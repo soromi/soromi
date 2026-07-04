@@ -11,7 +11,7 @@ use super::decoder::Utf8Decoder;
 use super::scrollback::ScrollbackBuffer;
 use crate::status::state::StatusState;
 
-const SCROLLBACK_CHARS: usize = 200_000;
+const SCROLLBACK_BYTES: usize = 256 * 1024;
 const OUTPUT_CAPACITY: usize = 2048;
 
 /// How to launch a session's PTY. `env` of `None` inherits the daemon's environment.
@@ -64,6 +64,10 @@ impl Session {
                 }
             }
         }
+        // Declare terminal capabilities (the viewport is xterm.js). A GUI-launched daemon has no
+        // TERM in its env, which would leave agent TUIs guessing and garble redraws.
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
 
         let child = pair.slave.spawn_command(cmd)?;
         // Drop the slave so the master reads EOF once the child exits.
@@ -72,7 +76,7 @@ impl Session {
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
-        let scrollback = Arc::new(Mutex::new(ScrollbackBuffer::new(SCROLLBACK_CHARS)));
+        let scrollback = Arc::new(Mutex::new(ScrollbackBuffer::new(SCROLLBACK_BYTES)));
         let (output_tx, _) = broadcast::channel(OUTPUT_CAPACITY);
         let (status_tx, status_rx) = watch::channel(Status::Idle);
 
@@ -234,5 +238,23 @@ mod tests {
         let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
         session.resize(120, 40);
         session.shutdown();
+    }
+
+    #[test]
+    fn declares_term_for_agent_tuis() {
+        let session = Session::spawn(opts(
+            "/bin/sh",
+            vec!["-c".into(), "printf TERM=$TERM".into()],
+        ))
+        .unwrap();
+        let mut found = false;
+        for _ in 0..100 {
+            if session.snapshot().contains("TERM=xterm-256color") {
+                found = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(found, "snapshot was {:?}", session.snapshot());
     }
 }
