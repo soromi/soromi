@@ -21,31 +21,6 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)
 
-  packages/daemon:
-    dependencies:
-      '@soromi/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      node-pty:
-        specifier: ^1.0.0
-        version: 1.1.0
-      ws:
-        specifier: ^8.18.0
-        version: 8.21.0
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.20.0
-      '@types/ws':
-        specifier: ^8.5.13
-        version: 8.18.1
-      tsx:
-        specifier: ^4.19.2
-        version: 4.23.0
-
   packages/gui:
     dependencies:
       '@codemirror/lang-cpp':
