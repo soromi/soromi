@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { createConnection } from './connection'
 
 //Types
-import type { ServerMessage, Status } from '@soromi/protocol'
+import type { KeepAwakeMode, ServerMessage, Status } from '@soromi/protocol'
 import type { SessionLike } from '../sessions/session'
 import type { OpenResult, WorkspaceHub } from '../workspaces/workspace-service'
 
@@ -67,6 +67,12 @@ function hubWith(
       binary: false,
     }),
     createSpace: (input: { name: string }) => ({ workspace: input.name }),
+    keepAwakeActive: () => false,
+    keepAwakeMode: () => 'working' as const,
+    keepAwakeModes: [] as KeepAwakeMode[],
+    setKeepAwakeMode(mode: KeepAwakeMode) {
+      this.keepAwakeModes.push(mode)
+    },
     removed: [] as string[],
     removeSpace(name: string) {
       this.removed.push(name)
@@ -89,6 +95,7 @@ function hubWith(
   } satisfies WorkspaceHub & {
     fireChange: () => void
     mutes: Array<[string, boolean]>
+    keepAwakeModes: KeepAwakeMode[]
     removed: string[]
   }
 }
@@ -108,15 +115,21 @@ describe('createConnection', () => {
     const sent: ServerMessage[] = []
     const conn = createConnection(hubWith(session), (m) => sent.push(m))
     conn.handle({ type: 'list-workspaces' })
-    expect(sent).toEqual([{ type: 'workspace-list', workspaces: [summary('thinking')] }])
+    expect(sent).toEqual([
+      { type: 'workspace-list', workspaces: [summary('thinking')] },
+      { type: 'keep-awake', active: false, mode: 'working' },
+    ])
   })
 
-  it('re-sends the workspace list when the hub changes', () => {
+  it('re-sends the workspace list and keep-awake when the hub changes', () => {
     const sent: ServerMessage[] = []
     const hub = hubWith(fakeSession())
     createConnection(hub, (m) => sent.push(m))
     hub.fireChange()
-    expect(sent).toEqual([{ type: 'workspace-list', workspaces: [summary('idle')] }])
+    expect(sent).toEqual([
+      { type: 'workspace-list', workspaces: [summary('idle')] },
+      { type: 'keep-awake', active: false, mode: 'working' },
+    ])
   })
 
   it('opens a workspace and replies with workspace-opened', () => {
@@ -165,11 +178,35 @@ describe('createConnection', () => {
     expect(hub.removed).toEqual(['kazomi'])
   })
 
+  it('saves an account and replies with the account list', () => {
+    const saved: Array<{ name: string }> = []
+    const accounts = {
+      list: () => saved,
+      save: (p: { name: string }) => {
+        saved.push(p)
+      },
+      remove: () => {},
+    }
+    const sent: ServerMessage[] = []
+    const conn = createConnection(hubWith(fakeSession()), (m) => sent.push(m), accounts)
+    const profile = { name: 'work', providers: {} }
+    conn.handle({ type: 'save-account', profile })
+    expect(saved).toEqual([profile])
+    expect(sent).toContainEqual({ type: 'account-list', accounts: [profile] })
+  })
+
   it('forwards mute-workspace to the hub', () => {
     const hub = hubWith(fakeSession())
     const conn = createConnection(hub, () => {})
     conn.handle({ type: 'mute-workspace', workspace: 'kazomi', muted: true })
     expect(hub.mutes).toEqual([['kazomi', true]])
+  })
+
+  it('forwards set-keep-awake-mode to the hub', () => {
+    const hub = hubWith(fakeSession())
+    const conn = createConnection(hub, () => {})
+    conn.handle({ type: 'set-keep-awake-mode', mode: 'always' })
+    expect(hub.keepAwakeModes).toEqual(['always'])
   })
 
   it('replies to list-dir with a directory listing', () => {
@@ -213,6 +250,19 @@ describe('createConnection', () => {
       { type: 'output', workspace: 'kazomi', data: 'live' },
       { type: 'status', workspace: 'kazomi', status: 'waiting-input' },
     ])
+  })
+
+  it('does not double output when a workspace is re-attached', () => {
+    const session = fakeSession()
+    const sent: ServerMessage[] = []
+    const conn = createConnection(hubWith(session), (m) => sent.push(m))
+
+    conn.handle({ type: 'attach', workspace: 'kazomi' })
+    conn.handle({ type: 'attach', workspace: 'kazomi' })
+    sent.length = 0 // drop the two snapshot/status replays
+
+    session.emit('live')
+    expect(sent).toEqual([{ type: 'output', workspace: 'kazomi', data: 'live' }])
   })
 
   it('forwards input to the session', () => {

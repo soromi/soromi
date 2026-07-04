@@ -1,5 +1,6 @@
 //Types
 import type { ClientMessage, ServerMessage } from '@soromi/protocol'
+import type { AccountManager } from '../accounts/account-store'
 import type { WorkspaceHub } from '../workspaces/workspace-service'
 
 /**
@@ -8,19 +9,29 @@ import type { WorkspaceHub } from '../workspaces/workspace-service'
  * status stream back. The workspace list is re-sent whenever the hub changes. Kept
  * transport-free so it can be unit-tested without a real WebSocket.
  */
-export function createConnection(hub: WorkspaceHub, send: (message: ServerMessage) => void) {
+export function createConnection(
+  hub: WorkspaceHub,
+  send: (message: ServerMessage) => void,
+  accounts?: AccountManager,
+) {
   const unsubscribers: Array<() => void> = []
+  const attached = new Map<string, () => void>()
 
-  function sendWorkspaceList(): void {
-    send({ type: 'workspace-list', workspaces: hub.summaries() })
+  function sendAccounts(): void {
+    if (accounts) send({ type: 'account-list', accounts: accounts.list() })
   }
 
-  unsubscribers.push(hub.onChange(sendWorkspaceList))
+  function sendState(): void {
+    send({ type: 'workspace-list', workspaces: hub.summaries() })
+    send({ type: 'keep-awake', active: hub.keepAwakeActive(), mode: hub.keepAwakeMode() })
+  }
+
+  unsubscribers.push(hub.onChange(sendState))
 
   function handle(message: ClientMessage): void {
     switch (message.type) {
       case 'list-workspaces': {
-        sendWorkspaceList()
+        sendState()
         return
       }
       case 'open-workspace': {
@@ -55,6 +66,10 @@ export function createConnection(hub: WorkspaceHub, send: (message: ServerMessag
         hub.setMuted(message.workspace, message.muted)
         return
       }
+      case 'set-keep-awake-mode': {
+        hub.setKeepAwakeMode(message.mode)
+        return
+      }
       case 'list-dir': {
         send({
           type: 'dir-listing',
@@ -76,19 +91,38 @@ export function createConnection(hub: WorkspaceHub, send: (message: ServerMessag
         })
         return
       }
+      case 'list-accounts': {
+        sendAccounts()
+        return
+      }
+      case 'save-account': {
+        accounts?.save(message.profile)
+        sendAccounts()
+        return
+      }
+      case 'delete-account': {
+        accounts?.remove(message.name)
+        sendAccounts()
+        return
+      }
       case 'attach': {
         const session = hub.get(message.workspace)
         if (!session) return
+        // Re-attaching (e.g. on reconnect) replaces the prior subscription, so output is
+        // never streamed twice for the same workspace on one connection.
+        attached.get(message.workspace)?.()
         send({ type: 'output', workspace: message.workspace, data: session.snapshot() })
         send({ type: 'status', workspace: message.workspace, status: session.status() })
-        unsubscribers.push(
-          session.onOutput((data) => {
-            send({ type: 'output', workspace: message.workspace, data })
-          }),
-          session.onStatus((status) => {
-            send({ type: 'status', workspace: message.workspace, status })
-          }),
-        )
+        const offOutput = session.onOutput((data) => {
+          send({ type: 'output', workspace: message.workspace, data })
+        })
+        const offStatus = session.onStatus((status) => {
+          send({ type: 'status', workspace: message.workspace, status })
+        })
+        attached.set(message.workspace, () => {
+          offOutput()
+          offStatus()
+        })
         return
       }
       case 'input': {
@@ -105,6 +139,8 @@ export function createConnection(hub: WorkspaceHub, send: (message: ServerMessag
   function dispose(): void {
     for (const unsubscribe of unsubscribers) unsubscribe()
     unsubscribers.length = 0
+    for (const off of attached.values()) off()
+    attached.clear()
   }
 
   return { handle, dispose }

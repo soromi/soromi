@@ -12,7 +12,8 @@ import { type PersistedSpace, loadSpaces, saveSpaces } from './space-store'
 import { loadWorkspace } from './workspace-loader'
 
 //Types
-import type { DirEntry, WorkspaceSummary } from '@soromi/protocol'
+import type { DirEntry, KeepAwakeMode, WorkspaceSummary } from '@soromi/protocol'
+import type { KeepAwakeController } from '../keep-awake/keep-awake-controller'
 import type { NotificationController } from '../notifications/notification-controller'
 import type { SessionLike } from '../sessions/session'
 import type { WorkspaceRegistry } from '../sessions/session-manager'
@@ -41,6 +42,9 @@ export interface WorkspaceHub extends WorkspaceRegistry {
   summaries(): WorkspaceSummary[]
   listDir(workspace: string, path: string): DirEntry[]
   readFile(workspace: string, path: string): FileRead
+  keepAwakeActive(): boolean
+  keepAwakeMode(): KeepAwakeMode
+  setKeepAwakeMode(mode: KeepAwakeMode): void
   setMuted(workspace: string, muted: boolean): void
   onChange(listener: () => void): () => void
 }
@@ -56,7 +60,10 @@ export class WorkspaceService implements WorkspaceHub {
   private readonly metadata = new Map<string, WorkspaceMeta>()
   private readonly changeListeners = new Set<() => void>()
 
-  constructor(private readonly notifications: NotificationController) {
+  constructor(
+    private readonly notifications: NotificationController,
+    private readonly keepAwake: KeepAwakeController,
+  ) {
     for (const space of loadSpaces()) this.spawnSpace(space)
   }
 
@@ -126,6 +133,19 @@ export class WorkspaceService implements WorkspaceHub {
     return readFileWithin(meta.root, path)
   }
 
+  keepAwakeActive(): boolean {
+    return this.keepAwake.isActive()
+  }
+
+  keepAwakeMode(): KeepAwakeMode {
+    return this.keepAwake.getMode()
+  }
+
+  setKeepAwakeMode(mode: KeepAwakeMode): void {
+    this.keepAwake.setMode(mode)
+    this.emitChange()
+  }
+
   setMuted(workspace: string, muted: boolean): void {
     this.notifications.setMuted(workspace, muted)
   }
@@ -158,7 +178,11 @@ export class WorkspaceService implements WorkspaceHub {
     }
 
     const session = this.manager.ensure(space.name, { command, args, cwd: space.root, env })
-    session.onStatus((status) => this.notifications.handle(space.name, status))
+    session.onStatus((status) => {
+      this.notifications.handle(space.name, status)
+      this.keepAwake.handle(space.name, status)
+      this.emitChange()
+    })
     this.metadata.set(space.name, {
       agent: space.agent,
       account: space.account,

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 //
+import { FileAccountManager } from './accounts/account-store'
 import { DAEMON_PORT } from './config'
+import { KeepAwakeController } from './keep-awake/keep-awake-controller'
+import { createKeepAwake } from './keep-awake/keep-awake'
 import { NotificationController } from './notifications/notification-controller'
 import { createNotifier } from './notifications/notifier'
 import { startWsServer } from './transport/ws-server'
@@ -14,7 +17,8 @@ import { WorkspaceService } from './workspaces/workspace-service'
  */
 function main(): void {
   const notifications = new NotificationController(createNotifier())
-  const service = new WorkspaceService(notifications)
+  const keepAwake = new KeepAwakeController(createKeepAwake())
+  const service = new WorkspaceService(notifications, keepAwake)
 
   const restored = service.names().length
   if (restored > 0) console.log(`soromi: restored ${restored} space(s) from local storage`)
@@ -29,11 +33,12 @@ function main(): void {
     }
   }
 
-  startWsServer({ port: DAEMON_PORT, hub: service })
+  startWsServer({ port: DAEMON_PORT, hub: service, accounts: new FileAccountManager() })
   console.log(`soromi: listening on ws://localhost:${DAEMON_PORT}`)
 
   const shutdown = () => {
     notifications.dispose()
+    keepAwake.dispose()
     service.dispose()
     process.exit(0)
   }
