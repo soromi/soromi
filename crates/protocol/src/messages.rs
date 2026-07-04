@@ -28,6 +28,8 @@ pub struct DirEntry {
     #[serde(rename = "type")]
     #[cfg_attr(feature = "ts", ts(rename = "type"))]
     pub kind: EntryKind,
+    /// True when the entry is git-ignored (shown dimmed in the tree).
+    pub ignored: bool,
 }
 
 /// Rail-facing summary of a workspace.

@@ -74,12 +74,12 @@ importers:
       '@codemirror/state':
         specifier: ^6.5.0
         version: 6.7.0
-      '@codemirror/theme-one-dark':
-        specifier: ^6.1.2
-        version: 6.1.3
       '@codemirror/view':
         specifier: ^6.36.1
         version: 6.43.5
+      '@lezer/highlight':
+        specifier: ^1.2.1
+        version: 1.2.3
       '@mantine/core':
         specifier: ^7.15.0
         version: 7.17.8(@mantine/hooks@7.17.8(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -318,9 +318,6 @@ packages:
 
   '@codemirror/state@6.7.0':
     resolution: {integrity: sha512-Zbl9NyscLMZkfXPQnNAIIAFftidrA1UbcJEIMp24C0Bukc2I5T8wJS0wsXYsnDOqCFJUeJ1BITGNs5CqPDSmSg==}
-
-  '@codemirror/theme-one-dark@6.1.3':
-    resolution: {integrity: sha512-NzBdIvEJmx6fjeremiGp3t/okrLPYT0d9orIc7AFun8oZcRk58aejkqhv6spnz4MLAevrKNPMQYXEWMg4s+sKA==}
 
   '@codemirror/view@6.43.5':
     resolution: {integrity: sha512-7uT/vUgH6dfXWn3WqOe23KneILMvGy5wQjNMEcRXLKzziJ9NOktpW6tGoyQpwVkBgE5Gj6hKkCcsddbnkaWrOQ==}
@@ -1933,13 +1930,6 @@ snapshots:
   '@codemirror/state@6.7.0':
     dependencies:
       '@marijn/find-cluster-break': 1.0.3
-
-  '@codemirror/theme-one-dark@6.1.3':
-    dependencies:
-      '@codemirror/language': 6.12.4
-      '@codemirror/state': 6.7.0
-      '@codemirror/view': 6.43.5
-      '@lezer/highlight': 1.2.3
 
   '@codemirror/view@6.43.5':
     dependencies:

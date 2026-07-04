@@ -213,10 +213,12 @@ fn server_dir_listing_renames_entry_type() {
                 DirEntry {
                     name: "src".into(),
                     kind: EntryKind::Dir,
+                    ignored: false,
                 },
                 DirEntry {
-                    name: "index.ts".into(),
-                    kind: EntryKind::File,
+                    name: "node_modules".into(),
+                    kind: EntryKind::Dir,
+                    ignored: true,
                 },
             ],
         },
@@ -225,8 +227,8 @@ fn server_dir_listing_renames_entry_type() {
             "workspace": "kazomi",
             "path": "api",
             "entries": [
-                { "name": "src", "type": "dir" },
-                { "name": "index.ts", "type": "file" }
+                { "name": "src", "type": "dir", "ignored": false },
+                { "name": "node_modules", "type": "dir", "ignored": true }
             ]
         }),
     );

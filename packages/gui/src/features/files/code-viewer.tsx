@@ -1,7 +1,9 @@
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView, lineNumbers } from '@codemirror/view'
 import { useEffect, useRef } from 'react'
+
+//Constants
+import { darkTheme } from './code-viewer-theme'
 
 //Styles
 import styles from './code-viewer.module.css'
@@ -22,7 +24,7 @@ export function CodeViewer({ value, path }: { value: string; path: string }) {
           lineNumbers(),
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
-          oneDark,
+          darkTheme,
           language.of([]),
         ],
       }),

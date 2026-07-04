@@ -9,8 +9,8 @@ import type { Status } from '@soromi/protocol'
  * color values JS itself needs (e.g. the xterm theme) and small mapping helpers.
  */
 export const colors = {
-  bgTerminal: '#161514',
-  text: '#e8e5df',
+  bgTerminal: '#1f1f1f',
+  text: '#cccccc',
 }
 
 export const theme = createTheme({
@@ -27,6 +27,19 @@ export const theme = createTheme({
       '#2d5c4b',
       '#25493c',
       '#1b362d',
+    ],
+    // Dark surfaces for Mantine components (menus, inputs, borders).
+    dark: [
+      '#cccccc',
+      '#b5b5b5',
+      '#9d9d9d',
+      '#6e6e6e',
+      '#3c3c3c',
+      '#2b2b2b',
+      '#252526',
+      '#1f1f1f',
+      '#181818',
+      '#141414',
     ],
   },
   fontFamily: '-apple-system, "Segoe UI", Inter, Roboto, sans-serif',

@@ -42,6 +42,7 @@ export function FileTree() {
           path={entry.name}
           name={entry.name}
           type={entry.type}
+          ignored={entry.ignored}
           depth={0}
         />
       ))}
@@ -54,10 +55,11 @@ interface TreeNodeProps {
   path: string
   name: string
   type: 'file' | 'dir'
+  ignored: boolean
   depth: number
 }
 
-function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
+function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps) {
   const transport = useTransport()
   const { expanded, children, selected, toggle, openFile } = useAppStore(
     useShallow((s) => {
@@ -82,7 +84,12 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
     return (
       <button
         type="button"
-        className={clsx(styles.row, styles.file, selected && styles.selected)}
+        className={clsx(
+          styles.row,
+          styles.file,
+          selected && styles.selected,
+          ignored && styles.ignored,
+        )}
         style={indent}
         onClick={open}
         title={name}
@@ -102,7 +109,13 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
 
   return (
     <>
-      <button type="button" className={styles.row} style={indent} onClick={onToggle} title={name}>
+      <button
+        type="button"
+        className={clsx(styles.row, ignored && styles.ignored)}
+        style={indent}
+        onClick={onToggle}
+        title={name}
+      >
         <Chevron open={expanded} />
         <span className={styles.label}>{name}</span>
       </button>
@@ -114,6 +127,7 @@ function TreeNode({ workspace, path, name, type, depth }: TreeNodeProps) {
             path={`${path}/${child.name}`}
             name={child.name}
             type={child.type}
+            ignored={child.ignored}
             depth={depth + 1}
           />
         ))}

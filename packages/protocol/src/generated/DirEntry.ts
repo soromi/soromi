@@ -4,4 +4,8 @@ import type { EntryKind } from "./EntryKind";
 /**
  * One directory entry (its `type` field maps to `kind`).
  */
-export type DirEntry = { name: string, type: EntryKind, };
+export type DirEntry = { name: string, type: EntryKind, 
+/**
+ * True when the entry is git-ignored (shown dimmed in the tree).
+ */
+ignored: boolean, };

@@ -28,8 +28,8 @@
   white-space: nowrap;
 }
 
+/* Files share the folder text color; only the monospace font sets them apart. */
 .file {
-  color: var(--soromi-text-dim);
   font-family: var(--mantine-font-family-monospace);
 }
 
@@ -53,6 +53,12 @@
 .gap {
   flex-shrink: 0;
   width: 12px;
+}
+
+/* Git-ignored entries (node_modules, dist, …) read as excluded: a distinctly dimmer gray
+   instead of the full-strength text, so they're easy to tell apart from normal entries. */
+.ignored {
+  color: var(--soromi-text-faint);
 }
 
 .empty {
