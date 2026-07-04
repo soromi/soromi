@@ -75,18 +75,26 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
   // settling after mount), so the terminal always fills its pane.
   useEffect(() => {
     if (!active) return
-    const term = termRef.current
-    const fit = fitRef.current
     const container = containerRef.current
-    if (!term || !fit || !container) return
+    if (!container) return
 
+    // Read refs fresh each call: the observer can fire after the terminal is disposed or
+    // swapped. Guard on the terminal being opened and never let fit() throw out of here
+    // (it reaches into an internal render service that isn't ready until the first paint).
     const syncSize = () => {
+      const term = termRef.current
+      const fit = fitRef.current
+      if (!term || !fit || !term.element) return
       if (container.clientWidth === 0 || container.clientHeight === 0) return
-      fit.fit()
-      transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
+      try {
+        fit.fit()
+        transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
+      } catch {
+        // Renderer not ready yet; the next resize will retry.
+      }
     }
     syncSize()
-    term.focus()
+    termRef.current?.focus()
 
     const observer = new ResizeObserver(syncSize)
     observer.observe(container)
