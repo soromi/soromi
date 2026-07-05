@@ -15,23 +15,25 @@ fn is_attention(status: Status) -> bool {
     )
 }
 
-struct WorkspaceState {
+struct SessionState {
     status: Status,
     fired: bool,
     pending: bool,
-    /// Bumped whenever a pending timer should be invalidated (workspace left attention).
+    /// Bumped whenever a pending timer should be invalidated (session left attention).
     generation: u64,
 }
 
 struct Inner {
-    states: HashMap<String, WorkspaceState>,
+    /// Attention state per session id.
+    states: HashMap<String, SessionState>,
+    /// Muted workspace names (mute is per workspace, so it silences all its sessions).
     muted: HashSet<String>,
 }
 
 /// Decides when to fire notifications from status transitions. Fires on entering an attention
 /// state (waiting-input / blocked / done) after a debounce, at most once per episode (re-armed
-/// when the workspace leaves the attention states). Per-workspace mute. Timers run as tokio
-/// tasks, so it must be used within a runtime.
+/// when the session leaves the attention states). State is per session; mute is per workspace.
+/// Timers run as tokio tasks, so it must be used within a runtime.
 pub struct NotificationController {
     notifier: Arc<dyn Notifier>,
     debounce: Duration,
@@ -63,12 +65,12 @@ impl NotificationController {
         }
     }
 
-    pub fn handle(&self, workspace: &str, status: Status) {
+    pub fn handle(&self, workspace: &str, session: &str, status: Status) {
         let mut inner = self.inner.lock().unwrap();
         let state = inner
             .states
-            .entry(workspace.to_string())
-            .or_insert(WorkspaceState {
+            .entry(session.to_string())
+            .or_insert(SessionState {
                 status: Status::Idle,
                 fired: false,
                 pending: false,
@@ -94,11 +96,12 @@ impl NotificationController {
         let notifier = self.notifier.clone();
         let debounce = self.debounce;
         let workspace = workspace.to_string();
+        let session = session.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(debounce).await;
             let (status, muted) = {
                 let mut guard = inner.lock().unwrap();
-                let Some(state) = guard.states.get_mut(&workspace) else {
+                let Some(state) = guard.states.get_mut(&session) else {
                     return;
                 };
                 if state.generation != generation {
@@ -158,8 +161,8 @@ mod tests {
     async fn fires_once_after_the_debounce() {
         let rec = Arc::new(Recording::default());
         let ctrl = NotificationController::with_debounce(rec.clone(), Duration::from_millis(20));
-        ctrl.handle("kazomi", Status::WaitingInput);
-        ctrl.handle("kazomi", Status::WaitingInput); // still pending, no second timer
+        ctrl.handle("kazomi", "s1", Status::WaitingInput);
+        ctrl.handle("kazomi", "s1", Status::WaitingInput); // still pending, no second timer
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert_eq!(rec.messages.lock().unwrap().len(), 1);
     }
@@ -168,8 +171,8 @@ mod tests {
     async fn leaving_attention_before_the_debounce_cancels() {
         let rec = Arc::new(Recording::default());
         let ctrl = NotificationController::with_debounce(rec.clone(), Duration::from_millis(30));
-        ctrl.handle("kazomi", Status::WaitingInput);
-        ctrl.handle("kazomi", Status::Thinking);
+        ctrl.handle("kazomi", "s1", Status::WaitingInput);
+        ctrl.handle("kazomi", "s1", Status::Thinking);
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert!(rec.messages.lock().unwrap().is_empty());
     }
@@ -179,7 +182,7 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let ctrl = NotificationController::with_debounce(rec.clone(), Duration::from_millis(20));
         ctrl.set_muted("kazomi", true);
-        ctrl.handle("kazomi", Status::Done);
+        ctrl.handle("kazomi", "s1", Status::Done);
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert!(rec.messages.lock().unwrap().is_empty());
     }

@@ -9,7 +9,7 @@ import { useTransport } from '@/services/transport/transport-context'
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
-import { accountKind, statusVariant } from '@/config/theme'
+import { statusVariant } from '@/config/theme'
 
 //Icons
 import BellOffSvg from '@/assets/icons/bell-off.svg?react'
@@ -72,10 +72,6 @@ export function TerminalHeader() {
         title={workspace.status}
       />
       <span className={styles.name}>{name}</span>
-      <span className={styles.agent}>{workspace.agent}</span>
-      <span className={clsx(styles.badge, styles[accountKind(workspace.account)])}>
-        {workspace.account}
-      </span>
       <span className={styles.spacer} />
       <button
         type="button"

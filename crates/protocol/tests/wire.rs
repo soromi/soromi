@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 use soromi_protocol::{
-    AccountProfile, ClientMessage, DirEntry, EntryKind, KeepAwakeMode, ProviderConfig,
-    ServerMessage, Status, WorkspaceSummary,
+    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
+    ProviderConfig, ServerMessage, SessionSummary, Status, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -31,17 +31,114 @@ fn assert_server(msg: ServerMessage, expected: Value) {
 fn client_attach_and_resize() {
     assert_client(
         ClientMessage::Attach {
-            workspace: "kazomi".into(),
+            session: "s1".into(),
         },
-        json!({ "type": "attach", "workspace": "kazomi" }),
+        json!({ "type": "attach", "session": "s1" }),
     );
     assert_client(
         ClientMessage::Resize {
-            workspace: "kazomi".into(),
+            session: "s1".into(),
             cols: 120,
             rows: 40,
         },
-        json!({ "type": "resize", "workspace": "kazomi", "cols": 120, "rows": 40 }),
+        json!({ "type": "resize", "session": "s1", "cols": 120, "rows": 40 }),
+    );
+}
+
+#[test]
+fn client_open_session_omits_absent_account() {
+    assert_client(
+        ClientMessage::OpenSession {
+            workspace: "kazomi".into(),
+            agent: "claude".into(),
+            account: None,
+        },
+        json!({ "type": "open-session", "workspace": "kazomi", "agent": "claude" }),
+    );
+    assert_client(
+        ClientMessage::OpenSession {
+            workspace: "kazomi".into(),
+            agent: "codex".into(),
+            account: Some("work".into()),
+        },
+        json!({
+            "type": "open-session",
+            "workspace": "kazomi",
+            "agent": "codex",
+            "account": "work"
+        }),
+    );
+}
+
+#[test]
+fn client_close_session() {
+    assert_client(
+        ClientMessage::CloseSession {
+            session: "s1".into(),
+        },
+        json!({ "type": "close-session", "session": "s1" }),
+    );
+}
+
+#[test]
+fn client_rename_session() {
+    assert_client(
+        ClientMessage::RenameSession {
+            session: "s1".into(),
+            title: "build".into(),
+        },
+        json!({ "type": "rename-session", "session": "s1", "title": "build" }),
+    );
+}
+
+#[test]
+fn client_update_space_carries_account_bindings() {
+    assert_client(
+        ClientMessage::UpdateSpace {
+            workspace: "kazomi".into(),
+            accounts: vec![AgentAccount {
+                id: "work".into(),
+                agent: "claude".into(),
+            }],
+        },
+        json!({
+            "type": "update-space",
+            "workspace": "kazomi",
+            "accounts": [{ "id": "work", "agent": "claude" }]
+        }),
+    );
+}
+
+#[test]
+fn server_output_and_session_opened() {
+    assert_server(
+        ServerMessage::Output {
+            session: "s1".into(),
+            data: "hi".into(),
+        },
+        json!({ "type": "output", "session": "s1", "data": "hi" }),
+    );
+    assert_server(
+        ServerMessage::SessionOpened {
+            workspace: "kazomi".into(),
+            session: SessionSummary {
+                id: "s1".into(),
+                agent: "claude".into(),
+                account: "work".into(),
+                status: Status::Idle,
+                title: None,
+            },
+        },
+        json!({
+            "type": "session-opened",
+            "workspace": "kazomi",
+            "session": {
+                "id": "s1",
+                "agent": "claude",
+                "account": "work",
+                "status": "idle"
+            }
+        }),
     );
 }
 
@@ -160,10 +257,10 @@ fn server_space_exported() {
 fn server_status_uses_kebab_status_value() {
     assert_server(
         ServerMessage::Status {
-            workspace: "kazomi".into(),
+            session: "s1".into(),
             status: Status::WaitingInput,
         },
-        json!({ "type": "status", "workspace": "kazomi", "status": "waiting-input" }),
+        json!({ "type": "status", "session": "s1", "status": "waiting-input" }),
     );
 }
 
@@ -185,9 +282,18 @@ fn server_workspace_list_and_summary() {
             workspaces: vec![WorkspaceSummary {
                 name: "kazomi".into(),
                 status: Status::Idle,
-                agent: "claude".into(),
-                account: "personal".into(),
                 folders: vec!["api".into()],
+                accounts: vec![AgentAccount {
+                    id: "personal".into(),
+                    agent: "claude".into(),
+                }],
+                sessions: vec![SessionSummary {
+                    id: "s1".into(),
+                    agent: "claude".into(),
+                    account: "personal".into(),
+                    status: Status::Idle,
+                    title: Some("build".into()),
+                }],
             }],
         },
         json!({
@@ -195,9 +301,15 @@ fn server_workspace_list_and_summary() {
             "workspaces": [{
                 "name": "kazomi",
                 "status": "idle",
-                "agent": "claude",
-                "account": "personal",
-                "folders": ["api"]
+                "folders": ["api"],
+                "accounts": [{ "id": "personal", "agent": "claude" }],
+                "sessions": [{
+                    "id": "s1",
+                    "agent": "claude",
+                    "account": "personal",
+                    "status": "idle",
+                    "title": "build"
+                }]
             }]
         }),
     );

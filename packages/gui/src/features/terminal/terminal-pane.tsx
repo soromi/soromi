@@ -17,16 +17,16 @@ import type { Transport } from '@/services/transport/transport'
 
 interface TerminalPaneProps {
   transport: Transport
-  workspace: string
+  session: string
   active: boolean
 }
 
 /**
- * One xterm bound to a workspace session. It mounts once and stays alive while its workspace
- * exists (a "parked buffer"): switching away hides it via CSS instead of unmounting, so its
- * scrollback and scroll position survive and it keeps receiving live output in the background.
+ * One xterm bound to a session (tab). It mounts once and stays alive while its session exists
+ * (a "parked buffer"): switching away hides it via CSS instead of unmounting, so its scrollback
+ * and scroll position survive and it keeps receiving live output in the background.
  */
-export function TerminalPane({ transport, workspace, active }: TerminalPaneProps) {
+export function TerminalPane({ transport, session, active }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -62,12 +62,12 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
     }
 
     const offMessage = transport.onMessage((message) => {
-      if (message.type === 'output' && message.workspace === workspace) {
+      if (message.type === 'output' && message.session === session) {
         term.write(message.data)
       }
     })
     const inputSub = term.onData((data) => {
-      transport.send({ type: 'input', workspace, data })
+      transport.send({ type: 'input', session, data })
     })
 
     // Attach only after the terminal has real dimensions, so the snapshot replays at the right
@@ -81,10 +81,10 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
       } catch {
         return
       }
-      transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
+      transport.send({ type: 'resize', session, cols: term.cols, rows: term.rows })
       if (!attached && transport.isOpen()) {
         attached = true
-        transport.send({ type: 'attach', workspace })
+        transport.send({ type: 'attach', session })
       }
     }
 
@@ -105,7 +105,7 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
       termRef.current = null
       fitRef.current = null
     }
-  }, [transport, workspace])
+  }, [transport, session])
 
   // Refit and focus when this pane becomes the visible one (a hidden pane can't be fitted).
   useEffect(() => {
@@ -117,13 +117,13 @@ export function TerminalPane({ transport, workspace, active }: TerminalPaneProps
     if (container.clientWidth !== 0 && container.clientHeight !== 0) {
       try {
         fit.fit()
-        transport.send({ type: 'resize', workspace, cols: term.cols, rows: term.rows })
+        transport.send({ type: 'resize', session, cols: term.cols, rows: term.rows })
       } catch {
         // Renderer not ready; the mount effect's observer will retry.
       }
     }
     term.focus()
-  }, [active, transport, workspace])
+  }, [active, transport, session])
 
   return (
     <div className={clsx(styles.pane, !active && styles.hidden)}>

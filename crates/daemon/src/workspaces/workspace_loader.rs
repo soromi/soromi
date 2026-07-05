@@ -64,7 +64,7 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(
             dir.path().join("soromi.space.json"),
-            r#"{ "name": "kazomi", "folders": ["."], "agent": "claude", "account": "personal" }"#,
+            r#"{ "name": "kazomi", "folders": ["."], "accounts": [{ "id": "personal", "agent": "claude" }] }"#,
         )
         .unwrap();
 
@@ -84,7 +84,7 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(
             dir.path().join("soromi.space.json"),
-            r#"{ "name": "x", "folders": ["../evil"], "agent": "claude", "account": "personal" }"#,
+            r#"{ "name": "x", "folders": ["../evil"], "accounts": [{ "id": "personal", "agent": "claude" }] }"#,
         )
         .unwrap();
         assert!(load_workspace(dir.path().to_str().unwrap()).is_err());

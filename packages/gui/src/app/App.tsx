@@ -39,7 +39,10 @@ export function App() {
           store.setProviderStatus(message.provider, message.configDir, message.loggedIn)
           break
         case 'status':
-          store.setStatus(message.workspace, message.status)
+          store.setSessionStatus(message.session, message.status)
+          break
+        case 'session-opened':
+          store.addSession(message.workspace, message.session)
           break
         case 'workspace-opened':
           store.select(message.workspace)

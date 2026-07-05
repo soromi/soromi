@@ -70,9 +70,8 @@ impl Connection {
             ClientMessage::RemoveSpace { workspace } => self.hub.remove_space(&workspace),
             ClientMessage::UpdateSpace {
                 workspace,
-                agent,
-                account,
-            } => match self.hub.update_space(&workspace, agent, account) {
+                accounts,
+            } => match self.hub.update_space(&workspace, accounts) {
                 Ok(result) => self.send(ServerMessage::WorkspaceOpened {
                     workspace: result.workspace,
                     warning: result.warning,
@@ -81,6 +80,20 @@ impl Connection {
                     message: error.to_string(),
                 }),
             },
+            ClientMessage::OpenSession {
+                workspace,
+                agent,
+                account,
+            } => match self.hub.open_session(&workspace, agent, account) {
+                Ok(session) => self.send(ServerMessage::SessionOpened { workspace, session }),
+                Err(error) => self.send(ServerMessage::Error {
+                    message: error.to_string(),
+                }),
+            },
+            ClientMessage::CloseSession { session } => self.hub.close_session(&session),
+            ClientMessage::RenameSession { session, title } => {
+                self.hub.rename_session(&session, title)
+            }
             ClientMessage::ExportSpace { workspace } => match self.hub.export_space(&workspace) {
                 Ok(path) => self.send(ServerMessage::SpaceExported { workspace, path }),
                 Err(error) => self.send(ServerMessage::Error {
@@ -129,18 +142,18 @@ impl Connection {
                 let _ = self.accounts.remove(&name);
                 self.send_accounts();
             }
-            ClientMessage::Attach { workspace } => self.attach(&workspace),
-            ClientMessage::Input { workspace, data } => {
-                if let Some(session) = self.hub.get(&workspace) {
+            ClientMessage::Attach { session } => self.attach(&session),
+            ClientMessage::Input { session, data } => {
+                if let Some(session) = self.hub.get(&session) {
                     session.write(&data);
                 }
             }
             ClientMessage::Resize {
-                workspace,
+                session,
                 cols,
                 rows,
             } => {
-                if let Some(session) = self.hub.get(&workspace) {
+                if let Some(session) = self.hub.get(&session) {
                     session.resize(cols, rows);
                 }
             }
@@ -164,28 +177,28 @@ impl Connection {
     }
 
     /// Replays scrollback and current status, then streams both. Re-attaching replaces the
-    /// prior forwarder, so output is never streamed twice for one workspace on one connection.
+    /// prior forwarder, so output is never streamed twice for one session on one connection.
     /// The snapshot is prefixed with a terminal reset (`ESC c`) so a re-attach (reconnect) wipes
     /// the old content instead of writing on top of it.
-    fn attach(&mut self, workspace: &str) {
-        let Some(session) = self.hub.get(workspace) else {
+    fn attach(&mut self, session_id: &str) {
+        let Some(session) = self.hub.get(session_id) else {
             return;
         };
-        if let Some(previous) = self.attached.remove(workspace) {
+        if let Some(previous) = self.attached.remove(session_id) {
             previous.abort();
         }
 
         self.send(ServerMessage::Output {
-            workspace: workspace.to_string(),
+            session: session_id.to_string(),
             data: format!("\u{1b}c{}", session.snapshot()),
         });
         self.send(ServerMessage::Status {
-            workspace: workspace.to_string(),
+            session: session_id.to_string(),
             status: session.status(),
         });
 
         let out = self.out.clone();
-        let name = workspace.to_string();
+        let id = session_id.to_string();
         let mut output_rx = session.subscribe_output();
         let mut status_rx = session.subscribe_status();
         let handle = tokio::spawn(async move {
@@ -193,7 +206,7 @@ impl Connection {
                 tokio::select! {
                     output = output_rx.recv() => match output {
                         Ok(data) => {
-                            let _ = out.send(ServerMessage::Output { workspace: name.clone(), data });
+                            let _ = out.send(ServerMessage::Output { session: id.clone(), data });
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -203,12 +216,12 @@ impl Connection {
                             break;
                         }
                         let status = *status_rx.borrow_and_update();
-                        let _ = out.send(ServerMessage::Status { workspace: name.clone(), status });
+                        let _ = out.send(ServerMessage::Status { session: id.clone(), status });
                     }
                 }
             }
         });
-        self.attached.insert(workspace.to_string(), handle);
+        self.attached.insert(session_id.to_string(), handle);
     }
 }
 

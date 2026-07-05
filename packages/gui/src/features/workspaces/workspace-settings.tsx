@@ -1,6 +1,6 @@
 import { Button, Divider, Group, Select, Stack, Text, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Services
@@ -19,7 +19,10 @@ import { ProviderIcon } from '@/shared/provider-icon'
 //Styles
 import styles from './workspace-settings.module.css'
 
-/** Per-workspace settings: change its agent and account, export its config, or remove it. */
+//Types
+import type { AgentAccount } from '@soromi/protocol'
+
+/** Per-workspace settings: pick which account each agent runs under, export, or remove. */
 export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const transport = useTransport()
   const { summary, accounts, popOverlay } = useAppStore(
@@ -29,35 +32,55 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       popOverlay: s.popOverlay,
     })),
   )
-  const [agent, setAgent] = useState(summary?.agent ?? 'claude')
-  const [account, setAccount] = useState(summary?.account ?? 'personal')
 
   useEffect(() => {
     transport.send({ type: 'list-accounts' })
   }, [transport])
 
-  // Known providers, plus the current agent if it isn't one of them.
-  const agentOptions = PROVIDERS.some((p) => p.value === agent)
-    ? PROVIDERS
-    : [...PROVIDERS, { value: agent, label: agent }]
-  // Configured accounts, plus the default and whatever this workspace uses now.
-  const accountOptions = [...new Set(['personal', account, ...accounts.map((a) => a.name)])].map(
-    (name) => ({ value: name, label: name }),
+  // Every agent that has a binding or a provider we know about gets an editable row.
+  const agents = useMemo(
+    () => [
+      ...new Set([
+        ...PROVIDERS.map((p) => p.value),
+        ...(summary?.accounts.map((a) => a.agent) ?? []),
+      ]),
+    ],
+    [summary],
+  )
+  const boundAccount = (agent: string) =>
+    summary?.accounts.find((a) => a.agent === agent)?.id ?? 'personal'
+
+  const [bindings, setBindings] = useState<Record<string, string>>(() =>
+    Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])),
   )
 
-  const changed = agent !== summary?.agent || account !== summary?.account
+  // Only accounts that actually have a login configured for this agent's provider, plus the
+  // built-in `personal` default and whatever the agent is currently bound to.
+  const accountOptionsFor = (agent: string) =>
+    [
+      ...new Set([
+        'personal',
+        ...accounts.filter((a) => agent in a.providers).map((a) => a.name),
+        ...(bindings[agent] ? [bindings[agent]] : []),
+      ]),
+    ].map((name) => ({ value: name, label: name }))
+  const agentLabel = (agent: string) => PROVIDERS.find((p) => p.value === agent)?.label ?? agent
+
+  const changed = agents.some((agent) => (bindings[agent] ?? 'personal') !== boundAccount(agent))
   const save = () => {
-    transport.send({ type: 'update-space', workspace, agent, account })
+    const next: AgentAccount[] = agents.map((agent) => ({
+      id: bindings[agent] ?? 'personal',
+      agent,
+    }))
+    transport.send({ type: 'update-space', workspace, accounts: next })
     popOverlay()
   }
 
-  const exportSpace = () => {
-    transport.send({ type: 'export-space', workspace })
-  }
+  const exportSpace = () => transport.send({ type: 'export-space', workspace })
   const removeSpace = () => {
     modals.openConfirmModal({
       title: 'Remove workspace',
-      children: <Text size="sm">Remove "{workspace}"? This stops its agent.</Text>,
+      children: <Text size="sm">Remove "{workspace}"? This stops its agents.</Text>,
       labels: { confirm: 'Remove', cancel: 'Cancel' },
       confirmProps: { color: 'red' },
       onConfirm: () => {
@@ -74,30 +97,26 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
           <div>
             <Title order={4}>{workspace}</Title>
             <Text c="dimmed" size="sm">
-              Changing the agent or account restarts this workspace's session.
+              Choose the account each agent runs under. New sessions for that agent use it. Changing
+              an account restarts the affected tabs.
             </Text>
           </div>
-          <Select
-            label="Agent"
-            data={agentOptions}
-            value={agent}
-            onChange={(value) => value && setAgent(value)}
-            allowDeselect={false}
-            leftSection={<ProviderIcon provider={agent} />}
-            renderOption={({ option }) => (
-              <Group gap="xs" wrap="nowrap">
-                <ProviderIcon provider={option.value} />
-                <span>{option.label}</span>
-              </Group>
-            )}
-          />
-          <Select
-            label="Account"
-            data={accountOptions}
-            value={account}
-            onChange={(value) => value && setAccount(value)}
-            allowDeselect={false}
-          />
+
+          {agents.map((agent) => (
+            <Select
+              key={agent}
+              label={
+                <span className={styles.agentLabel}>
+                  <ProviderIcon provider={agent} size={14} />
+                  {agentLabel(agent)}
+                </span>
+              }
+              data={accountOptionsFor(agent)}
+              value={bindings[agent] ?? 'personal'}
+              onChange={(value) => value && setBindings((prev) => ({ ...prev, [agent]: value }))}
+              allowDeselect={false}
+            />
+          ))}
           <Button onClick={save} disabled={!changed}>
             Save
           </Button>

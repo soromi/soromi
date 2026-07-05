@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use super::session::{Session, SessionOptions};
 
-/// Owns the workspace-to-session map, one session per workspace. Interior-mutable so it can be
+/// Owns the id-to-session map (one entry per terminal tab). Interior-mutable so it can be
 /// shared across async connections behind an `Arc`.
 #[derive(Default)]
 pub struct SessionManager {
@@ -15,27 +15,27 @@ impl SessionManager {
         Self::default()
     }
 
-    /// Returns the existing session for a workspace, or spawns one.
-    pub fn ensure(&self, workspace: &str, opts: SessionOptions) -> anyhow::Result<Arc<Session>> {
+    /// Returns the existing session for an id, or spawns one.
+    pub fn ensure(&self, id: &str, opts: SessionOptions) -> anyhow::Result<Arc<Session>> {
         let mut sessions = self.sessions.lock().unwrap();
-        if let Some(existing) = sessions.get(workspace) {
+        if let Some(existing) = sessions.get(id) {
             return Ok(existing.clone());
         }
         let session = Arc::new(Session::spawn(opts)?);
-        sessions.insert(workspace.to_string(), session.clone());
+        sessions.insert(id.to_string(), session.clone());
         Ok(session)
     }
 
-    pub fn get(&self, workspace: &str) -> Option<Arc<Session>> {
-        self.sessions.lock().unwrap().get(workspace).cloned()
+    pub fn get(&self, id: &str) -> Option<Arc<Session>> {
+        self.sessions.lock().unwrap().get(id).cloned()
     }
 
     pub fn names(&self) -> Vec<String> {
         self.sessions.lock().unwrap().keys().cloned().collect()
     }
 
-    pub fn dispose(&self, workspace: &str) {
-        if let Some(session) = self.sessions.lock().unwrap().remove(workspace) {
+    pub fn dispose(&self, id: &str) {
+        if let Some(session) = self.sessions.lock().unwrap().remove(id) {
             session.shutdown();
         }
     }

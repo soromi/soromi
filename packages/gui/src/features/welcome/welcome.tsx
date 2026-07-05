@@ -56,13 +56,16 @@ function CreateSpaceForm() {
 
   const { root, folders } = useMemo(() => deriveRootAndFolders(folderInputs), [folderInputs])
 
+  // Only accounts with a login configured for the chosen agent's provider, plus `personal`.
   const accountOptions = useMemo(
     () =>
-      [...new Set(['personal', ...accounts.map((a) => a.name)])].map((n) => ({
-        value: n,
-        label: n,
-      })),
-    [accounts],
+      [
+        ...new Set([
+          'personal',
+          ...accounts.filter((a) => agent in a.providers).map((a) => a.name),
+        ]),
+      ].map((n) => ({ value: n, label: n })),
+    [accounts, agent],
   )
 
   const updateFolder = (index: number, value: string) =>

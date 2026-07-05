@@ -14,7 +14,7 @@ struct Inner {
 /// Holds the machine awake according to the selected mode:
 ///
 /// - `off`: never.
-/// - `working`: while any workspace's agent is actively thinking.
+/// - `working`: while any session's agent is actively thinking.
 /// - `always`: unconditionally.
 ///
 /// Engages/releases the backend only on a real transition. Interior-mutable so it can be
@@ -36,13 +36,13 @@ impl KeepAwakeController {
         }
     }
 
-    /// Updates from a workspace's status; returns true if the engaged state changed.
-    pub fn handle(&self, workspace: &str, status: Status) -> bool {
+    /// Updates from a session's status; returns true if the engaged state changed.
+    pub fn handle(&self, session: &str, status: Status) -> bool {
         let mut inner = self.inner.lock().unwrap();
         if status == Status::Thinking {
-            inner.working.insert(workspace.to_string());
+            inner.working.insert(session.to_string());
         } else {
-            inner.working.remove(workspace);
+            inner.working.remove(session);
         }
         self.recompute(&mut inner)
     }

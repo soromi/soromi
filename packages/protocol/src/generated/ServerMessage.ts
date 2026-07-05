@@ -2,10 +2,11 @@
 import type { AccountProfile } from "./AccountProfile";
 import type { DirEntry } from "./DirEntry";
 import type { KeepAwakeMode } from "./KeepAwakeMode";
+import type { SessionSummary } from "./SessionSummary";
 import type { Status } from "./Status";
 import type { WorkspaceSummary } from "./WorkspaceSummary";
 
 /**
  * Daemon -> viewport. A discriminated union on `type`.
  */
-export type ServerMessage = { "type": "output", workspace: string, data: string, } | { "type": "status", workspace: string, status: Status, } | { "type": "notify", workspace: string, status: Status, message: string, } | { "type": "workspace-list", workspaces: Array<WorkspaceSummary>, } | { "type": "workspace-opened", workspace: string, warning?: string, } | { "type": "error", message: string, } | { "type": "dir-listing", workspace: string, path: string, entries: Array<DirEntry>, } | { "type": "file-content", workspace: string, path: string, content: string, truncated: boolean, binary: boolean, } | { "type": "keep-awake", active: boolean, mode: KeepAwakeMode, } | { "type": "account-list", accounts: Array<AccountProfile>, } | { "type": "space-exported", workspace: string, path: string, } | { "type": "provider-status", provider: string, configDir: string, loggedIn: boolean, };
+export type ServerMessage = { "type": "output", session: string, data: string, } | { "type": "status", session: string, status: Status, } | { "type": "notify", workspace: string, status: Status, message: string, } | { "type": "session-opened", workspace: string, session: SessionSummary, } | { "type": "workspace-list", workspaces: Array<WorkspaceSummary>, } | { "type": "workspace-opened", workspace: string, warning?: string, } | { "type": "error", message: string, } | { "type": "dir-listing", workspace: string, path: string, entries: Array<DirEntry>, } | { "type": "file-content", workspace: string, path: string, content: string, truncated: boolean, binary: boolean, } | { "type": "keep-awake", active: boolean, mode: KeepAwakeMode, } | { "type": "account-list", accounts: Array<AccountProfile>, } | { "type": "space-exported", workspace: string, path: string, } | { "type": "provider-status", provider: string, configDir: string, loggedIn: boolean, };

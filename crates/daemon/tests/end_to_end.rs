@@ -46,6 +46,24 @@ where
     }
 }
 
+/// Lists workspaces and returns the first workspace's first session id.
+async fn first_session_id<S>(ws: &mut S) -> String
+where
+    S: Stream<Item = Result<Message, Error>> + Unpin + SinkExt<Message> + Unpin,
+    <S as futures_util::Sink<Message>>::Error: std::fmt::Debug,
+{
+    ws.send(Message::Text(
+        json!({ "type": "list-workspaces" }).to_string(),
+    ))
+    .await
+    .unwrap();
+    let list = read_until(ws, "workspace-list").await;
+    list["workspaces"][0]["sessions"][0]["id"]
+        .as_str()
+        .expect("session id")
+        .to_string()
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn resize_reaches_the_pty() {
@@ -83,20 +101,22 @@ async fn resize_reaches_the_pty() {
     .unwrap();
     read_until(&mut ws, "workspace-opened").await;
 
+    let session = first_session_id(&mut ws).await;
+
     ws.send(Message::Text(
-        json!({ "type": "attach", "workspace": "kazomi" }).to_string(),
+        json!({ "type": "attach", "session": session }).to_string(),
     ))
     .await
     .unwrap();
     ws.send(Message::Text(
-        json!({ "type": "resize", "workspace": "kazomi", "cols": 120, "rows": 40 }).to_string(),
+        json!({ "type": "resize", "session": session, "cols": 120, "rows": 40 }).to_string(),
     ))
     .await
     .unwrap();
     // Give the shell a moment to receive SIGWINCH before it runs the command.
     tokio::time::sleep(Duration::from_millis(200)).await;
     ws.send(Message::Text(
-        json!({ "type": "input", "workspace": "kazomi", "data": "stty size\n" }).to_string(),
+        json!({ "type": "input", "session": session, "data": "stty size\n" }).to_string(),
     ))
     .await
     .unwrap();
@@ -166,16 +186,20 @@ async fn gui_can_create_list_attach_and_exchange_io() {
     .unwrap();
     let list = read_until(&mut ws, "workspace-list").await;
     assert_eq!(list["workspaces"][0]["name"], "kazomi");
-    assert_eq!(list["workspaces"][0]["agent"], "/bin/cat");
+    let session = list["workspaces"][0]["sessions"][0]["id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    assert_eq!(list["workspaces"][0]["sessions"][0]["agent"], "/bin/cat");
 
     // Attach, then exchange terminal I/O (cat echoes input in a PTY).
     ws.send(Message::Text(
-        json!({ "type": "attach", "workspace": "kazomi" }).to_string(),
+        json!({ "type": "attach", "session": session }).to_string(),
     ))
     .await
     .unwrap();
     ws.send(Message::Text(
-        json!({ "type": "input", "workspace": "kazomi", "data": "ping\n" }).to_string(),
+        json!({ "type": "input", "session": session, "data": "ping\n" }).to_string(),
     ))
     .await
     .unwrap();

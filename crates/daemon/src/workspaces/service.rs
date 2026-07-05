@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use soromi_protocol::{DirEntry, KeepAwakeMode, Status, WorkspaceSummary};
+use soromi_protocol::{
+    AgentAccount, DirEntry, KeepAwakeMode, SessionSummary, Status, WorkspaceSummary,
+};
 use tokio::sync::broadcast;
 
 use crate::accounts::loader::{accounts_dir, load_account_profile};
@@ -14,16 +16,17 @@ use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::workspaces::agent_command::parse_agent_command;
-use crate::workspaces::config::{PersistedSpace, Workspace, WorkspaceDefaults};
+use crate::workspaces::config::{PersistedSpace, SessionSpec, Workspace};
 use crate::workspaces::space_store::{load_spaces, save_spaces};
 use crate::workspaces::workspace_loader::load_workspace;
 
 struct WorkspaceMeta {
-    agent: String,
-    account: String,
     folders: Vec<String>,
     root: String,
-    defaults: Option<WorkspaceDefaults>,
+    /// Which account each agent runs under (one entry per agent).
+    accounts: Vec<AgentAccount>,
+    /// Ordered tabs; each is a live PTY keyed in the session manager by its id.
+    sessions: Vec<SessionSpec>,
 }
 
 pub struct CreateSpaceInput {
@@ -40,9 +43,10 @@ pub struct OpenResult {
 }
 
 /// Creates and owns spaces. Spaces are created in-app and persisted under `~/.soromi/`, so
-/// they restore when the daemon restarts. `open_workspace` imports an optional
-/// `soromi.space.json`. A missing account profile is non-fatal (runs under the base env with a
-/// warning). Interior-mutable and `Arc`-shared across connections.
+/// they restore when the daemon restarts. A workspace holds one or more terminal sessions
+/// (tabs); each session's account is resolved from the workspace's per-agent account bindings.
+/// `open_workspace` imports an optional `soromi.space.json`. A missing account profile is
+/// non-fatal (runs under the base env with a warning). Interior-mutable and `Arc`-shared.
 pub struct WorkspaceService {
     manager: SessionManager,
     metadata: Mutex<Vec<(String, WorkspaceMeta)>>,
@@ -65,17 +69,20 @@ impl WorkspaceService {
             keep_awake,
             change_tx,
         });
-        let mut pruned_any = false;
+        let mut dirty = false;
         for mut space in load_spaces() {
+            if migrate(&mut space) {
+                dirty = true;
+            }
             let kept = existing_folders(&space.root, &space.folders);
             if kept != space.folders {
-                pruned_any = true;
+                dirty = true;
                 space.folders = kept;
             }
             service.spawn_space(space);
         }
-        // Persist once if any space had folders that no longer exist on disk.
-        if pruned_any {
+        // Persist once if any space was migrated or had folders that no longer exist on disk.
+        if dirty {
             service.persist();
         }
         service
@@ -85,60 +92,184 @@ impl WorkspaceService {
         self.change_tx.subscribe()
     }
 
+    /// Creates a space with a single initial tab (its `agent`), bound to `account`.
     pub fn create_space(&self, input: CreateSpaceInput) -> anyhow::Result<OpenResult> {
-        if self.has(&input.name) {
-            return Ok(OpenResult {
-                workspace: input.name,
-                warning: None,
-            });
-        }
-        if !Path::new(&input.root).is_dir() {
-            anyhow::bail!("folder not found: {}", input.root);
-        }
-
         let folders = match input.folders {
             Some(folders) if !folders.is_empty() => folders,
             _ => vec![".".to_string()],
         };
-        let warning = self.spawn_space(PersistedSpace {
-            name: input.name.clone(),
+        let space = PersistedSpace {
+            name: input.name,
             folders,
-            agent: input.agent,
-            account: input.account,
-            defaults: None,
             root: input.root,
-        });
+            accounts: vec![AgentAccount {
+                id: input.account,
+                agent: input.agent.clone(),
+            }],
+            sessions: vec![SessionSpec {
+                id: new_session_id(),
+                agent: input.agent,
+                title: None,
+            }],
+            agent: None,
+            account: None,
+        };
+        self.add_space(space)
+    }
+
+    /// Imports `<dir>/soromi.space.json`, opening one tab per configured account binding.
+    pub fn open_workspace(&self, dir: &str) -> anyhow::Result<OpenResult> {
+        let loaded = load_workspace(dir)?;
+        let accounts = loaded.workspace.accounts;
+        let mut sessions: Vec<SessionSpec> = accounts
+            .iter()
+            .map(|a| SessionSpec {
+                id: new_session_id(),
+                agent: a.agent.clone(),
+                title: None,
+            })
+            .collect();
+        if sessions.is_empty() {
+            sessions.push(SessionSpec {
+                id: new_session_id(),
+                agent: "claude".to_string(),
+                title: None,
+            });
+        }
+        let space = PersistedSpace {
+            name: loaded.workspace.name,
+            folders: loaded.workspace.folders,
+            root: loaded.root,
+            accounts,
+            sessions,
+            agent: None,
+            account: None,
+        };
+        self.add_space(space)
+    }
+
+    fn add_space(&self, space: PersistedSpace) -> anyhow::Result<OpenResult> {
+        if self.has(&space.name) {
+            return Ok(OpenResult {
+                workspace: space.name,
+                warning: None,
+            });
+        }
+        if !Path::new(&space.root).is_dir() {
+            anyhow::bail!("folder not found: {}", space.root);
+        }
+        let name = space.name.clone();
+        let warning = self.spawn_space(space);
         self.persist();
         self.emit_change();
         Ok(OpenResult {
-            workspace: input.name,
+            workspace: name,
             warning,
         })
     }
 
-    pub fn open_workspace(&self, dir: &str) -> anyhow::Result<OpenResult> {
-        let loaded = load_workspace(dir)?;
-        self.create_space(CreateSpaceInput {
-            name: loaded.workspace.name,
-            root: loaded.root,
-            agent: loaded.workspace.agent,
-            account: loaded.workspace.account,
-            folders: Some(loaded.workspace.folders),
+    /// Opens a new tab in a workspace. When `account` is given and the agent has no binding yet,
+    /// it is recorded as that agent's account; otherwise the existing binding is used.
+    pub fn open_session(
+        &self,
+        workspace: &str,
+        agent: String,
+        account: Option<String>,
+    ) -> anyhow::Result<SessionSummary> {
+        let session = SessionSpec {
+            id: new_session_id(),
+            agent: agent.clone(),
+            title: None,
+        };
+        let (root, accounts) = {
+            let mut metadata = self.metadata.lock().unwrap();
+            let (_, meta) = metadata
+                .iter_mut()
+                .find(|(n, _)| n == workspace)
+                .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
+            if let Some(id) = account {
+                if !meta.accounts.iter().any(|a| a.agent == agent) {
+                    meta.accounts.push(AgentAccount {
+                        id,
+                        agent: agent.clone(),
+                    });
+                }
+            }
+            meta.sessions.push(session.clone());
+            (meta.root.clone(), meta.accounts.clone())
+        };
+        self.start_session(workspace, &root, &accounts, &session);
+        self.persist();
+        self.emit_change();
+        Ok(SessionSummary {
+            id: session.id,
+            account: account_for(&accounts, &agent),
+            agent,
+            status: Status::Idle,
+            title: None,
         })
+    }
+
+    /// Renames a tab. An empty title clears the custom name (back to the account label).
+    pub fn rename_session(&self, session_id: &str, title: String) {
+        let title = if title.trim().is_empty() {
+            None
+        } else {
+            Some(title)
+        };
+        let mut changed = false;
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            for (_, meta) in metadata.iter_mut() {
+                if let Some(session) = meta.sessions.iter_mut().find(|s| s.id == session_id) {
+                    session.title = title;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if changed {
+            self.persist();
+            self.emit_change();
+        }
+    }
+
+    /// Closes a tab (by session id) and disposes its PTY.
+    pub fn close_session(&self, session_id: &str) {
+        self.manager.dispose(session_id);
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            for (_, meta) in metadata.iter_mut() {
+                meta.sessions.retain(|s| s.id != session_id);
+            }
+        }
+        self.persist();
+        self.emit_change();
     }
 
     pub fn remove_space(&self, name: &str) {
         if !self.has(name) {
             return;
         }
-        self.manager.dispose(name);
+        let ids: Vec<String> = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, meta)| meta.sessions.iter().map(|s| s.id.clone()).collect())
+                .unwrap_or_default()
+        };
+        for id in ids {
+            self.manager.dispose(&id);
+        }
         self.metadata.lock().unwrap().retain(|(n, _)| n != name);
         self.persist();
         self.emit_change();
     }
 
-    pub fn get(&self, name: &str) -> Option<Arc<Session>> {
-        self.manager.get(name)
+    /// Returns a live session by its id.
+    pub fn get(&self, id: &str) -> Option<Arc<Session>> {
+        self.manager.get(id)
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -149,16 +280,29 @@ impl WorkspaceService {
         let metadata = self.metadata.lock().unwrap();
         metadata
             .iter()
-            .map(|(name, meta)| WorkspaceSummary {
-                name: name.clone(),
-                status: self
-                    .manager
-                    .get(name)
-                    .map(|s| s.status())
-                    .unwrap_or(Status::Idle),
-                agent: meta.agent.clone(),
-                account: meta.account.clone(),
-                folders: meta.folders.clone(),
+            .map(|(name, meta)| {
+                let sessions: Vec<SessionSummary> = meta
+                    .sessions
+                    .iter()
+                    .map(|session| SessionSummary {
+                        id: session.id.clone(),
+                        agent: session.agent.clone(),
+                        account: account_for(&meta.accounts, &session.agent),
+                        status: self
+                            .manager
+                            .get(&session.id)
+                            .map(|s| s.status())
+                            .unwrap_or(Status::Idle),
+                        title: session.title.clone(),
+                    })
+                    .collect();
+                WorkspaceSummary {
+                    name: name.clone(),
+                    status: aggregate_status(&sessions),
+                    folders: meta.folders.clone(),
+                    accounts: meta.accounts.clone(),
+                    sessions,
+                }
             })
             .collect()
     }
@@ -193,9 +337,7 @@ impl WorkspaceService {
         let config = Workspace {
             name: workspace.to_string(),
             folders: meta.folders.clone(),
-            agent: meta.agent.clone(),
-            account: meta.account.clone(),
-            defaults: meta.defaults.clone(),
+            accounts: meta.accounts.clone(),
         };
         let path = Path::new(&meta.root).join("soromi.space.json");
         let json = serde_json::to_string_pretty(&config)?;
@@ -229,32 +371,25 @@ impl WorkspaceService {
         self.metadata.lock().unwrap().iter().any(|(n, _)| n == name)
     }
 
-    /// Restarts a workspace with a new agent and/or account, keeping its folders and root.
+    /// Replaces a workspace's account bindings, restarting only the sessions whose resolved
+    /// account changed (so a rebind to the same account leaves running tabs untouched).
     pub fn update_space(
         &self,
         name: &str,
-        agent: String,
-        account: String,
+        accounts: Vec<AgentAccount>,
     ) -> anyhow::Result<OpenResult> {
-        let space = {
+        let (root, sessions, old_accounts) = {
             let metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter()
                 .find(|(n, _)| n == name)
                 .ok_or_else(|| anyhow::anyhow!("workspace not found: {name}"))?;
-            PersistedSpace {
-                name: name.to_string(),
-                folders: meta.folders.clone(),
-                agent: agent.clone(),
-                account: account.clone(),
-                defaults: meta.defaults.clone(),
-                root: meta.root.clone(),
-            }
+            (
+                meta.root.clone(),
+                meta.sessions.clone(),
+                meta.accounts.clone(),
+            )
         };
-
-        self.manager.dispose(name);
-        let warning = self.start_session(&space);
-        // Update the metadata entry in place so the rail order is preserved.
         if let Some((_, meta)) = self
             .metadata
             .lock()
@@ -262,8 +397,15 @@ impl WorkspaceService {
             .iter_mut()
             .find(|(n, _)| n == name)
         {
-            meta.agent = agent;
-            meta.account = account;
+            meta.accounts = accounts.clone();
+        }
+        let mut warning = None;
+        for session in &sessions {
+            if account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent)
+            {
+                self.manager.dispose(&session.id);
+                warning = warning.or(self.start_session(name, &root, &accounts, session));
+            }
         }
         self.persist();
         self.emit_change();
@@ -273,34 +415,44 @@ impl WorkspaceService {
         })
     }
 
-    /// Spawns a session for a space, wires its status watcher, and records its metadata.
+    /// Spawns each of a space's sessions, wires their status watchers, and records its metadata.
     fn spawn_space(&self, space: PersistedSpace) -> Option<String> {
-        let warning = self.start_session(&space);
+        let mut warning = None;
+        for session in &space.sessions {
+            warning =
+                warning.or(self.start_session(&space.name, &space.root, &space.accounts, session));
+        }
         self.metadata.lock().unwrap().push((
             space.name,
             WorkspaceMeta {
-                agent: space.agent,
-                account: space.account,
                 folders: space.folders,
                 root: space.root,
-                defaults: space.defaults,
+                accounts: space.accounts,
+                sessions: space.sessions,
             },
         ));
         warning
     }
 
-    /// Starts (or restarts) a space's PTY session and wires its status watcher. Returns an
-    /// account warning if the profile could not be applied.
-    fn start_session(&self, space: &PersistedSpace) -> Option<String> {
-        let parsed = match parse_agent_command(&space.agent) {
+    /// Starts (or restarts) one session's PTY, keyed by its id, and wires its status watcher.
+    /// Returns an account warning if the profile could not be applied.
+    fn start_session(
+        &self,
+        workspace: &str,
+        root: &str,
+        accounts: &[AgentAccount],
+        session: &SessionSpec,
+    ) -> Option<String> {
+        let parsed = match parse_agent_command(&session.agent) {
             Ok(parsed) => parsed,
-            Err(_) => return Some(format!("agent command for \"{}\" is empty", space.name)),
+            Err(_) => return Some(format!("agent command for \"{workspace}\" is empty")),
         };
 
+        let account = account_for(accounts, &session.agent);
         let base_env: Vec<(String, String)> = std::env::vars().collect();
         let mut env = base_env.clone();
         let mut warning = None;
-        match load_account_profile(&space.account, &accounts_dir()) {
+        match load_account_profile(&account, &accounts_dir()) {
             Ok(profile) => {
                 let resolved = resolve_launch_env(&profile, basename(&parsed.command), &base_env);
                 for dir in &resolved.ensure_dirs {
@@ -310,8 +462,7 @@ impl WorkspaceService {
             }
             Err(_) => {
                 warning = Some(format!(
-                    "account \"{}\" is not configured; running under the default environment",
-                    space.account
+                    "account \"{account}\" is not configured; running under the default environment"
                 ));
             }
         }
@@ -319,29 +470,30 @@ impl WorkspaceService {
         let options = SessionOptions {
             command: parsed.command,
             args: parsed.args,
-            cwd: space.root.clone(),
+            cwd: root.to_string(),
             env: Some(env),
             cols: 80,
             rows: 24,
         };
-        if let Ok(session) = self.manager.ensure(&space.name, options) {
-            self.watch_status(&space.name, &session);
+        if let Ok(sess) = self.manager.ensure(&session.id, options) {
+            self.watch_status(&session.id, workspace, &sess);
         }
         warning
     }
 
     /// Forwards a session's status changes to notifications, keep-awake, and change events.
-    fn watch_status(&self, name: &str, session: &Session) {
+    fn watch_status(&self, session_id: &str, workspace: &str, session: &Session) {
         let mut status_rx = session.subscribe_status();
         let notifications = self.notifications.clone();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
-        let name = name.to_string();
+        let session_id = session_id.to_string();
+        let workspace = workspace.to_string();
         tokio::spawn(async move {
             while status_rx.changed().await.is_ok() {
                 let status = *status_rx.borrow_and_update();
-                notifications.handle(&name, status);
-                keep_awake.handle(&name, status);
+                notifications.handle(&workspace, &session_id, status);
+                keep_awake.handle(&session_id, status);
                 let _ = change_tx.send(());
             }
         });
@@ -356,10 +508,11 @@ impl WorkspaceService {
             .map(|(name, meta)| PersistedSpace {
                 name: name.clone(),
                 folders: meta.folders.clone(),
-                agent: meta.agent.clone(),
-                account: meta.account.clone(),
-                defaults: meta.defaults.clone(),
                 root: meta.root.clone(),
+                accounts: meta.accounts.clone(),
+                sessions: meta.sessions.clone(),
+                agent: None,
+                account: None,
             })
             .collect();
         save_spaces(&spaces);
@@ -370,8 +523,67 @@ impl WorkspaceService {
     }
 }
 
+fn new_session_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 fn basename(command: &str) -> &str {
     command.rsplit(['/', '\\']).next().unwrap_or(command)
+}
+
+/// The account bound to an agent, or the built-in `personal` default when unbound.
+fn account_for(accounts: &[AgentAccount], agent: &str) -> String {
+    accounts
+        .iter()
+        .find(|a| a.agent == agent)
+        .map(|a| a.id.clone())
+        .unwrap_or_else(|| "personal".to_string())
+}
+
+/// The workspace's rail status: the most attention-worthy of its sessions.
+fn aggregate_status(sessions: &[SessionSummary]) -> Status {
+    let any = |status: Status| sessions.iter().any(|s| s.status == status);
+    if any(Status::Thinking) {
+        Status::Thinking
+    } else if any(Status::WaitingInput) {
+        Status::WaitingInput
+    } else if any(Status::Blocked) {
+        Status::Blocked
+    } else if any(Status::Done) {
+        Status::Done
+    } else {
+        Status::Idle
+    }
+}
+
+/// Migrates a pre-tabs space (top-level `agent`/`account`, no `accounts`/`sessions`) into the
+/// bindings-and-sessions shape. Returns true if anything was synthesized (so it is re-persisted).
+fn migrate(space: &mut PersistedSpace) -> bool {
+    let mut changed = false;
+    if space.accounts.is_empty() {
+        if let Some(account) = space.account.take() {
+            let agent = space.agent.clone().unwrap_or_else(|| "claude".to_string());
+            space.accounts.push(AgentAccount { id: account, agent });
+            changed = true;
+        }
+    }
+    if space.sessions.is_empty() {
+        let agent = space
+            .agent
+            .clone()
+            .or_else(|| space.accounts.first().map(|a| a.agent.clone()))
+            .unwrap_or_else(|| "claude".to_string());
+        space.sessions.push(SessionSpec {
+            id: new_session_id(),
+            agent,
+            title: None,
+        });
+        changed = true;
+    }
+    if space.agent.take().is_some() {
+        changed = true;
+    }
+    changed
 }
 
 /// Keeps only folders that still exist on disk. `.` (the whole work folder) is always kept;
@@ -429,6 +641,9 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].name, "kazomi");
         assert_eq!(summaries[0].folders, vec![".".to_string()]);
+        assert_eq!(summaries[0].sessions.len(), 1);
+        assert_eq!(summaries[0].accounts.len(), 1);
+        assert_eq!(summaries[0].accounts[0].id, "personal");
 
         let listing = service.list_dir("kazomi", "");
         assert!(listing.iter().any(|entry| entry.name == "readme.md"));
@@ -436,6 +651,64 @@ mod tests {
 
         service.remove_space("kazomi");
         assert!(service.summaries().is_empty());
+
+        service.dispose();
+        std::env::remove_var("SOROMI_HOME");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn opens_closes_and_restores_sessions() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("SOROMI_HOME", home.path());
+        let root = tempfile::tempdir().unwrap();
+
+        let hub = service();
+        hub.create_space(CreateSpaceInput {
+            name: "kazomi".into(),
+            root: root.path().to_string_lossy().into_owned(),
+            agent: "/bin/cat".into(),
+            account: "personal".into(),
+            folders: None,
+        })
+        .unwrap();
+
+        // A second tab, same agent, no explicit account (resolves the existing binding).
+        hub.open_session("kazomi", "/bin/cat".into(), None).unwrap();
+        assert_eq!(hub.summaries()[0].sessions.len(), 2);
+        hub.dispose();
+
+        // Persisted, so a fresh service restores both tabs.
+        let restored = service();
+        assert_eq!(restored.summaries()[0].sessions.len(), 2);
+
+        let first = restored.summaries()[0].sessions[0].id.clone();
+        restored.close_session(&first);
+        assert_eq!(restored.summaries()[0].sessions.len(), 1);
+
+        restored.dispose();
+        std::env::remove_var("SOROMI_HOME");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn migrates_legacy_single_agent_space() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("SOROMI_HOME", home.path());
+        let root = tempfile::tempdir().unwrap();
+        let legacy = format!(
+            r#"[{{"name":"kazomi","folders":["."],"agent":"/bin/cat","account":"personal","root":"{}"}}]"#,
+            root.path().to_string_lossy()
+        );
+        std::fs::write(home.path().join("spaces.json"), legacy).unwrap();
+
+        let service = service();
+        let summaries = service.summaries();
+        assert_eq!(summaries[0].accounts.len(), 1);
+        assert_eq!(summaries[0].accounts[0].id, "personal");
+        assert_eq!(summaries[0].accounts[0].agent, "/bin/cat");
+        assert_eq!(summaries[0].sessions.len(), 1);
+        assert_eq!(summaries[0].sessions[0].agent, "/bin/cat");
 
         service.dispose();
         std::env::remove_var("SOROMI_HOME");

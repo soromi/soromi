@@ -9,5 +9,8 @@ pub mod messages;
 pub mod status;
 
 pub use account::{AccountProfile, ProviderConfig};
-pub use messages::{ClientMessage, DirEntry, EntryKind, ServerMessage, WorkspaceSummary};
+pub use messages::{
+    AgentAccount, ClientMessage, DirEntry, EntryKind, ServerMessage, SessionSummary,
+    WorkspaceSummary,
+};
 pub use status::{KeepAwakeMode, Status};

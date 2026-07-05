@@ -5,11 +5,36 @@ import type {
   AccountProfile,
   DirEntry,
   KeepAwakeMode,
+  SessionSummary,
   Status,
   WorkspaceSummary,
 } from '@soromi/protocol'
 
 export type WorkspaceInfo = WorkspaceSummary
+
+/** The workspace's rail status: the most attention-worthy of its sessions. */
+function aggregateStatus(sessions: SessionSummary[]): Status {
+  const has = (status: Status) => sessions.some((s) => s.status === status)
+  if (has('thinking')) return 'thinking'
+  if (has('waiting-input')) return 'waiting-input'
+  if (has('blocked')) return 'blocked'
+  if (has('done')) return 'done'
+  return 'idle'
+}
+
+/** Ensures each workspace keeps a valid active session, defaulting to its first tab. */
+function reconcileActiveSession(
+  workspaces: WorkspaceInfo[],
+  current: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const w of workspaces) {
+    const ids = w.sessions.map((s) => s.id)
+    const chosen = current[w.name]
+    next[w.name] = chosen && ids.includes(chosen) ? chosen : (ids[0] ?? '')
+  }
+  return next
+}
 
 export interface FileContent {
   content: string
@@ -42,6 +67,8 @@ interface AppState {
   keepAwakeMode: KeepAwakeMode
   workspaces: WorkspaceInfo[]
   active: string | null
+  /** The active tab (session id) per workspace. */
+  activeSession: Record<string, string>
   overlays: Overlay[]
   muted: Record<string, boolean>
   accounts: AccountProfile[]
@@ -56,8 +83,10 @@ interface AppState {
   setKeepAwake: (keepAwake: boolean) => void
   setKeepAwakeMode: (mode: KeepAwakeMode) => void
   setWorkspaces: (workspaces: WorkspaceInfo[]) => void
-  setStatus: (name: string, status: Status) => void
+  setSessionStatus: (session: string, status: Status) => void
   select: (name: string) => void
+  selectSession: (workspace: string, session: string) => void
+  addSession: (workspace: string, session: SessionSummary) => void
   openFile: (workspace: string, path: string) => void
   openCreateSpace: () => void
   openSettings: () => void
@@ -80,6 +109,7 @@ export const useAppStore = create<AppState>()((set) => ({
   keepAwakeMode: 'off',
   workspaces: [],
   active: null,
+  activeSession: {},
   overlays: [],
   muted: {},
   accounts: [],
@@ -93,16 +123,32 @@ export const useAppStore = create<AppState>()((set) => ({
   setKeepAwakeMode: (keepAwakeMode) => set({ keepAwakeMode }),
   setWorkspaces: (workspaces) =>
     set((state) => {
+      const activeSession = reconcileActiveSession(workspaces, state.activeSession)
       const stillActive = state.active !== null && workspaces.some((w) => w.name === state.active)
-      if (stillActive) return { workspaces }
-      if (workspaces.length === 0) return { workspaces, active: null, overlays: [] }
-      return { workspaces, active: workspaces[0].name, overlays: [] }
+      if (stillActive) return { workspaces, activeSession }
+      if (workspaces.length === 0) return { workspaces, activeSession, active: null, overlays: [] }
+      return { workspaces, activeSession, active: workspaces[0].name, overlays: [] }
     }),
-  setStatus: (name, status) =>
+  setSessionStatus: (session, status) =>
     set((state) => ({
-      workspaces: state.workspaces.map((w) => (w.name === name ? { ...w, status } : w)),
+      workspaces: state.workspaces.map((w) => {
+        if (!w.sessions.some((s) => s.id === session)) return w
+        const sessions = w.sessions.map((s) => (s.id === session ? { ...s, status } : s))
+        return { ...w, sessions, status: aggregateStatus(sessions) }
+      }),
     })),
   select: (name) => set({ active: name, error: null, overlays: [] }),
+  selectSession: (workspace, session) =>
+    set((state) => ({ activeSession: { ...state.activeSession, [workspace]: session } })),
+  addSession: (workspace, session) =>
+    set((state) => ({
+      workspaces: state.workspaces.map((w) =>
+        w.name === workspace && !w.sessions.some((s) => s.id === session.id)
+          ? { ...w, sessions: [...w.sessions, session] }
+          : w,
+      ),
+      activeSession: { ...state.activeSession, [workspace]: session.id },
+    })),
   openFile: (workspace, path) =>
     set((state) => {
       const entry: Overlay = {

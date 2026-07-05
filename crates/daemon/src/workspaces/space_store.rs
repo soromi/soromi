@@ -41,10 +41,18 @@ mod tests {
         let spaces = vec![PersistedSpace {
             name: "kazomi".into(),
             folders: vec![".".into()],
-            agent: "claude".into(),
-            account: "personal".into(),
-            defaults: None,
             root: "/w/kazomi".into(),
+            accounts: vec![soromi_protocol::AgentAccount {
+                id: "personal".into(),
+                agent: "claude".into(),
+            }],
+            sessions: vec![crate::workspaces::config::SessionSpec {
+                id: "s1".into(),
+                agent: "claude".into(),
+                title: None,
+            }],
+            agent: None,
+            account: None,
         }];
         save_spaces(&spaces);
         assert_eq!(load_spaces(), spaces);

@@ -9,3 +9,9 @@
   overflow: auto;
   padding: 24px;
 }
+
+.agentLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
