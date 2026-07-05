@@ -12,3 +12,6 @@ declare global {
  */
 export const DAEMON_URL =
   (typeof window !== 'undefined' && window.__SOROMI_DAEMON_URL__) || 'ws://localhost:8317'
+
+/** True when running inside the Tauri desktop shell (native dialogs, tray, etc. available). */
+export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

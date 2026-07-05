@@ -7,6 +7,9 @@ import { useAppStore } from '@/stores/app-store'
 //Constants
 import { statusVariant } from '@/config/theme'
 
+//Icons
+import SettingsSvg from '@/assets/icons/settings.svg?react'
+
 //Styles
 import styles from './rail.module.css'
 
@@ -43,7 +46,7 @@ export function Rail() {
       </button>
       <span className={styles.spacer} />
       <button type="button" className={styles.gear} title="Settings" onClick={openSettings}>
-        <GearIcon />
+        <SettingsSvg width={19} height={19} />
       </button>
     </nav>
   )
@@ -51,23 +54,4 @@ export function Rail() {
 
 function abbreviate(name: string): string {
   return name.slice(0, 2).replace(/^./, (c) => c.toUpperCase())
-}
-
-function GearIcon() {
-  return (
-    <svg
-      width={19}
-      height={19}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.7}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.5-2-1.5c.07-.4.1-.8.1-1.2Z" />
-    </svg>
-  )
 }

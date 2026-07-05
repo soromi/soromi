@@ -33,6 +33,7 @@ impl DaemonState {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Start the in-process daemon on an ephemeral local port, then hand its URL to the
             // webview. Binding + hub creation run on Tauri's tokio runtime (the hub spawns

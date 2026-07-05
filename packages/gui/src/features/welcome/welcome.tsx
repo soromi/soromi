@@ -1,5 +1,17 @@
-import { Alert, Button, Group, Stack, Text, TextInput, Title } from '@mantine/core'
-import { useState } from 'react'
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Button,
+  Group,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
+import { open } from '@tauri-apps/plugin-dialog'
+import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Services
@@ -8,34 +20,73 @@ import { useTransport } from '@/services/transport/transport-context'
 //Store
 import { useAppStore } from '@/stores/app-store'
 
+//Utils
+import { basename, deriveRootAndFolders } from './folders'
+
+//Constants
+import { isTauri } from '@/config'
+import { PROVIDERS } from '@/config/providers'
+
 //Components
 import { OverlayShell } from '@/shared/overlay-shell'
+import { ProviderIcon } from '@/shared/provider-icon'
 
 //Styles
 import styles from './welcome.module.css'
 
-/** The create-space form: pick a work folder, choose its agent and account. */
+/** The create-space form: pick work folders, choose an agent and account. */
 function CreateSpaceForm() {
   const transport = useTransport()
-  const { error, setError } = useAppStore(
-    useShallow((s) => ({ error: s.error, setError: s.setError })),
+  const { error, setError, accounts, openSettings } = useAppStore(
+    useShallow((s) => ({
+      error: s.error,
+      setError: s.setError,
+      accounts: s.accounts,
+      openSettings: s.openSettings,
+    })),
   )
-  const [folder, setFolder] = useState('')
+  const [folderInputs, setFolderInputs] = useState<string[]>([''])
   const [name, setName] = useState('')
   const [agent, setAgent] = useState('claude')
   const [account, setAccount] = useState('personal')
 
-  const root = folder.trim()
+  useEffect(() => {
+    transport.send({ type: 'list-accounts' })
+  }, [transport])
+
+  const { root, folders } = useMemo(() => deriveRootAndFolders(folderInputs), [folderInputs])
+
+  const accountOptions = useMemo(
+    () =>
+      [...new Set(['personal', ...accounts.map((a) => a.name)])].map((n) => ({
+        value: n,
+        label: n,
+      })),
+    [accounts],
+  )
+
+  const updateFolder = (index: number, value: string) =>
+    setFolderInputs((rows) => rows.map((row, i) => (i === index ? value : row)))
+  const addFolder = () => setFolderInputs((rows) => [...rows, ''])
+  const removeFolder = (index: number) =>
+    setFolderInputs((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== index) : ['']))
+
+  const pickFolder = async (index: number) => {
+    const selected = await open({ directory: true, multiple: false, title: 'Pick a work folder' })
+    if (typeof selected === 'string') updateFolder(index, selected)
+  }
 
   const create = () => {
     if (!root) return
     setError(null)
+    const isWhole = folders.length === 1 && folders[0] === '.'
     transport.send({
       type: 'create-space',
       name: name.trim() || basename(root),
       root,
       agent: agent.trim() || 'claude',
       account: account.trim() || 'personal',
+      folders: isWhole ? undefined : folders,
     })
   }
 
@@ -49,33 +100,88 @@ function CreateSpaceForm() {
     <Stack gap="md" className={styles.form}>
       <Title order={2}>New workspace</Title>
       <Text c="dimmed">
-        Pick a work folder and choose its agent and account. Nothing is written to the folder.
+        Pick one or more work folders and choose an agent and account. Nothing is written to the
+        folder.
       </Text>
-      <TextInput
-        label="Folder"
-        placeholder="/path/to/folder"
-        value={folder}
-        onChange={(event) => setFolder(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') create()
-        }}
-      />
+
       <TextInput
         label="Name"
         placeholder={root ? basename(root) : 'workspace name'}
         value={name}
         onChange={(event) => setName(event.currentTarget.value)}
       />
-      <Group grow>
-        <TextInput
+
+      <div>
+        <Text component="label" size="sm" fw={500} mb={4} display="block">
+          Folders
+        </Text>
+        <Stack gap="xs">
+          {folderInputs.map((folder, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
+            <Group key={index} gap="xs" wrap="nowrap">
+              <TextInput
+                flex={1}
+                placeholder="/path/to/folder"
+                value={folder}
+                onChange={(event) => updateFolder(index, event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') create()
+                }}
+              />
+              {isTauri && (
+                <Button variant="default" size="sm" onClick={() => pickFolder(index)}>
+                  Pick
+                </Button>
+              )}
+              {folderInputs.length > 1 && (
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Remove folder"
+                  onClick={() => removeFolder(index)}
+                >
+                  ✕
+                </ActionIcon>
+              )}
+            </Group>
+          ))}
+          <Group>
+            <Button variant="subtle" size="compact-sm" onClick={addFolder}>
+              Add folder
+            </Button>
+          </Group>
+        </Stack>
+      </div>
+
+      <Group grow align="flex-start">
+        <Select
           label="Agent"
+          data={PROVIDERS}
           value={agent}
-          onChange={(event) => setAgent(event.currentTarget.value)}
+          onChange={(value) => value && setAgent(value)}
+          allowDeselect={false}
+          leftSection={<ProviderIcon provider={agent} />}
+          renderOption={({ option }) => (
+            <Group gap="xs" wrap="nowrap">
+              <ProviderIcon provider={option.value} />
+              <span>{option.label}</span>
+            </Group>
+          )}
         />
-        <TextInput
-          label="Account"
+        <Select
+          label={
+            <span className={styles.accountLabel}>
+              Account
+              <Anchor component="button" type="button" size="sm" onClick={openSettings}>
+                New account
+              </Anchor>
+            </span>
+          }
+          labelProps={{ style: { display: 'block' } }}
+          data={accountOptions}
           value={account}
-          onChange={(event) => setAccount(event.currentTarget.value)}
+          onChange={(value) => value && setAccount(value)}
+          allowDeselect={false}
         />
       </Group>
       {error && (
@@ -111,8 +217,4 @@ export function CreateSpaceOverlay() {
       </div>
     </OverlayShell>
   )
-}
-
-function basename(path: string): string {
-  return path.replace(/\/+$/, '').split('/').pop() ?? path
 }

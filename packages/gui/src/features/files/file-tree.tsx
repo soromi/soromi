@@ -8,6 +8,9 @@ import { useTransport } from '@/services/transport/transport-context'
 //Store
 import { useAppStore } from '@/stores/app-store'
 
+//Icons
+import ChevronSvg from '@/assets/icons/chevron.svg?react'
+
 //Styles
 import styles from './file-tree.module.css'
 
@@ -116,7 +119,11 @@ function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps
         onClick={onToggle}
         title={name}
       >
-        <Chevron open={expanded} />
+        <ChevronSvg
+          width={12}
+          height={12}
+          className={clsx(styles.chevron, expanded && styles.chevronOpen)}
+        />
         <span className={styles.label}>{name}</span>
       </button>
       {expanded &&
@@ -136,21 +143,3 @@ function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps
 }
 
 /** Disclosure chevron: points right when collapsed, rotates down when open. */
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      className={clsx(styles.chevron, open && styles.chevronOpen)}
-      width={12}
-      height={12}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  )
-}

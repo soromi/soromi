@@ -9,3 +9,11 @@
   width: 460px;
   padding: 24px;
 }
+
+.accountLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--mantine-spacing-sm);
+}
