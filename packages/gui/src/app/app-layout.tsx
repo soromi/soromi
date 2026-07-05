@@ -40,8 +40,9 @@ export function AppLayout() {
         ) : (
           <Welcome />
         )}
-        <OverlayHost />
+        <OverlayHost scope="content" />
       </main>
+      <OverlayHost scope="full" handleEsc />
     </div>
   )
 }

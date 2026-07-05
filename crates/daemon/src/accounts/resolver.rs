@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use soromi_protocol::AccountProfile;
 
+use super::provider::config_env_var;
+
 /// Expands a leading `~` to the home directory; leaves other values untouched.
 pub fn expand_home(value: &str, home: &str) -> String {
     if value == "~" {
@@ -24,9 +26,9 @@ pub struct ResolvedLaunch {
 }
 
 /// Produces the environment to launch a provider's agent under, isolated by the account
-/// profile. The provider's env is layered over the base env (values `~`-expanded), so the
-/// daemon needs no per-provider knowledge. A provider absent from the profile launches under
-/// the base env unchanged.
+/// profile. The provider's `configDir` is bound to its config env var (from the registry, e.g.
+/// `CLAUDE_CONFIG_DIR`), then any explicit `env` overrides are layered on. A provider absent
+/// from the profile launches under the base env unchanged.
 pub fn resolve_launch_env(
     profile: &AccountProfile,
     provider_key: &str,
@@ -45,17 +47,22 @@ pub fn resolve_launch_env(
     };
 
     let mut env = base_env.to_vec();
+    let mut ensure_dirs = Vec::new();
+
+    if let Some(config_dir) = &provider.config_dir {
+        let expanded = expand_home(config_dir, &home);
+        if let Some(var) = config_env_var(provider_key) {
+            upsert(&mut env, var, expanded.clone());
+        }
+        ensure_dirs.push(expanded);
+    }
+
+    // Explicit env overrides win over the derived config-dir var.
     if let Some(provider_env) = &provider.env {
         for (key, value) in provider_env {
             upsert(&mut env, key, expand_home(value, &home));
         }
     }
-
-    let ensure_dirs = provider
-        .config_dir
-        .as_ref()
-        .map(|dir| vec![expand_home(dir, &home)])
-        .unwrap_or_default();
 
     ResolvedLaunch { env, ensure_dirs }
 }

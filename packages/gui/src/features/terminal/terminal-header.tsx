@@ -1,4 +1,5 @@
-import { Menu } from '@mantine/core'
+import { Menu, Text } from '@mantine/core'
+import { modals } from '@mantine/modals'
 import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -26,7 +27,15 @@ const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
 /** Header bar above the terminal: status, workspace, agent, account, and actions. */
 export function TerminalHeader() {
   const transport = useTransport()
-  const { workspace, muted, keepAwake, keepAwakeMode, setMuted, setKeepAwakeMode } = useAppStore(
+  const {
+    workspace,
+    muted,
+    keepAwake,
+    keepAwakeMode,
+    setMuted,
+    setKeepAwakeMode,
+    openWorkspaceSettings,
+  } = useAppStore(
     useShallow((s) => ({
       workspace: s.workspaces.find((w) => w.name === s.active),
       muted: s.active ? (s.muted[s.active] ?? false) : false,
@@ -34,6 +43,7 @@ export function TerminalHeader() {
       keepAwakeMode: s.keepAwakeMode,
       setMuted: s.setMuted,
       setKeepAwakeMode: s.setKeepAwakeMode,
+      openWorkspaceSettings: s.openWorkspaceSettings,
     })),
   )
   if (!workspace) return null
@@ -52,9 +62,13 @@ export function TerminalHeader() {
     transport.send({ type: 'export-space', workspace: name })
   }
   const removeSpace = () => {
-    if (window.confirm(`Remove "${name}"? This stops its agent.`)) {
-      transport.send({ type: 'remove-space', workspace: name })
-    }
+    modals.openConfirmModal({
+      title: 'Remove workspace',
+      children: <Text size="sm">Remove "{name}"? This stops its agent.</Text>,
+      labels: { confirm: 'Remove', cancel: 'Cancel' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => transport.send({ type: 'remove-space', workspace: name }),
+    })
   }
 
   return (
@@ -100,6 +114,14 @@ export function TerminalHeader() {
           ))}
         </Menu.Dropdown>
       </Menu>
+      <button
+        type="button"
+        className={styles.action}
+        onClick={() => openWorkspaceSettings(name)}
+        title="Workspace settings"
+      >
+        <GearIcon />
+      </button>
       <Menu position="bottom-end" width={180}>
         <Menu.Target>
           <button type="button" className={styles.action} title="Workspace actions">
@@ -172,6 +194,25 @@ function CheckIcon({ active }: { active: boolean }) {
       aria-hidden="true"
     >
       <path d="M5 12l5 5L20 6" />
+    </svg>
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
     </svg>
   )
 }

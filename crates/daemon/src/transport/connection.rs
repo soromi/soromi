@@ -68,12 +68,36 @@ impl Connection {
                 }),
             },
             ClientMessage::RemoveSpace { workspace } => self.hub.remove_space(&workspace),
+            ClientMessage::UpdateSpace {
+                workspace,
+                agent,
+                account,
+            } => match self.hub.update_space(&workspace, agent, account) {
+                Ok(result) => self.send(ServerMessage::WorkspaceOpened {
+                    workspace: result.workspace,
+                    warning: result.warning,
+                }),
+                Err(error) => self.send(ServerMessage::Error {
+                    message: error.to_string(),
+                }),
+            },
             ClientMessage::ExportSpace { workspace } => match self.hub.export_space(&workspace) {
                 Ok(path) => self.send(ServerMessage::SpaceExported { workspace, path }),
                 Err(error) => self.send(ServerMessage::Error {
                     message: error.to_string(),
                 }),
             },
+            ClientMessage::CheckProvider {
+                provider,
+                config_dir,
+            } => {
+                let logged_in = crate::accounts::provider::is_logged_in(&provider, &config_dir);
+                self.send(ServerMessage::ProviderStatus {
+                    provider,
+                    config_dir,
+                    logged_in,
+                });
+            }
             ClientMessage::MuteWorkspace { workspace, muted } => {
                 self.hub.set_muted(&workspace, muted)
             }

@@ -229,8 +229,69 @@ impl WorkspaceService {
         self.metadata.lock().unwrap().iter().any(|(n, _)| n == name)
     }
 
+    /// Restarts a workspace with a new agent and/or account, keeping its folders and root.
+    pub fn update_space(
+        &self,
+        name: &str,
+        agent: String,
+        account: String,
+    ) -> anyhow::Result<OpenResult> {
+        let space = {
+            let metadata = self.metadata.lock().unwrap();
+            let (_, meta) = metadata
+                .iter()
+                .find(|(n, _)| n == name)
+                .ok_or_else(|| anyhow::anyhow!("workspace not found: {name}"))?;
+            PersistedSpace {
+                name: name.to_string(),
+                folders: meta.folders.clone(),
+                agent: agent.clone(),
+                account: account.clone(),
+                defaults: meta.defaults.clone(),
+                root: meta.root.clone(),
+            }
+        };
+
+        self.manager.dispose(name);
+        let warning = self.start_session(&space);
+        // Update the metadata entry in place so the rail order is preserved.
+        if let Some((_, meta)) = self
+            .metadata
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(n, _)| n == name)
+        {
+            meta.agent = agent;
+            meta.account = account;
+        }
+        self.persist();
+        self.emit_change();
+        Ok(OpenResult {
+            workspace: name.to_string(),
+            warning,
+        })
+    }
+
     /// Spawns a session for a space, wires its status watcher, and records its metadata.
     fn spawn_space(&self, space: PersistedSpace) -> Option<String> {
+        let warning = self.start_session(&space);
+        self.metadata.lock().unwrap().push((
+            space.name,
+            WorkspaceMeta {
+                agent: space.agent,
+                account: space.account,
+                folders: space.folders,
+                root: space.root,
+                defaults: space.defaults,
+            },
+        ));
+        warning
+    }
+
+    /// Starts (or restarts) a space's PTY session and wires its status watcher. Returns an
+    /// account warning if the profile could not be applied.
+    fn start_session(&self, space: &PersistedSpace) -> Option<String> {
         let parsed = match parse_agent_command(&space.agent) {
             Ok(parsed) => parsed,
             Err(_) => return Some(format!("agent command for \"{}\" is empty", space.name)),
@@ -266,17 +327,6 @@ impl WorkspaceService {
         if let Ok(session) = self.manager.ensure(&space.name, options) {
             self.watch_status(&space.name, &session);
         }
-
-        self.metadata.lock().unwrap().push((
-            space.name,
-            WorkspaceMeta {
-                agent: space.agent,
-                account: space.account,
-                folders: space.folders,
-                root: space.root,
-                defaults: space.defaults,
-            },
-        ));
         warning
     }
 

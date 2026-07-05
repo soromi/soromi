@@ -15,3 +15,29 @@
   border: 1px solid var(--soromi-border);
   border-radius: 8px;
 }
+
+.path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotOk {
+  background: var(--soromi-ok);
+}
+
+.dotWarn {
+  background: var(--soromi-warn);
+}
+
+.dotUnknown {
+  background: var(--soromi-text-faint);
+}

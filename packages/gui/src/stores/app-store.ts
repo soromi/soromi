@@ -25,6 +25,16 @@ export type Overlay =
   | { id: string; type: 'file'; workspace: string; path: string; content: FileContent | null }
   | { id: string; type: 'create-space' }
   | { id: string; type: 'settings' }
+  | { id: string; type: 'workspace-settings'; workspace: string }
+
+/**
+ * How much an overlay covers. `full` covers the whole shell (rail + sidebar + content) for
+ * app-wide screens; `content` covers only the workspace content, keeping the rail/sidebar
+ * visible so it reads as workspace-scoped.
+ */
+export function overlayScope(overlay: Overlay): 'full' | 'content' {
+  return overlay.type === 'settings' || overlay.type === 'create-space' ? 'full' : 'content'
+}
 
 interface AppState {
   connected: boolean
@@ -35,6 +45,8 @@ interface AppState {
   overlays: Overlay[]
   muted: Record<string, boolean>
   accounts: AccountProfile[]
+  /** Whether a provider's config dir looks logged in, keyed by `provider::configDir`. */
+  providerStatus: Record<string, boolean>
   notice: string | null
   error: string | null
   /** Directory listings kept per workspace, then keyed by relative path. */
@@ -49,9 +61,11 @@ interface AppState {
   openFile: (workspace: string, path: string) => void
   openCreateSpace: () => void
   openSettings: () => void
+  openWorkspaceSettings: (workspace: string) => void
   popOverlay: () => void
   closeOverlays: () => void
   setAccounts: (accounts: AccountProfile[]) => void
+  setProviderStatus: (provider: string, configDir: string, loggedIn: boolean) => void
   setFileContent: (workspace: string, path: string, content: FileContent) => void
   setMuted: (name: string, muted: boolean) => void
   setNotice: (notice: string | null) => void
@@ -69,6 +83,7 @@ export const useAppStore = create<AppState>()((set) => ({
   overlays: [],
   muted: {},
   accounts: [],
+  providerStatus: {},
   notice: null,
   error: null,
   treeListings: {},
@@ -114,9 +129,24 @@ export const useAppStore = create<AppState>()((set) => ({
       if (state.overlays.at(-1)?.type === 'settings') return {}
       return { overlays: [...state.overlays, { id: crypto.randomUUID(), type: 'settings' }] }
     }),
+  openWorkspaceSettings: (workspace) =>
+    set((state) => {
+      const top = state.overlays.at(-1)
+      if (top?.type === 'workspace-settings' && top.workspace === workspace) return {}
+      return {
+        overlays: [
+          ...state.overlays,
+          { id: crypto.randomUUID(), type: 'workspace-settings', workspace },
+        ],
+      }
+    }),
   popOverlay: () => set((state) => ({ overlays: state.overlays.slice(0, -1) })),
   closeOverlays: () => set({ overlays: [] }),
   setAccounts: (accounts) => set({ accounts }),
+  setProviderStatus: (provider, configDir, loggedIn) =>
+    set((state) => ({
+      providerStatus: { ...state.providerStatus, [`${provider}::${configDir}`]: loggedIn },
+    })),
   setFileContent: (workspace, path, content) =>
     set((state) => ({
       overlays: state.overlays.map((o) =>

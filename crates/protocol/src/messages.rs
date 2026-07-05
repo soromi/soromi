@@ -113,6 +113,15 @@ pub enum ClientMessage {
     ExportSpace {
         workspace: String,
     },
+    CheckProvider {
+        provider: String,
+        config_dir: String,
+    },
+    UpdateSpace {
+        workspace: String,
+        agent: String,
+        account: String,
+    },
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -175,5 +184,10 @@ pub enum ServerMessage {
     SpaceExported {
         workspace: String,
         path: String,
+    },
+    ProviderStatus {
+        provider: String,
+        config_dir: String,
+        logged_in: bool,
     },
 }

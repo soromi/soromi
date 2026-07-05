@@ -1,4 +1,5 @@
 import { MantineProvider } from '@mantine/core'
+import { ModalsProvider } from '@mantine/modals'
 import { useEffect, useMemo } from 'react'
 
 //Services
@@ -33,6 +34,9 @@ export function App() {
           break
         case 'account-list':
           store.setAccounts(message.accounts)
+          break
+        case 'provider-status':
+          store.setProviderStatus(message.provider, message.configDir, message.loggedIn)
           break
         case 'status':
           store.setStatus(message.workspace, message.status)
@@ -76,9 +80,11 @@ export function App() {
 
   return (
     <MantineProvider theme={theme} forceColorScheme="dark">
-      <TransportProvider value={transport}>
-        <AppLayout />
-      </TransportProvider>
+      <ModalsProvider>
+        <TransportProvider value={transport}>
+          <AppLayout />
+        </TransportProvider>
+      </ModalsProvider>
     </MantineProvider>
   )
 }

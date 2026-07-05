@@ -1,0 +1,11 @@
+.title {
+  font-size: 12px;
+  color: var(--soromi-text-dim);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}

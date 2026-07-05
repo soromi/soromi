@@ -1,30 +1,42 @@
 import { useEffect } from 'react'
 
 //Store
-import { useAppStore } from '@/stores/app-store'
+import { overlayScope, useAppStore } from '@/stores/app-store'
 
 //Components
 import { OverlayScreen } from './overlay-screens'
 
-/** Hosts the overlay stack over the persistent workspace base; Esc pops the top layer. */
-export function OverlayHost() {
+/**
+ * Hosts overlays of one scope over the persistent workspace base. `full`-scope overlays mount
+ * at the shell (covering rail + sidebar); `content`-scope ones mount inside the content column.
+ * The `full` host owns Esc-to-pop for the whole stack.
+ */
+export function OverlayHost({
+  scope,
+  handleEsc,
+}: {
+  scope: 'full' | 'content'
+  handleEsc?: boolean
+}) {
   const overlays = useAppStore((s) => s.overlays)
   const popOverlay = useAppStore((s) => s.popOverlay)
 
   useEffect(() => {
-    if (overlays.length === 0) return
+    if (!handleEsc || overlays.length === 0) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') popOverlay()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [overlays.length, popOverlay])
+  }, [handleEsc, overlays.length, popOverlay])
 
   return (
     <>
-      {overlays.map((overlay) => (
-        <OverlayScreen key={overlay.id} overlay={overlay} />
-      ))}
+      {overlays
+        .filter((overlay) => overlayScope(overlay) === scope)
+        .map((overlay) => (
+          <OverlayScreen key={overlay.id} overlay={overlay} />
+        ))}
     </>
   )
 }

@@ -30,6 +30,7 @@
     "@lezer/highlight": "^1.2.1",
     "@mantine/core": "^7.15.0",
     "@mantine/hooks": "^7.15.0",
+    "@mantine/modals": "^7.15.0",
     "@soromi/protocol": "workspace:*",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-unicode11": "^0.8.0",
