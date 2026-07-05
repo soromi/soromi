@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }
 soromi-daemon = { path = "../../../crates/daemon" }
 soromi-protocol = { path = "../../../crates/protocol" }

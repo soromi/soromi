@@ -65,6 +65,23 @@ impl NotificationController {
         }
     }
 
+    pub fn is_muted(&self, workspace: &str) -> bool {
+        self.inner.lock().unwrap().muted.contains(workspace)
+    }
+
+    /// Fires a banner immediately for a discrete agent event (silent, since the sound player
+    /// owns the audio), unless the workspace is muted.
+    pub fn fire(&self, workspace: &str, text: &str) {
+        if self.is_muted(workspace) {
+            return;
+        }
+        self.notifier.notify(Notification {
+            title: "Soromi".into(),
+            message: format!("\"{workspace}\" {text}"),
+            sound: false,
+        });
+    }
+
     pub fn handle(&self, workspace: &str, session: &str, status: Status) {
         let mut inner = self.inner.lock().unwrap();
         let state = inner
@@ -138,8 +155,10 @@ fn message_for(workspace: &str, status: Status) -> Notification {
     };
     Notification {
         title: "Soromi".into(),
+        // Silent: the sound player owns the audio cue (immediate, per event), so the banner
+        // does not double it up.
         message: format!("\"{workspace}\" {text}"),
-        sound: true,
+        sound: false,
     }
 }
 

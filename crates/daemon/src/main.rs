@@ -9,6 +9,7 @@ use soromi_daemon::keep_awake::backend::create_keep_awake;
 use soromi_daemon::keep_awake::controller::KeepAwakeController;
 use soromi_daemon::notifications::controller::NotificationController;
 use soromi_daemon::notifications::notifier::create_notifier;
+use soromi_daemon::sound::player::create_sound_player;
 use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 
@@ -18,12 +19,22 @@ use soromi_daemon::workspaces::service::WorkspaceService;
 /// closing.
 #[tokio::main]
 async fn main() {
+    // Invoked as an agent-event bridge (`soromi hook <cue> <agent>`): deliver it and exit.
+    if let Some(invocation) = soromi_daemon::hooks::bridge::invocation() {
+        soromi_daemon::hooks::bridge::deliver(&invocation);
+        return;
+    }
+
     let notifications = Arc::new(NotificationController::new(create_notifier()));
     let keep_awake = Arc::new(KeepAwakeController::new(
         create_keep_awake(),
         KeepAwakeMode::Off,
     ));
-    let hub = WorkspaceService::new(notifications.clone(), keep_awake.clone());
+    let hub = WorkspaceService::new(
+        notifications.clone(),
+        keep_awake.clone(),
+        create_sound_player(),
+    );
     let accounts = Arc::new(FileAccountManager);
 
     let restored = hub.names().len();

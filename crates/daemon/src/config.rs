@@ -19,6 +19,9 @@ pub struct Provider {
     /// Optional top-level JSON key in that file that must be present and non-null (an account
     /// object). `None` means the file existing is enough.
     pub credential_key: Option<&'static str>,
+    /// CLI flag that adds an extra working directory, so a session scoped to several picked
+    /// folders can name each one. `None` means the provider only uses its cwd.
+    pub add_dir_flag: Option<&'static str>,
 }
 
 /// The provider registry. Adding a provider is a one-line entry here.
@@ -29,11 +32,21 @@ pub const PROVIDERS: &[Provider] = &[
         config_env_var: "CLAUDE_CONFIG_DIR",
         credential_file: ".claude.json",
         credential_key: Some("oauthAccount"),
+        add_dir_flag: Some("--add-dir"),
     },
     Provider {
         key: "codex",
         config_env_var: "CODEX_HOME",
         credential_file: "auth.json",
         credential_key: None,
+        add_dir_flag: None,
     },
 ];
+
+/// The provider's extra-working-directory flag, matched by the agent command's basename.
+pub fn add_dir_flag(command_basename: &str) -> Option<&'static str> {
+    PROVIDERS
+        .iter()
+        .find(|p| p.key == command_basename)
+        .and_then(|p| p.add_dir_flag)
+}

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use soromi_protocol::{
@@ -11,10 +11,12 @@ use crate::accounts::loader::{accounts_dir, load_account_profile};
 use crate::accounts::resolver::resolve_launch_env;
 use crate::files::directory::list_directory;
 use crate::files::reader::{read_file_within, FileRead};
+use crate::home::soromi_home;
 use crate::keep_awake::controller::KeepAwakeController;
 use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
+use crate::sound::player::{Cue, SoundPlayer};
 use crate::workspaces::agent_command::parse_agent_command;
 use crate::workspaces::config::{PersistedSpace, SessionSpec, Workspace};
 use crate::workspaces::space_store::{load_spaces, save_spaces};
@@ -52,6 +54,7 @@ pub struct WorkspaceService {
     metadata: Mutex<Vec<(String, WorkspaceMeta)>>,
     notifications: Arc<NotificationController>,
     keep_awake: Arc<KeepAwakeController>,
+    sound: Arc<dyn SoundPlayer>,
     change_tx: broadcast::Sender<()>,
 }
 
@@ -60,6 +63,7 @@ impl WorkspaceService {
     pub fn new(
         notifications: Arc<NotificationController>,
         keep_awake: Arc<KeepAwakeController>,
+        sound: Arc<dyn SoundPlayer>,
     ) -> Arc<Self> {
         let (change_tx, _) = broadcast::channel(64);
         let service = Arc::new(Self {
@@ -67,8 +71,11 @@ impl WorkspaceService {
             metadata: Mutex::new(Vec::new()),
             notifications,
             keep_awake,
+            sound,
             change_tx,
         });
+        // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
+        crate::hooks::listen::spawn(service.clone());
         let mut dirty = false;
         for mut space in load_spaces() {
             if migrate(&mut space) {
@@ -181,7 +188,7 @@ impl WorkspaceService {
             agent: agent.clone(),
             title: None,
         };
-        let (root, accounts) = {
+        let (root, folders, accounts) = {
             let mut metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter_mut()
@@ -196,9 +203,13 @@ impl WorkspaceService {
                 }
             }
             meta.sessions.push(session.clone());
-            (meta.root.clone(), meta.accounts.clone())
+            (
+                meta.root.clone(),
+                meta.folders.clone(),
+                meta.accounts.clone(),
+            )
         };
-        self.start_session(workspace, &root, &accounts, &session);
+        self.start_session(workspace, &root, &folders, &accounts, &session);
         self.persist();
         self.emit_change();
         Ok(SessionSummary {
@@ -378,7 +389,7 @@ impl WorkspaceService {
         name: &str,
         accounts: Vec<AgentAccount>,
     ) -> anyhow::Result<OpenResult> {
-        let (root, sessions, old_accounts) = {
+        let (root, folders, sessions, old_accounts) = {
             let metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter()
@@ -386,6 +397,7 @@ impl WorkspaceService {
                 .ok_or_else(|| anyhow::anyhow!("workspace not found: {name}"))?;
             (
                 meta.root.clone(),
+                meta.folders.clone(),
                 meta.sessions.clone(),
                 meta.accounts.clone(),
             )
@@ -404,7 +416,7 @@ impl WorkspaceService {
             if account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent)
             {
                 self.manager.dispose(&session.id);
-                warning = warning.or(self.start_session(name, &root, &accounts, session));
+                warning = warning.or(self.start_session(name, &root, &folders, &accounts, session));
             }
         }
         self.persist();
@@ -419,8 +431,13 @@ impl WorkspaceService {
     fn spawn_space(&self, space: PersistedSpace) -> Option<String> {
         let mut warning = None;
         for session in &space.sessions {
-            warning =
-                warning.or(self.start_session(&space.name, &space.root, &space.accounts, session));
+            warning = warning.or(self.start_session(
+                &space.name,
+                &space.root,
+                &space.folders,
+                &space.accounts,
+                session,
+            ));
         }
         self.metadata.lock().unwrap().push((
             space.name,
@@ -440,6 +457,7 @@ impl WorkspaceService {
         &self,
         workspace: &str,
         root: &str,
+        folders: &[String],
         accounts: &[AgentAccount],
         session: &SessionSpec,
     ) -> Option<String> {
@@ -447,6 +465,17 @@ impl WorkspaceService {
             Ok(parsed) => parsed,
             Err(_) => return Some(format!("agent command for \"{workspace}\" is empty")),
         };
+
+        // Run at the picked folders, not their common parent: cwd is the first folder and the
+        // rest are named via the provider's add-dir flag, so the agent's scope is exactly them.
+        let (cwd, extra_dirs) = session_dirs(root, folders);
+        let mut args = parsed.args;
+        if let Some(flag) = crate::config::add_dir_flag(basename(&parsed.command)) {
+            for dir in &extra_dirs {
+                args.push(flag.to_string());
+                args.push(dir.clone());
+            }
+        }
 
         let account = account_for(accounts, &session.agent);
         let base_env: Vec<(String, String)> = std::env::vars().collect();
@@ -467,36 +496,79 @@ impl WorkspaceService {
             }
         }
 
+        // Identify this session to the agent hooks (the bridge reads these), so their events
+        // map back to it and reach this daemon's socket.
+        upsert_env(&mut env, "SOROMI_SESSION", session.id.clone());
+        upsert_env(
+            &mut env,
+            "SOROMI_HOME",
+            soromi_home().to_string_lossy().into_owned(),
+        );
+
+        // Install Soromi's event hooks into the Claude config dir this session will use, so
+        // permission / done events reach the daemon reliably (no terminal parsing).
+        if basename(&parsed.command) == "claude" {
+            let config_dir = env
+                .iter()
+                .find(|(key, _)| key == "CLAUDE_CONFIG_DIR")
+                .map(|(_, value)| PathBuf::from(value))
+                .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"));
+            let _ = crate::hooks::ensure_claude_hooks(&config_dir);
+        }
+
         let options = SessionOptions {
             command: parsed.command,
-            args: parsed.args,
-            cwd: root.to_string(),
+            args,
+            cwd,
             env: Some(env),
             cols: 80,
             rows: 24,
         };
         if let Ok(sess) = self.manager.ensure(&session.id, options) {
-            self.watch_status(&session.id, workspace, &sess);
+            self.watch_status(&session.id, &sess);
         }
         warning
     }
 
-    /// Forwards a session's status changes to notifications, keep-awake, and change events.
-    fn watch_status(&self, session_id: &str, workspace: &str, session: &Session) {
+    /// Forwards a session's parsed status to keep-awake and the rail (change events). Sound and
+    /// notifications come from the agent hooks (reliable), not this heuristic status parser.
+    fn watch_status(&self, session_id: &str, session: &Session) {
         let mut status_rx = session.subscribe_status();
-        let notifications = self.notifications.clone();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
         let session_id = session_id.to_string();
-        let workspace = workspace.to_string();
         tokio::spawn(async move {
             while status_rx.changed().await.is_ok() {
                 let status = *status_rx.borrow_and_update();
-                notifications.handle(&workspace, &session_id, status);
                 keep_awake.handle(&session_id, status);
                 let _ = change_tx.send(());
             }
         });
+    }
+
+    /// Handles an agent-hook event (from the socket listener): resolves the session's workspace,
+    /// and if it is not muted, plays the cue and fires a banner. `agent` is the source that fired
+    /// it (e.g. `claude`), named in the banner when present.
+    pub fn handle_agent_event(&self, session_id: &str, cue: Cue, agent: Option<&str>) {
+        let workspace = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(_, meta)| meta.sessions.iter().any(|s| s.id == session_id))
+                .map(|(name, _)| name.clone())
+        };
+        let Some(workspace) = workspace else {
+            return;
+        };
+        if self.notifications.is_muted(&workspace) {
+            return;
+        }
+        self.sound.play(cue);
+        let text = match agent {
+            Some(agent) => format!("({agent}) {}", cue_text(cue)),
+            None => cue_text(cue).to_string(),
+        };
+        self.notifications.fire(&workspace, &text);
     }
 
     fn persist(&self) {
@@ -529,6 +601,40 @@ fn new_session_id() -> String {
 
 fn basename(command: &str) -> &str {
     command.rsplit(['/', '\\']).next().unwrap_or(command)
+}
+
+/// Sets or replaces an env var in a launch env list.
+fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: String) {
+    if let Some(slot) = env.iter_mut().find(|(k, _)| k == key) {
+        slot.1 = value;
+    } else {
+        env.push((key.to_string(), value));
+    }
+}
+
+/// The banner text for an agent-event cue.
+fn cue_text(cue: Cue) -> &'static str {
+    match cue {
+        Cue::Request => "needs your permission",
+        Cue::Question => "is waiting for you",
+        Cue::Complete => "finished",
+    }
+}
+
+/// Resolves a session's working directories from the workspace root and its picked folders. The
+/// whole folder (`["."]`) runs at the root; otherwise the session runs at the first folder and
+/// the rest become extra working dirs (all absolute).
+fn session_dirs(root: &str, folders: &[String]) -> (String, Vec<String>) {
+    if folders.iter().all(|f| f == ".") {
+        return (root.to_string(), Vec::new());
+    }
+    let abs: Vec<String> = folders
+        .iter()
+        .map(|folder| Path::new(root).join(folder).to_string_lossy().into_owned())
+        .collect();
+    let cwd = abs.first().cloned().unwrap_or_else(|| root.to_string());
+    let extra = abs.into_iter().skip(1).collect();
+    (cwd, extra)
 }
 
 /// The account bound to an agent, or the built-in `personal` default when unbound.
@@ -606,6 +712,7 @@ mod tests {
     use super::*;
     use crate::keep_awake::backend::NoopKeepAwake;
     use crate::notifications::notifier::NoopNotifier;
+    use crate::sound::player::NoopSoundPlayer;
 
     fn service() -> Arc<WorkspaceService> {
         let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
@@ -613,7 +720,7 @@ mod tests {
             Arc::new(NoopKeepAwake),
             KeepAwakeMode::Off,
         ));
-        WorkspaceService::new(notifications, keep_awake)
+        WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer))
     }
 
     #[tokio::test]
@@ -712,6 +819,20 @@ mod tests {
 
         service.dispose();
         std::env::remove_var("SOROMI_HOME");
+    }
+
+    #[test]
+    fn session_dirs_runs_at_the_picked_folders_not_the_root() {
+        // Whole folder: run at the root, no extra dirs.
+        assert_eq!(
+            session_dirs("/a", &[".".into()]),
+            ("/a".to_string(), Vec::<String>::new())
+        );
+        // Several folders: cwd is the first, the rest are extra working dirs (absolute).
+        assert_eq!(
+            session_dirs("/a", &["api".into(), "web".into()]),
+            ("/a/api".to_string(), vec!["/a/web".to_string()])
+        );
     }
 
     #[test]

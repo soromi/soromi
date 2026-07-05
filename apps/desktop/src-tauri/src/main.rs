@@ -3,18 +3,36 @@
 
 use std::sync::Arc;
 
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
 
 use soromi_daemon::accounts::store::FileAccountManager;
 use soromi_daemon::keep_awake::backend::create_keep_awake;
 use soromi_daemon::keep_awake::controller::KeepAwakeController;
 use soromi_daemon::notifications::controller::NotificationController;
-use soromi_daemon::notifications::notifier::create_notifier;
+use soromi_daemon::notifications::notifier::{Notification, Notifier};
+use soromi_daemon::sound::player::create_sound_player;
 use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 use soromi_protocol::KeepAwakeMode;
+
+/// Sends notifications through Tauri, so they carry the Soromi app identity and icon (unlike
+/// `osascript`, which posts as Script Editor).
+struct TauriNotifier {
+    app: AppHandle,
+}
+
+impl Notifier for TauriNotifier {
+    fn notify(&self, notification: Notification) {
+        let _ = self
+            .app
+            .notification()
+            .builder()
+            .title(notification.title)
+            .body(notification.message)
+            .show();
+    }
+}
 
 /// Held in Tauri state so the daemon can be torn down cleanly on Quit.
 struct DaemonState {
@@ -32,9 +50,20 @@ impl DaemonState {
 }
 
 fn main() {
+    // Invoked as an agent-event bridge (`<exe> hook <cue> <agent>`) by a Claude hook: deliver
+    // the event to the running daemon over its socket and exit, before any Tauri/window init.
+    if let Some(invocation) = soromi_daemon::hooks::bridge::invocation() {
+        soromi_daemon::hooks::bridge::deliver(&invocation);
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let handle = app.handle().clone();
+            // Ask for notification permission up front so the first banner isn't dropped.
+            let _ = handle.notification().request_permission();
             // Start the in-process daemon on an ephemeral local port, then hand its URL to the
             // webview. Binding + hub creation run on Tauri's tokio runtime (the hub spawns
             // status watchers, which need a runtime).
@@ -44,12 +73,17 @@ fn main() {
                     .expect("bind daemon port");
                 let port = listener.local_addr().expect("daemon addr").port();
 
-                let notifications = Arc::new(NotificationController::new(create_notifier()));
+                let notifier: Arc<dyn Notifier> = Arc::new(TauriNotifier { app: handle });
+                let notifications = Arc::new(NotificationController::new(notifier));
                 let keep_awake = Arc::new(KeepAwakeController::new(
                     create_keep_awake(),
                     KeepAwakeMode::Off,
                 ));
-                let hub = WorkspaceService::new(notifications.clone(), keep_awake.clone());
+                let hub = WorkspaceService::new(
+                    notifications.clone(),
+                    keep_awake.clone(),
+                    create_sound_player(),
+                );
                 let accounts = Arc::new(FileAccountManager);
 
                 let serve_hub = hub.clone();
@@ -74,38 +108,30 @@ fn main() {
                 .initialization_script(&script)
                 .build()?;
 
-            // Tray: closing the window only hides it, so the daemon keeps agents running; Quit
-            // stops everything.
-            let show = MenuItemBuilder::with_id("show", "Show Soromi").build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
-            TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().cloned().expect("bundle icon"))
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.state::<DaemonState>().shutdown();
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .build(app)?;
-
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Hide instead of exit; the daemon (and agents) stay alive.
+                // Hide instead of exit, so the in-process daemon (and its agents) stay alive.
+                // Clicking the dock icon reopens the window (see RunEvent::Reopen below).
                 let _ = window.hide();
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the Soromi desktop shell");
+        .build(tauri::generate_context!())
+        .expect("error while building the Soromi desktop shell")
+        .run(|app, event| match event {
+            // Dock-icon click on macOS: bring the hidden window back.
+            RunEvent::Reopen { .. } => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            // Quit (Cmd+Q / app menu): stop the daemon, kill agents, release keep-awake.
+            RunEvent::ExitRequested { .. } => {
+                app.state::<DaemonState>().shutdown();
+            }
+            _ => {}
+        });
 }

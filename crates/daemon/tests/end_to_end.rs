@@ -14,6 +14,7 @@ use soromi_daemon::keep_awake::backend::NoopKeepAwake;
 use soromi_daemon::keep_awake::controller::KeepAwakeController;
 use soromi_daemon::notifications::controller::NotificationController;
 use soromi_daemon::notifications::notifier::NoopNotifier;
+use soromi_daemon::sound::player::NoopSoundPlayer;
 use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 use soromi_protocol::KeepAwakeMode;
@@ -76,7 +77,7 @@ async fn resize_reaches_the_pty() {
         Arc::new(NoopKeepAwake),
         KeepAwakeMode::Off,
     ));
-    let hub = WorkspaceService::new(notifications, keep_awake);
+    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer));
     let accounts = Arc::new(FileAccountManager);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -151,7 +152,7 @@ async fn gui_can_create_list_attach_and_exchange_io() {
         Arc::new(NoopKeepAwake),
         KeepAwakeMode::Off,
     ));
-    let hub = WorkspaceService::new(notifications, keep_awake);
+    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer));
     let accounts = Arc::new(FileAccountManager);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
