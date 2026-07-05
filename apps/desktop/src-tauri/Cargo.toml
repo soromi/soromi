@@ -4,11 +4,17 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+# The produced binary is `soromi`, so the dev process / macOS menu-bar name reads "soromi"
+# instead of the crate name.
+[[bin]]
+name = "soromi"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }
 soromi-daemon = { path = "../../../crates/daemon" }
