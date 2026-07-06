@@ -6,9 +6,13 @@ import type {
   DirEntry,
   KeepAwakeMode,
   SessionSummary,
+  Skill,
   Status,
   WorkspaceSummary,
 } from '@soromi/protocol'
+
+/** Which view the contextual sidebar shows. */
+export type SidebarMode = 'files' | 'skills'
 
 export type WorkspaceInfo = WorkspaceSummary
 
@@ -40,6 +44,23 @@ export interface FileContent {
   content: string
   truncated: boolean
   binary: boolean
+}
+
+/** A newer release the daemon found. Notify-only: `url` opens the release page. */
+export interface AppUpdate {
+  version: string
+  url: string
+  notes: string | null
+}
+
+/** Remembers the last update version the user dismissed, so it stays hidden until a newer one. */
+const DISMISSED_UPDATE_KEY = 'soromi.dismissedUpdate'
+const readDismissedUpdate = (): string | null => {
+  try {
+    return localStorage.getItem(DISMISSED_UPDATE_KEY)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -79,6 +100,14 @@ interface AppState {
   /** Directory listings kept per workspace, then keyed by relative path. */
   treeListings: Record<string, Record<string, DirEntry[]>>
   treeExpanded: Record<string, Record<string, boolean>>
+  /** Which view the contextual sidebar shows. */
+  sidebarMode: SidebarMode
+  /** Skills for a session, keyed by session id. */
+  skills: Record<string, Skill[]>
+  /** A newer release, once the daemon reports one. */
+  update: AppUpdate | null
+  /** The update version the user dismissed; the banner stays hidden while it matches. */
+  dismissedUpdate: string | null
   setConnected: (connected: boolean) => void
   setKeepAwake: (keepAwake: boolean) => void
   setKeepAwakeMode: (mode: KeepAwakeMode) => void
@@ -101,6 +130,10 @@ interface AppState {
   setError: (error: string | null) => void
   setListing: (workspace: string, path: string, entries: DirEntry[]) => void
   toggleTreeNode: (workspace: string, path: string) => void
+  setSidebarMode: (mode: SidebarMode) => void
+  setSkills: (session: string, skills: Skill[]) => void
+  setUpdate: (update: AppUpdate) => void
+  dismissUpdate: () => void
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -118,6 +151,10 @@ export const useAppStore = create<AppState>()((set) => ({
   error: null,
   treeListings: {},
   treeExpanded: {},
+  sidebarMode: 'files',
+  skills: {},
+  update: null,
+  dismissedUpdate: readDismissedUpdate(),
   setConnected: (connected) => set({ connected }),
   setKeepAwake: (keepAwake) => set({ keepAwake }),
   setKeepAwakeMode: (keepAwakeMode) => set({ keepAwakeMode }),
@@ -218,5 +255,17 @@ export const useAppStore = create<AppState>()((set) => ({
           [workspace]: { ...current, [path]: !current[path] },
         },
       }
+    }),
+  setSidebarMode: (sidebarMode) => set({ sidebarMode }),
+  setSkills: (session, skills) =>
+    set((state) => ({ skills: { ...state.skills, [session]: skills } })),
+  setUpdate: (update) => set({ update }),
+  dismissUpdate: () =>
+    set((state) => {
+      const version = state.update?.version ?? null
+      try {
+        if (version) localStorage.setItem(DISMISSED_UPDATE_KEY, version)
+      } catch {}
+      return { dismissedUpdate: version }
     }),
 }))

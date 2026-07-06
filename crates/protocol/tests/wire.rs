@@ -384,3 +384,25 @@ fn server_workspace_opened_omits_absent_warning() {
         json!({ "type": "workspace-opened", "workspace": "kazomi", "warning": "no profile" }),
     );
 }
+
+#[test]
+fn check_update_and_up_to_date_are_bare_tags() {
+    assert_client(ClientMessage::CheckUpdate, json!({ "type": "check-update" }));
+    assert_server(ServerMessage::UpToDate, json!({ "type": "up-to-date" }));
+}
+
+#[test]
+fn server_update_available_omits_absent_notes() {
+    assert_server(
+        ServerMessage::UpdateAvailable {
+            version: "0.2.0".into(),
+            url: "https://example.com/v0.2.0".into(),
+            notes: None,
+        },
+        json!({
+            "type": "update-available",
+            "version": "0.2.0",
+            "url": "https://example.com/v0.2.0"
+        }),
+    );
+}

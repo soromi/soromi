@@ -133,6 +133,10 @@ impl Connection {
                     binary: file.binary,
                 });
             }
+            ClientMessage::ListSkills { session } => {
+                let skills = self.hub.list_skills(&session);
+                self.send(ServerMessage::SkillList { session, skills });
+            }
             ClientMessage::ListAccounts => self.send_accounts(),
             ClientMessage::SaveAccount { profile } => {
                 let _ = self.accounts.save(&profile);
@@ -141,6 +145,20 @@ impl Connection {
             ClientMessage::DeleteAccount { name } => {
                 let _ = self.accounts.remove(&name);
                 self.send_accounts();
+            }
+            ClientMessage::CheckUpdate => {
+                // Run the check off the message loop; report back to this viewport. A found
+                // update goes through the hub so every viewport's banner updates, not just this one.
+                let hub = self.hub.clone();
+                let out = self.out.clone();
+                tokio::spawn(async move {
+                    match crate::updates::check(crate::updates::current_version()).await {
+                        Some(info) => hub.set_update(info),
+                        None => {
+                            let _ = out.send(ServerMessage::UpToDate);
+                        }
+                    }
+                });
             }
             ClientMessage::Attach { session } => self.attach(&session),
             ClientMessage::Input { session, data } => {
@@ -234,4 +252,11 @@ pub fn send_state(hub: &WorkspaceService, out: &Outbound) {
         active: hub.keep_awake_active(),
         mode: hub.keep_awake_mode(),
     });
+    if let Some(update) = hub.update_info() {
+        let _ = out.send(ServerMessage::UpdateAvailable {
+            version: update.version,
+            url: update.url,
+            notes: update.notes,
+        });
+    }
 }

@@ -21,14 +21,7 @@ export function FilePreview({ overlay }: { overlay: FileOverlay }) {
   const { path, content: file } = overlay
 
   return (
-    <OverlayShell
-      header={
-        <>
-          <span className={styles.path}>{path}</span>
-          <span className={styles.readonly}>read-only</span>
-        </>
-      }
-    >
+    <OverlayShell title={path} extra={<span className={styles.readonly}>read-only</span>}>
       <div className={styles.body}>
         {!file ? (
           <span className={styles.message}>Loading…</span>

@@ -8,15 +8,44 @@ pub struct Invocation {
     pub agent: Option<String>,
 }
 
-/// If this process was invoked as an event bridge (`<exe> hook <cue> [agent]`), returns it.
+/// If this process was invoked as an event bridge, returns the parsed invocation:
+/// - `<exe> hook <cue> [agent]`  (Claude hooks; we pass the cue directly as an arg)
+/// - `<exe> codex-notify <json>` (Codex `notify`; the payload `type` -> cue)
+/// - `<exe> codex-hook`          (Codex hooks; JSON on stdin, `hook_event_name` -> cue)
 pub fn invocation() -> Option<Invocation> {
     let mut args = std::env::args().skip(1);
-    if args.next().as_deref() != Some("hook") {
-        return None;
+    match args.next().as_deref() {
+        Some("hook") => {
+            let cue = args.next()?;
+            let agent = args.next();
+            Some(Invocation { cue, agent })
+        }
+        Some("codex-notify") => {
+            let payload: serde_json::Value = serde_json::from_str(&args.next()?).ok()?;
+            codex_cue(payload.get("type")?.as_str()?)
+        }
+        Some("codex-hook") => {
+            use std::io::Read;
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input).ok()?;
+            let payload: serde_json::Value = serde_json::from_str(input.trim()).ok()?;
+            codex_cue(payload.get("hook_event_name")?.as_str()?)
+        }
+        _ => None,
     }
-    let cue = args.next()?;
-    let agent = args.next();
-    Some(Invocation { cue, agent })
+}
+
+/// Maps a Codex event name (from `notify` payload `type` or a hook's `hook_event_name`) to a cue.
+fn codex_cue(event: &str) -> Option<Invocation> {
+    let cue = match event {
+        "agent-turn-complete" | "Stop" => "complete",
+        "approval-requested" | "PermissionRequest" => "request",
+        _ => return None,
+    };
+    Some(Invocation {
+        cue: cue.to_string(),
+        agent: Some("codex".to_string()),
+    })
 }
 
 /// Delivers an invocation (plus this session's id from `SOROMI_SESSION`) to the daemon over its

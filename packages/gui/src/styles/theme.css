@@ -1,22 +1,25 @@
 :root {
-  /* Dark neutral palette. */
-  --soromi-bg-app: #181818;
-  --soromi-bg-rail: #181818;
-  --soromi-bg-sidebar: #181818;
-  --soromi-bg-terminal: #1f1f1f;
-  --soromi-bg-hover: #2a2d2e;
-  --soromi-bg-active: #37373d;
-  --soromi-border: #2b2b2b;
-  --soromi-text: #cccccc;
-  --soromi-text-dim: #9d9d9d;
-  --soromi-text-faint: #6e6e6e;
+  /* Warm-neutral dark palette. */
+  --soromi-bg-app: #0a0a0b;
+  --soromi-bg-rail: #0b0b0c;
+  --soromi-bg-sidebar: #0f0f11;
+  --soromi-bg-tab: #0d0d0f;
+  --soromi-bg-terminal: #0a0a0b;
+  --soromi-bg-hover: #19191c;
+  --soromi-bg-active: #242427;
+  --soromi-border: #242427;
+  --soromi-border-subtle: #1a1a1d;
+  --soromi-text: #f0f0f0;
+  --soromi-text-dim: #c9c9cc;
+  --soromi-text-faint: #6a6a6e;
 
-  /* Soromi brand accent (jade) kept for status/active affordances. */
-  --soromi-accent: #4fae8d;
-  --soromi-accent-dim: #2d5c4b;
-  --soromi-accent-on: #cfeadd;
+  /* Emerald accent. */
+  --soromi-accent: #3ecf8e;
+  --soromi-accent-dim: #143024;
+  --soromi-accent-border: #24523c;
+  --soromi-accent-on: #08321f;
   --soromi-warn: #d9a53f;
-  --soromi-ok: #4fae8d;
+  --soromi-ok: #3ecf8e;
 
   --soromi-badge-personal-fg: #5b9bd1;
   --soromi-badge-personal-bg: #223345;

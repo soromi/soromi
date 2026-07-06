@@ -49,6 +49,13 @@ impl DaemonState {
     }
 }
 
+/// Quits the app (the "Quit Soromi" menu item). Routes through the normal exit flow, so the
+/// daemon is disposed via `RunEvent::ExitRequested`.
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 fn main() {
     // Invoked as an agent-event bridge (`<exe> hook <cue> <agent>`) by a Claude hook: deliver
     // the event to the running daemon over its socket and exit, before any Tauri/window init.
@@ -60,6 +67,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![quit])
         .setup(|app| {
             let handle = app.handle().clone();
             // Ask for notification permission up front so the first banner isn't dropped.
@@ -89,6 +98,9 @@ fn main() {
                 let serve_hub = hub.clone();
                 tauri::async_runtime::spawn(serve(listener, serve_hub, accounts));
 
+                // Notify-only update check: flags newer releases to the viewport.
+                soromi_daemon::updates::spawn(hub.clone());
+
                 (
                     DaemonState {
                         hub,
@@ -100,8 +112,12 @@ fn main() {
             });
             app.manage(state);
 
-            // Build the main window with the daemon URL injected before any page script runs.
-            let script = format!("window.__SOROMI_DAEMON_URL__ = \"ws://localhost:{port}\";");
+            // Build the main window with the daemon URL and app version injected before any
+            // page script runs.
+            let version = app.package_info().version.to_string();
+            let script = format!(
+                "window.__SOROMI_DAEMON_URL__ = \"ws://localhost:{port}\"; window.__SOROMI_VERSION__ = \"{version}\";"
+            );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Soromi")
                 .inner_size(1200.0, 800.0)

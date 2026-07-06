@@ -35,7 +35,7 @@ import { ProviderIcon } from '@/shared/provider-icon'
 import styles from './welcome.module.css'
 
 /** The create-space form: pick work folders, choose an agent and account. */
-function CreateSpaceForm() {
+function CreateSpaceForm({ heading }: { heading?: boolean }) {
   const transport = useTransport()
   const { error, setError, accounts, openSettings } = useAppStore(
     useShallow((s) => ({
@@ -101,7 +101,7 @@ function CreateSpaceForm() {
 
   return (
     <Stack gap="md" className={styles.form}>
-      <Title order={2}>New workspace</Title>
+      {heading && <Title order={2}>New workspace</Title>}
       <Text c="dimmed">
         Pick one or more work folders and choose an agent and account. Nothing is written to the
         folder.
@@ -206,7 +206,7 @@ function CreateSpaceForm() {
 export function Welcome() {
   return (
     <div className={styles.center}>
-      <CreateSpaceForm />
+      <CreateSpaceForm heading />
     </div>
   )
 }
@@ -214,7 +214,7 @@ export function Welcome() {
 /** Create-space as an overlay on top of a running workspace. */
 export function CreateSpaceOverlay() {
   return (
-    <OverlayShell>
+    <OverlayShell title="New workspace">
       <div className={styles.center}>
         <CreateSpaceForm />
       </div>

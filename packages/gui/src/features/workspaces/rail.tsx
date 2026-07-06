@@ -1,57 +1,161 @@
+import { Anchor, Menu, Modal, Text } from '@mantine/core'
+import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import clsx from 'clsx'
+import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+
+//Services
+import { useTransport } from '@/services/transport/transport-context'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
-import { statusVariant } from '@/config/theme'
+import { APP_VERSION, REPO_URL, isTauri } from '@/config'
 
 //Icons
+import CaretSvg from '@/assets/icons/caret.svg?react'
+import FilesSvg from '@/assets/icons/files.svg?react'
+import IsoLogo from '@/assets/icons/iso-dark.svg?react'
+import PlusSvg from '@/assets/icons/plus.svg?react'
 import SettingsSvg from '@/assets/icons/settings.svg?react'
+import SkillsSvg from '@/assets/icons/skills.svg?react'
 
 //Styles
 import styles from './rail.module.css'
 
-/** The far-left workspace switcher: one icon per workspace, plus an add button. */
+//Types
+import type { SidebarMode } from '@/stores/app-store'
+import type { ComponentType, SVGProps } from 'react'
+
+/** Opens a URL in the user's browser (Tauri opener), falling back to a new tab in the browser. */
+function openExternal(url: string) {
+  if (isTauri) openUrl(url)
+  else window.open(url, '_blank', 'noreferrer')
+}
+
+const SECTIONS: {
+  mode: SidebarMode
+  label: string
+  Icon: ComponentType<SVGProps<SVGSVGElement>>
+}[] = [
+  { mode: 'files', label: 'Files', Icon: FilesSvg },
+  { mode: 'skills', label: 'Skills', Icon: SkillsSvg },
+]
+
+/** The far-left icon nav: the app-menu logo, sidebar sections, add, and settings. */
 export function Rail() {
-  const { workspaces, active, select, openCreateSpace, openSettings } = useAppStore(
-    useShallow((s) => ({
-      workspaces: s.workspaces,
-      active: s.active,
-      select: s.select,
-      openCreateSpace: s.openCreateSpace,
-      openSettings: s.openSettings,
-    })),
-  )
+  const transport = useTransport()
+  const { active, sidebarMode, setSidebarMode, openCreateSpace, openSettings, setNotice } =
+    useAppStore(
+      useShallow((s) => ({
+        active: s.active,
+        sidebarMode: s.sidebarMode,
+        setSidebarMode: s.setSidebarMode,
+        openCreateSpace: s.openCreateSpace,
+        openSettings: s.openSettings,
+        setNotice: s.setNotice,
+      })),
+    )
+  const [aboutOpen, setAboutOpen] = useState(false)
+
+  const checkUpdates = () => {
+    setNotice('Checking for updates…')
+    transport.send({ type: 'check-update' })
+  }
+  const quit = () => {
+    if (isTauri) invoke('quit')
+  }
 
   return (
     <nav className={styles.rail}>
-      {workspaces.map((workspace) => (
-        <button
-          key={workspace.name}
-          type="button"
-          className={clsx(styles.icon, workspace.name === active && styles.active)}
-          title={`${workspace.name} — ${workspace.status}`}
-          onClick={() => select(workspace.name)}
-        >
-          {abbreviate(workspace.name)}
-          {workspace.status !== 'idle' && (
-            <span className={clsx(styles.dot, styles[statusVariant(workspace.status)])} />
-          )}
-        </button>
-      ))}
-      <button type="button" className={styles.add} title="Add workspace" onClick={openCreateSpace}>
-        +
-      </button>
+      <Menu position="right-start" width={230} withinPortal>
+        <Menu.Target>
+          <button type="button" className={styles.logo} title="Soromi">
+            <IsoLogo width={24} height={24} />
+            <span className={styles.logoBadge}>
+              <CaretSvg width={10} height={10} />
+            </span>
+          </button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <div className={styles.appHead}>
+            <span className={styles.appHeadIcon}>
+              <IsoLogo width={16} height={16} />
+            </span>
+            <div>
+              <div className={styles.appHeadName}>Soromi</div>
+              <div className={styles.appHeadVersion}>Version {APP_VERSION}</div>
+            </div>
+          </div>
+          <Menu.Divider />
+          <Menu.Item onClick={() => setAboutOpen(true)}>About Soromi</Menu.Item>
+          <Menu.Divider />
+          <Menu.Item
+            rightSection={<span className={styles.shortcut}>⌘,</span>}
+            onClick={openSettings}
+          >
+            Settings
+          </Menu.Item>
+          <Menu.Item onClick={checkUpdates}>Check for updates…</Menu.Item>
+          <Menu.Divider />
+          <Menu.Item rightSection={<span className={styles.shortcut}>⌘Q</span>} onClick={quit}>
+            Quit Soromi
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      <Modal
+        opened={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        withCloseButton={false}
+        centered
+        size={340}
+      >
+        <div className={styles.about}>
+          <span className={styles.aboutIcon}>
+            <IsoLogo width={34} height={34} />
+          </span>
+          <div className={styles.aboutName}>Soromi</div>
+          <div className={styles.aboutVersion}>Version {APP_VERSION}</div>
+          <Text size="sm" c="dimmed" ta="center">
+            A small, fast home for AI coding agents. The daemon owns the terminals; this window is
+            just a viewport.
+          </Text>
+          <Anchor size="sm" component="button" type="button" onClick={() => openExternal(REPO_URL)}>
+            github.com/soromi/soromi
+          </Anchor>
+        </div>
+      </Modal>
+      <div className={styles.divider} />
+
+      <div className={styles.sections}>
+        {SECTIONS.map(({ mode, label, Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            className={clsx(styles.section, active && sidebarMode === mode && styles.active)}
+            title={label}
+            onClick={() => setSidebarMode(mode)}
+            disabled={!active}
+          >
+            <Icon width={20} height={20} />
+          </button>
+        ))}
+      </div>
       <span className={styles.spacer} />
-      <button type="button" className={styles.gear} title="Settings" onClick={openSettings}>
+      <button
+        type="button"
+        className={styles.section}
+        title="New workspace"
+        onClick={openCreateSpace}
+      >
+        <PlusSvg width={18} height={18} />
+      </button>
+      <button type="button" className={styles.section} title="Settings" onClick={openSettings}>
         <SettingsSvg width={19} height={19} />
       </button>
     </nav>
   )
-}
-
-function abbreviate(name: string): string {
-  return name.slice(0, 2).replace(/^./, (c) => c.toUpperCase())
 }

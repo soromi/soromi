@@ -1,0 +1,53 @@
+.banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px;
+  font-size: 13px;
+  color: var(--soromi-accent);
+  background: var(--soromi-accent-dim);
+  border-bottom: 1px solid var(--soromi-accent-border);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  color: var(--soromi-text);
+}
+
+.text strong {
+  color: var(--soromi-accent);
+  font-weight: 600;
+}
+
+.download {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--soromi-accent-border);
+  border-radius: 8px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.download:hover {
+  background: var(--soromi-ok);
+}
+
+.dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+.dismiss:hover {
+  opacity: 1;
+}

@@ -1,4 +1,4 @@
-import { Button, Group, Modal, Select, Stack, Text, TextInput, Title } from '@mantine/core'
+import { Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
@@ -16,6 +16,12 @@ import { PROVIDERS } from '@/config/providers'
 //Components
 import { OverlayShell } from '@/shared/overlay-shell'
 
+//Icons
+import BellOffSvg from '@/assets/icons/bell-off.svg?react'
+import PlusSvg from '@/assets/icons/plus.svg?react'
+import SettingsSvg from '@/assets/icons/settings.svg?react'
+import TrashSvg from '@/assets/icons/trash.svg?react'
+
 //Styles
 import styles from './settings.module.css'
 
@@ -28,6 +34,7 @@ interface ProviderRow {
 }
 
 const statusKey = (provider: string, configDir: string) => `${provider}::${configDir}`
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
 
 /** Settings overlay: account profiles (per-provider logins), plus notification mutes. */
 export function Settings() {
@@ -106,152 +113,167 @@ export function Settings() {
   }
 
   return (
-    <OverlayShell header={<span className={styles.title}>Settings</span>}>
+    <OverlayShell icon={<SettingsSvg width={20} height={20} />} title="Settings">
       <div className={styles.body}>
-        <Stack gap="lg" maw={640}>
-          <div>
-            <Title order={4}>Accounts</Title>
-            <Text c="dimmed" size="sm">
-              An account bundles per-provider logins. Point a provider at a config directory you
-              already use, or at a new one you'll log into from a workspace (use New).
-            </Text>
-          </div>
+        <div className={styles.content}>
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <div>
+                <h2 className={styles.h2}>Accounts</h2>
+                <p className={styles.desc}>
+                  An account bundles per-provider logins. Point a provider at a config directory you
+                  already use, or a new one you'll log into from a workspace.
+                </p>
+              </div>
+              <span className={styles.count}>
+                {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
+              </span>
+            </div>
 
-          <Stack gap="xs">
-            {accounts.length === 0 ? (
-              <Text c="dimmed" size="sm">
-                No accounts yet.
-              </Text>
-            ) : (
-              accounts.map((account) => (
-                <div key={account.name} className={styles.row}>
-                  <Group justify="space-between">
-                    <Text fw={500}>{account.name}</Text>
-                    <Button
-                      variant="subtle"
-                      color="red"
-                      size="compact-sm"
+            {accounts.map((account) => {
+              const providers = Object.entries(account.providers)
+              return (
+                <div key={account.name} className={styles.card}>
+                  <div className={styles.cardHead}>
+                    <span className={styles.avatar}>{account.name.charAt(0).toUpperCase()}</span>
+                    <div className={styles.cardHeadText}>
+                      <div className={styles.cardName}>{account.name}</div>
+                      <div className={styles.cardMeta}>
+                        {providers.length} {providers.length === 1 ? 'provider' : 'providers'}{' '}
+                        connected
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.delete}
                       onClick={() => remove(account.name)}
                     >
+                      <TrashSvg width={15} height={15} />
                       Delete
-                    </Button>
-                  </Group>
-                  <Stack gap={4} mt={6}>
-                    {Object.entries(account.providers).map(([provider, config]) => {
+                    </button>
+                  </div>
+                  <div className={styles.cardBody}>
+                    {providers.map(([provider, config]) => {
                       const dir = config?.configDir ?? ''
+                      const connected = providerStatus[statusKey(provider, dir)]
                       return (
-                        <Group key={provider} gap="xs" wrap="nowrap">
-                          <Text size="xs" fw={500} tt="capitalize" w={54}>
-                            {provider}
-                          </Text>
-                          <StatusDot status={providerStatus[statusKey(provider, dir)]} />
-                          <Text size="xs" c="dimmed" className={styles.path}>
-                            {dir || '(no path)'}
-                          </Text>
-                        </Group>
+                        <div key={provider} className={styles.providerRow}>
+                          <span className={styles.providerName}>{capitalize(provider)}</span>
+                          <span
+                            className={clsx(styles.providerStatus, connected && styles.connected)}
+                          >
+                            <span className={styles.statusDot} />
+                            {connected ? 'Connected' : 'Not connected'}
+                          </span>
+                          <span className={styles.providerPath}>{dir || '(no path)'}</span>
+                        </div>
                       )
                     })}
-                  </Stack>
+                  </div>
                 </div>
-              ))
-            )}
-          </Stack>
+              )
+            })}
 
-          <Group>
-            <Button variant="light" onClick={() => setFormOpen(true)}>
-              Add new
-            </Button>
-          </Group>
+            <button type="button" className={styles.addBtn} onClick={() => setFormOpen(true)}>
+              <PlusSvg width={16} height={16} />
+              Add account
+            </button>
+          </section>
 
-          <Modal
-            opened={formOpen}
-            onClose={() => setFormOpen(false)}
-            title="New account"
-            centered
-            size="lg"
-          >
-            <Stack gap="sm">
-              <TextInput
-                label="Name"
-                placeholder="e.g. work"
-                value={name}
-                onChange={(event) => setName(event.currentTarget.value)}
-              />
-              {rows.map((row, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
-                <Group key={index} align="flex-end" gap="xs" wrap="nowrap">
-                  <Select
-                    w={116}
-                    label={index === 0 ? 'Provider' : undefined}
-                    data={PROVIDERS}
-                    value={row.provider}
-                    onChange={(value) => value && updateRow(index, { provider: value })}
-                    allowDeselect={false}
-                    onBlur={() => check(row.provider, row.configDir)}
-                  />
-                  <TextInput
-                    flex={1}
-                    label={index === 0 ? 'Config directory' : undefined}
-                    placeholder="~/.claude"
-                    value={row.configDir}
-                    onChange={(event) => updateRow(index, { configDir: event.currentTarget.value })}
-                    onBlur={() => check(row.provider, row.configDir)}
-                    rightSection={
-                      <StatusDot
-                        status={providerStatus[statusKey(row.provider, row.configDir.trim())]}
-                      />
-                    }
-                  />
-                  <Button variant="subtle" size="compact-sm" onClick={() => fillIsolatedDir(index)}>
-                    New
-                  </Button>
-                  {rows.length > 1 && (
-                    <Button
-                      variant="subtle"
-                      color="red"
-                      size="compact-sm"
-                      onClick={() => removeRow(index)}
-                    >
-                      ✕
-                    </Button>
-                  )}
-                </Group>
-              ))}
-              <Group>
-                <Button variant="light" onClick={addRow}>
-                  Add provider
-                </Button>
-                <Button onClick={create} disabled={!name.trim()}>
-                  Save account
-                </Button>
-              </Group>
-            </Stack>
-          </Modal>
+          <div className={styles.divider} />
 
-          <div>
-            <Title order={4}>Muted workspaces</Title>
-            <Text c="dimmed" size="sm">
-              Workspaces with notifications silenced.
-            </Text>
-          </div>
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <div>
+                <h2 className={styles.h2}>Muted workspaces</h2>
+                <p className={styles.desc}>Workspaces with notifications silenced.</p>
+              </div>
+            </div>
 
-          <Stack gap="xs">
             {mutedNames.length === 0 ? (
-              <Text c="dimmed" size="sm">
-                No muted workspaces.
-              </Text>
+              <div className={styles.empty}>
+                <span className={styles.emptyIcon}>
+                  <BellOffSvg width={22} height={22} />
+                </span>
+                <div className={styles.emptyTitle}>No muted workspaces</div>
+                <div className={styles.emptyDesc}>Silenced workspaces show up here.</div>
+              </div>
             ) : (
               mutedNames.map((workspace) => (
-                <Group key={workspace} justify="space-between" className={styles.row}>
-                  <Text fw={500}>{workspace}</Text>
+                <div key={workspace} className={styles.mutedRow}>
+                  <span className={styles.cardName}>{workspace}</span>
                   <Button variant="subtle" size="compact-sm" onClick={() => unmute(workspace)}>
                     Unmute
                   </Button>
-                </Group>
+                </div>
               ))
             )}
+          </section>
+        </div>
+
+        <Modal
+          opened={formOpen}
+          onClose={() => setFormOpen(false)}
+          title="New account"
+          centered
+          size="lg"
+        >
+          <Stack gap="md">
+            <TextInput
+              label="Name"
+              placeholder="e.g. work"
+              value={name}
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+            {rows.map((row, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
+              <Group key={index} align="flex-end" gap="xs" wrap="nowrap">
+                <Select
+                  w={140}
+                  label={index === 0 ? 'Provider' : undefined}
+                  data={PROVIDERS}
+                  value={row.provider}
+                  onChange={(value) => value && updateRow(index, { provider: value })}
+                  allowDeselect={false}
+                  onBlur={() => check(row.provider, row.configDir)}
+                />
+                <TextInput
+                  flex={1}
+                  label={index === 0 ? 'Config directory' : undefined}
+                  placeholder="~/.claude"
+                  value={row.configDir}
+                  onChange={(event) => updateRow(index, { configDir: event.currentTarget.value })}
+                  onBlur={() => check(row.provider, row.configDir)}
+                  rightSection={
+                    <StatusDot
+                      status={providerStatus[statusKey(row.provider, row.configDir.trim())]}
+                    />
+                  }
+                />
+                <Button variant="subtle" onClick={() => fillIsolatedDir(index)}>
+                  New
+                </Button>
+                {rows.length > 1 && (
+                  <Button variant="subtle" color="red" onClick={() => removeRow(index)}>
+                    ✕
+                  </Button>
+                )}
+              </Group>
+            ))}
+            <Group justify="space-between" mt="xs">
+              <Button
+                variant="default"
+                leftSection={<PlusSvg width={14} height={14} />}
+                onClick={addRow}
+              >
+                Add provider
+              </Button>
+              <Button onClick={create} disabled={!name.trim()}>
+                Save account
+              </Button>
+            </Group>
           </Stack>
-        </Stack>
+        </Modal>
       </div>
     </OverlayShell>
   )

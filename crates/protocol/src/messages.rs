@@ -32,6 +32,48 @@ pub struct DirEntry {
     pub ignored: bool,
 }
 
+/// Whether a skill is a slash command or an agent skill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum SkillKind {
+    Command,
+    Skill,
+}
+
+/// Where a skill is defined: the user's config dir or the workspace's project dir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum SkillScope {
+    User,
+    Project,
+}
+
+/// An agent skill or slash command available to a session, invoked as `/name`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct Skill {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub description: Option<String>,
+    pub kind: SkillKind,
+    pub scope: SkillScope,
+}
+
 /// A workspace's per-agent account binding: which account (by name) an `agent` runs under.
 /// One entry per agent, so every session of that agent shares the same account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +192,9 @@ pub enum ClientMessage {
         workspace: String,
         path: String,
     },
+    ListSkills {
+        session: String,
+    },
     ListAccounts,
     SaveAccount {
         profile: AccountProfile,
@@ -171,6 +216,8 @@ pub enum ClientMessage {
         workspace: String,
         accounts: Vec<AgentAccount>,
     },
+    /// Re-run the update check now (the "Check for updates" menu item).
+    CheckUpdate,
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -227,6 +274,10 @@ pub enum ServerMessage {
         truncated: bool,
         binary: bool,
     },
+    SkillList {
+        session: String,
+        skills: Vec<Skill>,
+    },
     KeepAwake {
         active: bool,
         mode: KeepAwakeMode,
@@ -243,4 +294,14 @@ pub enum ServerMessage {
         config_dir: String,
         logged_in: bool,
     },
+    /// A newer release exists. `url` opens the release page; `notes` is the changelog body.
+    UpdateAvailable {
+        version: String,
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        notes: Option<String>,
+    },
+    /// The manual update check found nothing newer (only sent in reply to `CheckUpdate`).
+    UpToDate,
 }

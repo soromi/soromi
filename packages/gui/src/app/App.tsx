@@ -54,12 +54,27 @@ export function App() {
         case 'dir-listing':
           store.setListing(message.workspace, message.path, message.entries)
           break
+        case 'skill-list':
+          store.setSkills(message.session, message.skills)
+          break
         case 'file-content':
           store.setFileContent(message.workspace, message.path, {
             content: message.content,
             truncated: message.truncated,
             binary: message.binary,
           })
+          break
+        case 'update-available':
+          store.setUpdate({
+            version: message.version,
+            url: message.url,
+            notes: message.notes ?? null,
+          })
+          // Clear any "Checking for updates…" notice from a manual check.
+          store.setNotice(null)
+          break
+        case 'up-to-date':
+          store.setNotice("You're on the latest version.")
           break
         case 'error':
           store.setError(message.message)

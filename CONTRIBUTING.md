@@ -40,13 +40,14 @@ Read alongside each package's `README.md` (what that package is for).
 
 - **TypeScript strict, everywhere.** No `any`; use `unknown` and narrow. Avoid non-null `!`;
   prefer an explicit check (as in `main.tsx`).
-- **Zod is the source of truth for boundary data.** Validate at every boundary (WS ingress,
-  file reads). Infer types with `z.infer`; never hand-maintain a parallel `interface` beside
-  a schema.
+- **The Rust `crates/protocol` is the source of truth for wire types.** The TypeScript types in
+  `packages/protocol` are generated from it with ts-rs (`pnpm gen:protocol`); never hand-edit
+  `packages/protocol/src/generated/`. Change the Rust serde definitions, regenerate, and keep the
+  wire-conformance tests (`crates/protocol/tests/wire.rs`) in sync.
 - **Biome is authoritative for formatting and linting.** Single quotes, no semicolons,
   width 100, trailing commas. Never hand-format; run `pnpm format` or `pnpm check:fix`.
 - **Naming:** files `kebab-case.ts` (React components may be `PascalCase.tsx`); types and
-  components `PascalCase`; values and functions `camelCase`; Zod schemas end in `Schema`.
+  components `PascalCase`; values and functions `camelCase`.
 - **Tests are colocated** as `*.test.ts` next to the code, run with Vitest. Add or adjust
   tests with every behavior change.
 - **Keep `protocol` pure:** no IO, no side effects, no `console`. Importing it does nothing.

@@ -8,10 +8,10 @@ import { useAppStore } from '@/stores/app-store'
 import { Rail } from '@/features/workspaces/rail'
 import { Sidebar } from '@/features/sidebar/sidebar'
 import { TerminalDeck } from '@/features/terminal/terminal-deck'
-import { TerminalHeader } from '@/features/terminal/terminal-header'
 import { Welcome } from '@/features/welcome/welcome'
 import { OverlayHost } from './overlay-host'
 import { StatusBanner } from './status-banner'
+import { UpdateBanner } from './update-banner'
 
 //Styles
 import styles from './app-layout.module.css'
@@ -29,14 +29,12 @@ export function AppLayout() {
       <Rail />
       <Sidebar />
       <main className={styles.content}>
+        <UpdateBanner />
         <StatusBanner />
         {active !== null ? (
-          <>
-            <TerminalHeader />
-            <div className={styles.terminalArea}>
-              <TerminalDeck transport={transport} />
-            </div>
-          </>
+          <div className={styles.terminalArea}>
+            <TerminalDeck transport={transport} />
+          </div>
         ) : (
           <Welcome />
         )}

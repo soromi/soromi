@@ -3,10 +3,11 @@ import type { AccountProfile } from "./AccountProfile";
 import type { DirEntry } from "./DirEntry";
 import type { KeepAwakeMode } from "./KeepAwakeMode";
 import type { SessionSummary } from "./SessionSummary";
+import type { Skill } from "./Skill";
 import type { Status } from "./Status";
 import type { WorkspaceSummary } from "./WorkspaceSummary";
 
 /**
  * Daemon -> viewport. A discriminated union on `type`.
  */
-export type ServerMessage = { "type": "output", session: string, data: string, } | { "type": "status", session: string, status: Status, } | { "type": "notify", workspace: string, status: Status, message: string, } | { "type": "session-opened", workspace: string, session: SessionSummary, } | { "type": "workspace-list", workspaces: Array<WorkspaceSummary>, } | { "type": "workspace-opened", workspace: string, warning?: string, } | { "type": "error", message: string, } | { "type": "dir-listing", workspace: string, path: string, entries: Array<DirEntry>, } | { "type": "file-content", workspace: string, path: string, content: string, truncated: boolean, binary: boolean, } | { "type": "keep-awake", active: boolean, mode: KeepAwakeMode, } | { "type": "account-list", accounts: Array<AccountProfile>, } | { "type": "space-exported", workspace: string, path: string, } | { "type": "provider-status", provider: string, configDir: string, loggedIn: boolean, };
+export type ServerMessage = { "type": "output", session: string, data: string, } | { "type": "status", session: string, status: Status, } | { "type": "notify", workspace: string, status: Status, message: string, } | { "type": "session-opened", workspace: string, session: SessionSummary, } | { "type": "workspace-list", workspaces: Array<WorkspaceSummary>, } | { "type": "workspace-opened", workspace: string, warning?: string, } | { "type": "error", message: string, } | { "type": "dir-listing", workspace: string, path: string, entries: Array<DirEntry>, } | { "type": "file-content", workspace: string, path: string, content: string, truncated: boolean, binary: boolean, } | { "type": "skill-list", session: string, skills: Array<Skill>, } | { "type": "keep-awake", active: boolean, mode: KeepAwakeMode, } | { "type": "account-list", accounts: Array<AccountProfile>, } | { "type": "space-exported", workspace: string, path: string, } | { "type": "provider-status", provider: string, configDir: string, loggedIn: boolean, } | { "type": "update-available", version: string, url: string, notes?: string, } | { "type": "up-to-date" };

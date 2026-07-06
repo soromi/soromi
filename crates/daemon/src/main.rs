@@ -42,6 +42,9 @@ async fn main() {
         println!("soromi: restored {restored} space(s) from local storage");
     }
 
+    // Notify-only update check: polls GitHub releases and flags newer builds to viewports.
+    soromi_daemon::updates::spawn(hub.clone());
+
     if let Some(dir) = std::env::args().nth(1) {
         match hub.open_workspace(&dir) {
             Ok(result) => {

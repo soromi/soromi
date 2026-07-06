@@ -8,7 +8,7 @@ use soromi_protocol::{
 use tokio::sync::broadcast;
 
 use crate::accounts::loader::{accounts_dir, load_account_profile};
-use crate::accounts::resolver::resolve_launch_env;
+use crate::accounts::resolver::{expand_home, resolve_launch_env};
 use crate::files::directory::list_directory;
 use crate::files::reader::{read_file_within, FileRead};
 use crate::home::soromi_home;
@@ -17,6 +17,7 @@ use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::sound::player::{Cue, SoundPlayer};
+use crate::updates::UpdateInfo;
 use crate::workspaces::agent_command::parse_agent_command;
 use crate::workspaces::config::{PersistedSpace, SessionSpec, Workspace};
 use crate::workspaces::space_store::{load_spaces, save_spaces};
@@ -56,6 +57,8 @@ pub struct WorkspaceService {
     keep_awake: Arc<KeepAwakeController>,
     sound: Arc<dyn SoundPlayer>,
     change_tx: broadcast::Sender<()>,
+    /// A newer release than the running build, once the update check finds one.
+    update: Mutex<Option<UpdateInfo>>,
 }
 
 impl WorkspaceService {
@@ -73,6 +76,7 @@ impl WorkspaceService {
             keep_awake,
             sound,
             change_tx,
+            update: Mutex::new(None),
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -97,6 +101,17 @@ impl WorkspaceService {
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
         self.change_tx.subscribe()
+    }
+
+    /// Records an available update and wakes viewports so they can show the banner.
+    pub fn set_update(&self, info: UpdateInfo) {
+        *self.update.lock().unwrap() = Some(info);
+        self.emit_change();
+    }
+
+    /// The available update, if the check has found one.
+    pub fn update_info(&self) -> Option<UpdateInfo> {
+        self.update.lock().unwrap().clone()
     }
 
     /// Creates a space with a single initial tab (its `agent`), bound to `account`.
@@ -338,6 +353,38 @@ impl WorkspaceService {
         }
     }
 
+    /// Lists the slash commands and skills available to a session's agent (Claude only for now).
+    pub fn list_skills(&self, session_id: &str) -> Vec<soromi_protocol::Skill> {
+        let resolved = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata.iter().find_map(|(_, meta)| {
+                meta.sessions.iter().find(|s| s.id == session_id).map(|s| {
+                    (
+                        s.agent.clone(),
+                        account_for(&meta.accounts, &s.agent),
+                        meta.root.clone(),
+                    )
+                })
+            })
+        };
+        let Some((agent, account, root)) = resolved else {
+            return Vec::new();
+        };
+        let command = basename(agent.split_whitespace().next().unwrap_or(&agent));
+        let root = Path::new(&root);
+        match command {
+            "claude" => {
+                let dir = provider_config_dir(&account, "claude", "CLAUDE_CONFIG_DIR", ".claude");
+                crate::skills::claude_skills(&dir, root)
+            }
+            "codex" => {
+                let dir = provider_config_dir(&account, "codex", "CODEX_HOME", ".codex");
+                crate::skills::codex_skills(&dir, root)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Writes the space's committable config to `<root>/soromi.space.json`. Returns the path.
     pub fn export_space(&self, workspace: &str) -> anyhow::Result<String> {
         let metadata = self.metadata.lock().unwrap();
@@ -505,15 +552,20 @@ impl WorkspaceService {
             soromi_home().to_string_lossy().into_owned(),
         );
 
-        // Install Soromi's event hooks into the Claude config dir this session will use, so
-        // permission / done events reach the daemon reliably (no terminal parsing).
-        if basename(&parsed.command) == "claude" {
-            let config_dir = env
-                .iter()
-                .find(|(key, _)| key == "CLAUDE_CONFIG_DIR")
-                .map(|(_, value)| PathBuf::from(value))
-                .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"));
-            let _ = crate::hooks::ensure_claude_hooks(&config_dir);
+        // Install Soromi's event hooks into the agent's config dir, so permission / done events
+        // reach the daemon reliably (no terminal parsing).
+        match basename(&parsed.command) {
+            "claude" => {
+                let config_dir = config_dir_from(&env, "CLAUDE_CONFIG_DIR", ".claude");
+                let _ = crate::hooks::ensure_claude_hooks(&config_dir);
+            }
+            "codex" => {
+                let config_dir = config_dir_from(&env, "CODEX_HOME", ".codex");
+                // `notify` (no trust) covers complete; the hook (needs `/hooks` trust) adds request.
+                let _ = crate::hooks::ensure_codex_notify(&config_dir);
+                let _ = crate::hooks::ensure_codex_hooks(&config_dir);
+            }
+            _ => {}
         }
 
         let options = SessionOptions {
@@ -601,6 +653,35 @@ fn new_session_id() -> String {
 
 fn basename(command: &str) -> &str {
     command.rsplit(['/', '\\']).next().unwrap_or(command)
+}
+
+/// A provider's config dir for an account: its profile `configDir` if set, else the provider's
+/// config env var (e.g. `CLAUDE_CONFIG_DIR` / `CODEX_HOME`), else `~/<default>`.
+fn provider_config_dir(account: &str, provider: &str, env_var: &str, default: &str) -> PathBuf {
+    if let Ok(profile) = load_account_profile(account, &accounts_dir()) {
+        if let Some(dir) = profile
+            .providers
+            .get(provider)
+            .and_then(|provider| provider.config_dir.as_ref())
+        {
+            let home = dirs::home_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            return PathBuf::from(expand_home(dir, &home));
+        }
+    }
+    std::env::var(env_var)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(default))
+}
+
+/// The agent's config dir: the resolved env var if set, else `~/<default>`.
+fn config_dir_from(env: &[(String, String)], var: &str, default: &str) -> PathBuf {
+    env.iter()
+        .find(|(key, _)| key == var)
+        .map(|(_, value)| PathBuf::from(value))
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(default))
 }
 
 /// Sets or replaces an env var in a launch env list.

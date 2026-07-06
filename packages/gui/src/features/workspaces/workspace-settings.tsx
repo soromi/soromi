@@ -91,7 +91,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
   }
 
   return (
-    <OverlayShell header={<span className={styles.title}>Workspace settings · {workspace}</span>}>
+    <OverlayShell title={`Workspace settings · ${workspace}`}>
       <div className={styles.body}>
         <Stack gap="md" maw={420}>
           <div>
