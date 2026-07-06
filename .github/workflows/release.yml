@@ -41,7 +41,6 @@ jobs:
             patchelf \
             build-essential
 
-      # No version here: it is read from package.json's "packageManager" field.
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
