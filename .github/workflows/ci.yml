@@ -19,3 +19,16 @@ jobs:
       - run: pnpm check
       - run: pnpm test
       - run: pnpm exec turbo run build --filter='!@soromi/desktop'
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy -p soromi-protocol -p soromi-daemon --all-targets -- -D warnings
+      - run: cargo test -p soromi-protocol -p soromi-daemon

@@ -387,7 +387,10 @@ fn server_workspace_opened_omits_absent_warning() {
 
 #[test]
 fn check_update_and_up_to_date_are_bare_tags() {
-    assert_client(ClientMessage::CheckUpdate, json!({ "type": "check-update" }));
+    assert_client(
+        ClientMessage::CheckUpdate,
+        json!({ "type": "check-update" }),
+    );
     assert_server(ServerMessage::UpToDate, json!({ "type": "up-to-date" }));
 }
 

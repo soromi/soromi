@@ -3,7 +3,7 @@
   "productName": "Soromi",
   "mainBinaryName": "soromi",
   "version": "0.0.0",
-  "identifier": "io.soromi.app",
+  "identifier": "io.soromi.desktop",
   "build": {
     "frontendDist": "../../../packages/gui/dist",
     "devUrl": "http://localhost:1420",
