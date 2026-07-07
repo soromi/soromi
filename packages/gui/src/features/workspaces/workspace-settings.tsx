@@ -3,8 +3,8 @@ import { modals } from '@mantine/modals'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
+//Packages
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -25,13 +25,13 @@ import type { AgentAccount } from '@soromi/protocol'
 /** Per-workspace settings: pick which account each agent runs under, export, or remove. */
 export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const transport = useTransport()
-  const { summary, accounts, popOverlay } = useAppStore(
+  const { summary, accounts } = useClientStore(
     useShallow((s) => ({
       summary: s.workspaces.find((w) => w.name === workspace),
       accounts: s.accounts,
-      popOverlay: s.popOverlay,
     })),
   )
+  const popOverlay = useAppStore((s) => s.popOverlay)
 
   useEffect(() => {
     transport.send({ type: 'list-accounts' })

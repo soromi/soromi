@@ -1,6 +1,9 @@
 import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
+//Packages
+import { useClientStore } from '@soromi/client'
+
 //Store
 import { useAppStore } from '@/stores/app-store'
 
@@ -9,8 +12,9 @@ import styles from './status-banner.module.css'
 
 /** A slim strip above the workspace: daemon-connection status and dismissible account notices. */
 export function StatusBanner() {
-  const { connected, notice, setNotice } = useAppStore(
-    useShallow((s) => ({ connected: s.connected, notice: s.notice, setNotice: s.setNotice })),
+  const connected = useClientStore((s) => s.connected)
+  const { notice, setNotice } = useAppStore(
+    useShallow((s) => ({ notice: s.notice, setNotice: s.setNotice })),
   )
 
   if (!connected) {

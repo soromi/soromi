@@ -10,17 +10,17 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
+//Packages
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
+import { pickFolder } from '@/lib/host'
 import { basename, deriveRootAndFolders } from './folders'
 
 //Constants
@@ -37,14 +37,10 @@ import styles from './welcome.module.css'
 /** The create-space form: pick work folders, choose an agent and account. */
 function CreateSpaceForm({ heading }: { heading?: boolean }) {
   const transport = useTransport()
-  const { error, setError, accounts, openSettings } = useAppStore(
-    useShallow((s) => ({
-      error: s.error,
-      setError: s.setError,
-      accounts: s.accounts,
-      openSettings: s.openSettings,
-    })),
+  const { error, setError, openSettings } = useAppStore(
+    useShallow((s) => ({ error: s.error, setError: s.setError, openSettings: s.openSettings })),
   )
+  const accounts = useClientStore((s) => s.accounts)
   const [folderInputs, setFolderInputs] = useState<string[]>([''])
   const [name, setName] = useState('')
   const [agent, setAgent] = useState('claude')
@@ -74,9 +70,9 @@ function CreateSpaceForm({ heading }: { heading?: boolean }) {
   const removeFolder = (index: number) =>
     setFolderInputs((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== index) : ['']))
 
-  const pickFolder = async (index: number) => {
-    const selected = await open({ directory: true, multiple: false, title: 'Pick a work folder' })
-    if (typeof selected === 'string') updateFolder(index, selected)
+  const pickFolderAt = async (index: number) => {
+    const selected = await pickFolder('Pick a work folder')
+    if (selected) updateFolder(index, selected)
   }
 
   const create = () => {
@@ -132,7 +128,7 @@ function CreateSpaceForm({ heading }: { heading?: boolean }) {
                 }}
               />
               {isTauri && (
-                <Button variant="default" size="sm" onClick={() => pickFolder(index)}>
+                <Button variant="default" size="sm" onClick={() => pickFolderAt(index)}>
                   Pick
                 </Button>
               )}

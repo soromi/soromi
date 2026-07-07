@@ -3,16 +3,18 @@ import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
+//Packages
+import { TerminalSurface, useClientStore } from '@soromi/client'
+
 //Store
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
 import { PROVIDERS } from '@/config/providers'
-import { statusVariant } from '@/config/theme'
+import { colors, statusVariant } from '@/config/theme'
 
 //Components
 import { ProviderIcon } from '@/shared/provider-icon'
-import { TerminalPane } from './terminal-pane'
 
 //Icons
 import CloseIcon from '@/assets/icons/close.svg?react'
@@ -22,7 +24,7 @@ import PlusIcon from '@/assets/icons/plus.svg?react'
 import styles from './terminal-deck.module.css'
 
 //Types
-import type { Transport } from '@/services/transport/transport'
+import type { Transport } from '@soromi/client'
 import type { SessionSummary } from '@soromi/protocol'
 
 /**
@@ -31,14 +33,15 @@ import type { SessionSummary } from '@soromi/protocol'
  * The tab strip belongs to the active workspace; a "＋" opens another session for a chosen agent.
  */
 export function TerminalDeck({ transport }: { transport: Transport }) {
-  const { workspaces, active, activeSession, accounts, selectSession } = useAppStore(
+  const { active, activeSession, selectSession } = useAppStore(
     useShallow((s) => ({
-      workspaces: s.workspaces,
       active: s.active,
       activeSession: s.activeSession,
-      accounts: s.accounts,
       selectSession: s.selectSession,
     })),
+  )
+  const { workspaces, accounts } = useClientStore(
+    useShallow((s) => ({ workspaces: s.workspaces, accounts: s.accounts })),
   )
   const [visited, setVisited] = useState<string[]>([])
 
@@ -132,11 +135,13 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
       )}
       <div className={styles.panes}>
         {visited.map((id) => (
-          <TerminalPane
+          <TerminalSurface
             key={id}
             transport={transport}
             session={id}
             active={id === currentSession}
+            background={colors.bgTerminal}
+            foreground={colors.text}
           />
         ))}
       </div>

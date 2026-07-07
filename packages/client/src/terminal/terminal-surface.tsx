@@ -6,19 +6,19 @@ import '@xterm/xterm/css/xterm.css'
 import clsx from 'clsx'
 import { useEffect, useRef } from 'react'
 
-//Constants
-import { colors } from '@/config/theme'
-
 //Styles
-import styles from './terminal-pane.module.css'
+import styles from './terminal-surface.module.css'
 
 //Types
-import type { Transport } from '@/services/transport/transport'
+import type { Transport } from '../transport/transport'
 
-interface TerminalPaneProps {
+interface TerminalSurfaceProps {
   transport: Transport
   session: string
   active: boolean
+  /** Terminal colors, supplied by the host so the engine stays theme-agnostic. */
+  background: string
+  foreground: string
 }
 
 /**
@@ -26,7 +26,13 @@ interface TerminalPaneProps {
  * (a "parked buffer"): switching away hides it via CSS instead of unmounting, so its scrollback
  * and scroll position survive and it keeps receiving live output in the background.
  */
-export function TerminalPane({ transport, session, active }: TerminalPaneProps) {
+export function TerminalSurface({
+  transport,
+  session,
+  active,
+  background,
+  foreground,
+}: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -40,7 +46,7 @@ export function TerminalPane({ transport, session, active }: TerminalPaneProps) 
       fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: { background: colors.bgTerminal, foreground: colors.text },
+      theme: { background, foreground },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -105,7 +111,7 @@ export function TerminalPane({ transport, session, active }: TerminalPaneProps) 
       termRef.current = null
       fitRef.current = null
     }
-  }, [transport, session])
+  }, [transport, session, background, foreground])
 
   // Refit and focus when this pane becomes the visible one (a hidden pane can't be fitted).
   useEffect(() => {

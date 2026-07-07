@@ -13,6 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@soromi/client': fileURLToPath(new URL('../client/src/index.ts', import.meta.url)),
     },
   },
 })

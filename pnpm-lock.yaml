@@ -27,6 +27,37 @@ importers:
         specifier: ^2
         version: 2.11.4
 
+  packages/client:
+    dependencies:
+      '@soromi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@xterm/addon-fit':
+        specifier: ^0.10.0
+        version: 0.10.0(@xterm/xterm@5.5.0)
+      '@xterm/addon-unicode11':
+        specifier: ^0.8.0
+        version: 0.8.0(@xterm/xterm@5.5.0)
+      '@xterm/addon-webgl':
+        specifier: ^0.18.0
+        version: 0.18.0(@xterm/xterm@5.5.0)
+      '@xterm/xterm':
+        specifier: ^5.5.0
+        version: 5.5.0
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      zustand:
+        specifier: ^5.0.2
+        version: 5.0.14(@types/react@18.3.31)(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.18
+        version: 18.3.31
+
   packages/gui:
     dependencies:
       '@codemirror/lang-cpp':
@@ -89,6 +120,9 @@ importers:
       '@mantine/modals':
         specifier: ^7.15.0
         version: 7.17.8(@mantine/core@7.17.8(@mantine/hooks@7.17.8(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@mantine/hooks@7.17.8(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@soromi/client':
+        specifier: workspace:*
+        version: link:../client
       '@soromi/protocol':
         specifier: workspace:*
         version: link:../protocol

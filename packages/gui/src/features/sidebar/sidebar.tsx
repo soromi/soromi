@@ -2,8 +2,8 @@ import { Menu } from '@mantine/core'
 import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
+//Packages
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -38,33 +38,27 @@ const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
  */
 export function Sidebar() {
   const transport = useTransport()
-  const {
-    workspaces,
-    active,
-    sidebarMode,
-    muted,
-    keepAwake,
-    keepAwakeMode,
-    select,
-    openCreateSpace,
-    openWorkspaceSettings,
-    setMuted,
-    setKeepAwakeMode,
-  } = useAppStore(
+  const { active, sidebarMode, select, openCreateSpace, openWorkspaceSettings } = useAppStore(
     useShallow((s) => ({
-      workspaces: s.workspaces,
       active: s.active,
       sidebarMode: s.sidebarMode,
-      muted: s.active ? (s.muted[s.active] ?? false) : false,
-      keepAwake: s.keepAwake,
-      keepAwakeMode: s.keepAwakeMode,
       select: s.select,
       openCreateSpace: s.openCreateSpace,
       openWorkspaceSettings: s.openWorkspaceSettings,
-      setMuted: s.setMuted,
-      setKeepAwakeMode: s.setKeepAwakeMode,
     })),
   )
+  const { workspaces, mutedMap, keepAwake, keepAwakeMode, setMuted, setKeepAwakeMode } =
+    useClientStore(
+      useShallow((s) => ({
+        workspaces: s.workspaces,
+        mutedMap: s.muted,
+        keepAwake: s.keepAwake,
+        keepAwakeMode: s.keepAwakeMode,
+        setMuted: s.setMuted,
+        setKeepAwakeMode: s.setKeepAwakeMode,
+      })),
+    )
+  const muted = active ? (mutedMap[active] ?? false) : false
 
   const toggleMute = () => {
     if (!active) return

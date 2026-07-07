@@ -16,7 +16,7 @@
   min-height: 0;
 }
 
-/* Subtle, theme-matched scrollbar for the xterm viewport. */
+/* Subtle, theme-matched scrollbar for the xterm viewport. Vars come from the host app's globals. */
 .terminal :global(.xterm-viewport)::-webkit-scrollbar {
   width: 12px;
 }

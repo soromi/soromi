@@ -4,11 +4,8 @@ import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
-
-//Store
-import { useAppStore } from '@/stores/app-store'
+//Packages
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Constants
 import { PROVIDERS } from '@/config/providers'
@@ -39,7 +36,7 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 /** Settings overlay: account profiles (per-provider logins), plus notification mutes. */
 export function Settings() {
   const transport = useTransport()
-  const { accounts, workspaces, muted, providerStatus, setMuted } = useAppStore(
+  const { accounts, workspaces, muted, providerStatus, setMuted } = useClientStore(
     useShallow((s) => ({
       accounts: s.accounts,
       workspaces: s.workspaces,

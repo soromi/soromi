@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
+//Packages
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -16,13 +16,10 @@ import styles from './skill-list.module.css'
  */
 export function SkillList() {
   const transport = useTransport()
-  const { active, activeSession, skills } = useAppStore(
-    useShallow((s) => ({
-      active: s.active,
-      activeSession: s.activeSession,
-      skills: s.skills,
-    })),
+  const { active, activeSession } = useAppStore(
+    useShallow((s) => ({ active: s.active, activeSession: s.activeSession })),
   )
+  const skills = useClientStore((s) => s.skills)
   const session = active ? activeSession[active] : undefined
   const list = session ? skills[session] : undefined
   const [filter, setFilter] = useState('')

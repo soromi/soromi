@@ -1,18 +1,19 @@
 import { Anchor, Menu, Modal, Text } from '@mantine/core'
-import { invoke } from '@tauri-apps/api/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import clsx from 'clsx'
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
-//Services
-import { useTransport } from '@/services/transport/transport-context'
+//Packages
+import { useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
 
+//Utils
+import { openExternal, quit } from '@/lib/host'
+
 //Constants
-import { APP_VERSION, REPO_URL, isTauri } from '@/config'
+import { APP_VERSION, REPO_URL } from '@/config'
 
 //Icons
 import CaretSvg from '@/assets/icons/caret.svg?react'
@@ -28,12 +29,6 @@ import styles from './rail.module.css'
 //Types
 import type { SidebarMode } from '@/stores/app-store'
 import type { ComponentType, SVGProps } from 'react'
-
-/** Opens a URL in the user's browser (Tauri opener), falling back to a new tab in the browser. */
-function openExternal(url: string) {
-  if (isTauri) openUrl(url)
-  else window.open(url, '_blank', 'noreferrer')
-}
 
 const SECTIONS: {
   mode: SidebarMode
@@ -63,9 +58,6 @@ export function Rail() {
   const checkUpdates = () => {
     setNotice('Checking for updates…')
     transport.send({ type: 'check-update' })
-  }
-  const quit = () => {
-    if (isTauri) invoke('quit')
   }
 
   return (
