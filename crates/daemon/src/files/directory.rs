@@ -97,7 +97,7 @@ fn by_dirs_then_name(a: &DirEntry, b: &DirEntry) -> Ordering {
 mod tests {
     use super::*;
     use std::fs;
-    use tempfile::{tempdir, TempDir};
+    use tempfile::{TempDir, tempdir};
 
     fn setup() -> TempDir {
         let dir = tempdir().unwrap();

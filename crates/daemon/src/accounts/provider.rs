@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::config::{Provider, PROVIDERS};
+use crate::config::{PROVIDERS, Provider};
 
 use super::resolver::expand_home;
 

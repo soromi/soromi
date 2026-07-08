@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use crate::accounts::loader::{accounts_dir, load_account_profile};
 use crate::accounts::resolver::{expand_home, resolve_launch_env};
 use crate::files::directory::list_directory;
-use crate::files::reader::{read_file_within, FileRead};
+use crate::files::reader::{FileRead, read_file_within};
 use crate::home::soromi_home;
 use crate::keep_awake::controller::KeepAwakeController;
 use crate::notifications::controller::NotificationController;
@@ -64,6 +64,10 @@ pub struct WorkspaceService {
     /// suppressed (the user is already looking at the app). Set by the shell; false by default,
     /// so the standalone daemon always fires.
     focused: AtomicBool,
+    /// PATH to launch sessions with, when the process's own PATH is too narrow (a GUI-launched
+    /// app has no shell PATH). The shell resolves it and passes it here; `None` keeps the
+    /// process PATH (a terminal-launched daemon already has the full one).
+    launch_path: Option<String>,
 }
 
 impl WorkspaceService {
@@ -72,6 +76,7 @@ impl WorkspaceService {
         notifications: Arc<NotificationController>,
         keep_awake: Arc<KeepAwakeController>,
         sound: Arc<dyn SoundPlayer>,
+        launch_path: Option<String>,
     ) -> Arc<Self> {
         let (change_tx, _) = broadcast::channel(64);
         let service = Arc::new(Self {
@@ -83,6 +88,7 @@ impl WorkspaceService {
             change_tx,
             update: Mutex::new(None),
             focused: AtomicBool::new(false),
+            launch_path,
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -221,13 +227,13 @@ impl WorkspaceService {
                 .iter_mut()
                 .find(|(n, _)| n == workspace)
                 .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
-            if let Some(id) = account {
-                if !meta.accounts.iter().any(|a| a.agent == agent) {
-                    meta.accounts.push(AgentAccount {
-                        id,
-                        agent: agent.clone(),
-                    });
-                }
+            if let Some(id) = account
+                && !meta.accounts.iter().any(|a| a.agent == agent)
+            {
+                meta.accounts.push(AgentAccount {
+                    id,
+                    agent: agent.clone(),
+                });
             }
             meta.sessions.push(session.clone());
             (
@@ -542,7 +548,15 @@ impl WorkspaceService {
         }
 
         let account = account_for(accounts, &session.agent);
-        let base_env: Vec<(String, String)> = std::env::vars().collect();
+        let mut base_env: Vec<(String, String)> = std::env::vars().collect();
+        // Use the shell-resolved PATH when set, so a GUI-launched app's agents find their
+        // binaries, without mutating this process's global environment.
+        if let Some(path) = &self.launch_path {
+            match base_env.iter_mut().find(|(key, _)| key == "PATH") {
+                Some(entry) => entry.1 = path.clone(),
+                None => base_env.push(("PATH".to_string(), path.clone())),
+            }
+        }
         let mut env = base_env.clone();
         let mut warning = None;
         match load_account_profile(&account, &accounts_dir()) {
@@ -679,18 +693,17 @@ fn basename(command: &str) -> &str {
 /// A provider's config dir for an account: its profile `configDir` if set, else the provider's
 /// config env var (e.g. `CLAUDE_CONFIG_DIR` / `CODEX_HOME`), else `~/<default>`.
 fn provider_config_dir(account: &str, provider: &str, env_var: &str, default: &str) -> PathBuf {
-    if let Ok(profile) = load_account_profile(account, &accounts_dir()) {
-        if let Some(dir) = profile
+    if let Ok(profile) = load_account_profile(account, &accounts_dir())
+        && let Some(dir) = profile
             .providers
             .get(provider)
             .and_then(|provider| provider.config_dir.as_ref())
-        {
-            let home = dirs::home_dir()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            return PathBuf::from(expand_home(dir, &home));
-        }
+    {
+        let home = dirs::home_dir()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        return PathBuf::from(expand_home(dir, &home));
     }
     std::env::var(env_var)
         .map(PathBuf::from)
@@ -768,12 +781,12 @@ fn aggregate_status(sessions: &[SessionSummary]) -> Status {
 /// bindings-and-sessions shape. Returns true if anything was synthesized (so it is re-persisted).
 fn migrate(space: &mut PersistedSpace) -> bool {
     let mut changed = false;
-    if space.accounts.is_empty() {
-        if let Some(account) = space.account.take() {
-            let agent = space.agent.clone().unwrap_or_else(|| "claude".to_string());
-            space.accounts.push(AgentAccount { id: account, agent });
-            changed = true;
-        }
+    if space.accounts.is_empty()
+        && let Some(account) = space.account.take()
+    {
+        let agent = space.agent.clone().unwrap_or_else(|| "claude".to_string());
+        space.accounts.push(AgentAccount { id: account, agent });
+        changed = true;
     }
     if space.sessions.is_empty() {
         let agent = space
@@ -822,14 +835,14 @@ mod tests {
             Arc::new(NoopKeepAwake),
             KeepAwakeMode::Off,
         ));
-        WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer))
+        WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None)
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn creates_lists_and_removes_a_space() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
 
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("readme.md"), "hi").unwrap();
@@ -862,14 +875,14 @@ mod tests {
         assert!(service.summaries().is_empty());
 
         service.dispose();
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn opens_closes_and_restores_sessions() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
         let root = tempfile::tempdir().unwrap();
 
         let hub = service();
@@ -896,14 +909,14 @@ mod tests {
         assert_eq!(restored.summaries()[0].sessions.len(), 1);
 
         restored.dispose();
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn migrates_legacy_single_agent_space() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
         let root = tempfile::tempdir().unwrap();
         let legacy = format!(
             r#"[{{"name":"kazomi","folders":["."],"agent":"/bin/cat","account":"personal","root":"{}"}}]"#,
@@ -920,7 +933,7 @@ mod tests {
         assert_eq!(summaries[0].sessions[0].agent, "/bin/cat");
 
         service.dispose();
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 
     #[test]
@@ -961,7 +974,7 @@ mod tests {
     #[serial_test::serial]
     async fn rejects_a_missing_root() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
         let service = service();
         let result = service.create_space(CreateSpaceInput {
             name: "x".into(),
@@ -971,6 +984,6 @@ mod tests {
             folders: None,
         });
         assert!(result.is_err());
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 }

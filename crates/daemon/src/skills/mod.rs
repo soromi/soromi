@@ -193,11 +193,15 @@ mod tests {
 
         let roots = vec![workspace.path().join("api"), workspace.path().join("web")];
         let skills = claude_skills(config.path(), &roots);
-        assert!(skills
-            .iter()
-            .any(|s| s.name == "deploy" && s.scope == SkillScope::Project));
-        assert!(skills
-            .iter()
-            .any(|s| s.name == "build" && s.scope == SkillScope::Project));
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.name == "deploy" && s.scope == SkillScope::Project)
+        );
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.name == "build" && s.scope == SkillScope::Project)
+        );
     }
 }

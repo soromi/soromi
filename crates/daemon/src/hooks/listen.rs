@@ -32,10 +32,10 @@ pub fn spawn(service: Arc<WorkspaceService>) {
                 if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
                     return;
                 }
-                if let Ok(event) = serde_json::from_str::<super::Event>(line.trim()) {
-                    if let Some(cue) = super::cue_from(&event.cue) {
-                        service.handle_agent_event(&event.session, cue, event.agent.as_deref());
-                    }
+                if let Ok(event) = serde_json::from_str::<super::Event>(line.trim())
+                    && let Some(cue) = super::cue_from(&event.cue)
+                {
+                    service.handle_agent_event(&event.session, cue, event.agent.as_deref());
                 }
             });
         }

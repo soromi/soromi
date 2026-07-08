@@ -4,11 +4,11 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, accept_async};
 
 use soromi_protocol::{ClientMessage, ServerMessage};
 
-use super::connection::{send_state, Connection};
+use super::connection::{Connection, send_state};
 use crate::accounts::store::FileAccountManager;
 use crate::workspaces::service::WorkspaceService;
 

@@ -34,6 +34,8 @@ async fn main() {
         notifications.clone(),
         keep_awake.clone(),
         create_sound_player(),
+        // Terminal-launched: this process already has the full shell PATH.
+        None,
     );
     let accounts = Arc::new(FileAccountManager);
 
@@ -81,7 +83,7 @@ async fn main() {
 async fn shutdown() {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}

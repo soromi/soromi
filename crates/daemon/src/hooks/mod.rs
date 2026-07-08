@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::home::soromi_home;
 use crate::sound::player::Cue;
@@ -121,7 +121,7 @@ pub fn ensure_codex_notify(config_dir: &Path) -> io::Result<()> {
 /// idempotent. Note: Codex requires the user to trust project/user hooks via its `/hooks` command
 /// before they fire.
 pub fn ensure_codex_hooks(config_dir: &Path) -> io::Result<()> {
-    use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
+    use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
 
     let Ok(exe) = std::env::current_exe() else {
         return Ok(());
@@ -224,9 +224,10 @@ mod tests {
         let stop = root["hooks"]["Stop"].as_array().unwrap();
         // The user's hook plus exactly one Soromi hook (not two).
         assert_eq!(stop.len(), 2);
-        assert!(stop
-            .iter()
-            .any(|e| e["hooks"][0]["command"] == "user-thing"));
+        assert!(
+            stop.iter()
+                .any(|e| e["hooks"][0]["command"] == "user-thing")
+        );
         assert!(stop.iter().any(|e| e["hooks"][0]["args"][0] == "hook"));
         assert_eq!(
             root["hooks"]["PermissionRequest"].as_array().unwrap().len(),

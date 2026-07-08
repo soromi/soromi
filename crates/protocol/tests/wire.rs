@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use soromi_protocol::{
     AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
     ProviderConfig, ServerMessage, SessionSummary, Status, WorkspaceSummary,

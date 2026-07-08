@@ -56,27 +56,30 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
-/// Import the login shell's PATH into this process before the in-process daemon starts, so its
-/// sessions inherit the same PATH a terminal would have.
+/// Resolves the login shell's PATH, so the in-process daemon can launch agents with the same
+/// PATH a terminal would have (a GUI-launched app inherits only a minimal one). Returns it for
+/// the daemon to use as its session PATH, rather than mutating this process's environment.
 #[cfg(target_os = "macos")]
-fn detect_launch_path() {
+fn detect_launch_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let output = std::process::Command::new(shell)
         .args(["-ilc", "printf %s \"$PATH\""])
         .stdin(std::process::Stdio::null())
-        .output();
-    if let Ok(out) = output {
-        if let Ok(path) = String::from_utf8(out.stdout) {
-            let path = path.trim();
-            if !path.is_empty() {
-                std::env::set_var("PATH", path);
-            }
-        }
+        .output()
+        .ok()?;
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn detect_launch_path() {}
+fn detect_launch_path() -> Option<String> {
+    None
+}
 
 fn main() {
     // Invoked as an agent-event bridge (`<exe> hook <cue> <agent>`) by a Claude hook: deliver
@@ -86,15 +89,15 @@ fn main() {
         return;
     }
 
-    // Must run before the daemon (and its restored sessions) start.
-    detect_launch_path();
+    // The daemon launches sessions with this PATH (a GUI launch has only a minimal one).
+    let launch_path = detect_launch_path();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![quit])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             // Ask for notification permission up front so the first banner isn't dropped.
             let _ = handle.notification().request_permission();
@@ -117,6 +120,7 @@ fn main() {
                     notifications.clone(),
                     keep_awake.clone(),
                     create_sound_player(),
+                    launch_path.clone(),
                 );
                 let accounts = Arc::new(FileAccountManager);
 

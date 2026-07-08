@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, Stream, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::{Error, Message};
 
@@ -69,7 +69,7 @@ where
 #[serial_test::serial]
 async fn resize_reaches_the_pty() {
     let home = tempfile::tempdir().unwrap();
-    std::env::set_var("SOROMI_HOME", home.path());
+    soromi_daemon::home::set_soromi_home(Some(home.path().to_path_buf()));
     let root = tempfile::tempdir().unwrap();
 
     let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
@@ -77,7 +77,7 @@ async fn resize_reaches_the_pty() {
         Arc::new(NoopKeepAwake),
         KeepAwakeMode::Off,
     ));
-    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer));
+    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None);
     let accounts = Arc::new(FileAccountManager);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -137,14 +137,14 @@ async fn resize_reaches_the_pty() {
     .unwrap_or(false);
     assert!(got, "PTY did not report the resized dimensions");
 
-    std::env::remove_var("SOROMI_HOME");
+    soromi_daemon::home::set_soromi_home(None);
 }
 
 #[tokio::test]
 #[serial_test::serial]
 async fn gui_can_create_list_attach_and_exchange_io() {
     let home = tempfile::tempdir().unwrap();
-    std::env::set_var("SOROMI_HOME", home.path());
+    soromi_daemon::home::set_soromi_home(Some(home.path().to_path_buf()));
     let root = tempfile::tempdir().unwrap();
 
     let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
@@ -152,7 +152,7 @@ async fn gui_can_create_list_attach_and_exchange_io() {
         Arc::new(NoopKeepAwake),
         KeepAwakeMode::Off,
     ));
-    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer));
+    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None);
     let accounts = Arc::new(FileAccountManager);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -219,5 +219,5 @@ async fn gui_can_create_list_attach_and_exchange_io() {
     .unwrap_or(false);
     assert!(echoed, "did not receive echoed terminal output");
 
-    std::env::remove_var("SOROMI_HOME");
+    soromi_daemon::home::set_soromi_home(None);
 }

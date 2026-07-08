@@ -69,7 +69,7 @@ mod tests {
     #[serial_test::serial]
     fn round_trips_a_profile_through_the_store() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
 
         let manager = FileAccountManager;
         let profile = AccountProfile {
@@ -81,6 +81,6 @@ mod tests {
         manager.remove("work").unwrap();
         assert!(manager.list().is_empty());
 
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 }

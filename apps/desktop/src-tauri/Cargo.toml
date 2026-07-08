@@ -1,7 +1,7 @@
 [package]
 name = "soromi-desktop"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 # The produced binary is `soromi`, so the dev process / macOS menu-bar name reads "soromi"

@@ -35,7 +35,7 @@ mod tests {
     #[serial_test::serial]
     fn round_trips_spaces_through_disk() {
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("SOROMI_HOME", home.path());
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
 
         assert!(load_spaces().is_empty());
         let spaces = vec![PersistedSpace {
@@ -57,6 +57,6 @@ mod tests {
         save_spaces(&spaces);
         assert_eq!(load_spaces(), spaces);
 
-        std::env::remove_var("SOROMI_HOME");
+        crate::home::set_soromi_home(None);
     }
 }
