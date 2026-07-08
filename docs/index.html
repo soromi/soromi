@@ -13,6 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" />
 <link rel="stylesheet" href="styles.css" />
+<script defer src="https://cloud.umami.is/script.js" data-website-id="364df764-b075-43c3-bdd8-a434adce9637"></script>
 </head>
 <body>
 
@@ -430,6 +431,87 @@
     '.section-head, .problem-card, .spotlight, .feature, .how .col, .remote-copy, .phone-wrap, .providers, .nongoals, .final .wrap'
   )
   for (const el of targets) el.classList.add('reveal')
+
+  // Type the headline on load. Chars are pre-wrapped in spans and revealed in
+  // place, so the centered two-line layout never shifts while typing.
+  const typeHeadline = () => {
+    const h1 = document.querySelector('.hero h1')
+    if (!h1) return
+    const walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT)
+    const textNodes = []
+    while (walker.nextNode()) textNodes.push(walker.currentNode)
+    const chars = []
+    for (const node of textNodes) {
+      const frag = document.createDocumentFragment()
+      for (const ch of node.nodeValue) {
+        const span = document.createElement('span')
+        span.className = 'ch'
+        span.textContent = ch
+        frag.appendChild(span)
+        chars.push(span)
+      }
+      node.parentNode.replaceChild(frag, node)
+    }
+    const cursor = document.createElement('span')
+    cursor.className = 'type-cursor'
+    let i = 0
+    const step = () => {
+      if (i >= chars.length) {
+        setTimeout(() => {
+          cursor.style.opacity = '0'
+          setTimeout(() => cursor.remove(), 700)
+        }, 2500)
+        return
+      }
+      const ch = chars[i]
+      ch.classList.add('on')
+      ch.after(cursor)
+      i++
+      setTimeout(step, 35)
+    }
+    setTimeout(step, 250)
+  }
+  typeHeadline()
+
+  // Type the spotlight code block like a terminal, once, when it scrolls in.
+  const typeCode = (block) => {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    while (walker.nextNode()) nodes.push({ node: walker.currentNode, text: walker.currentNode.nodeValue })
+    block.style.minHeight = `${block.offsetHeight}px`
+    for (const { node } of nodes) node.nodeValue = ''
+    const cursor = document.createElement('span')
+    cursor.className = 'type-cursor'
+    block.appendChild(cursor)
+    let i = 0
+    let j = 0
+    const step = () => {
+      while (i < nodes.length && nodes[i].text.trim() === '') {
+        nodes[i].node.nodeValue = nodes[i].text
+        i++
+      }
+      if (i >= nodes.length) {
+        setTimeout(() => {
+          cursor.style.opacity = '0'
+          setTimeout(() => cursor.remove(), 700)
+        }, 3500)
+        return
+      }
+      const { node, text } = nodes[i]
+      j++
+      node.nodeValue = text.slice(0, j)
+      node.parentNode.insertBefore(cursor, node.nextSibling)
+      if (j >= text.length) {
+        i++
+        j = 0
+        setTimeout(step, 300)
+      } else {
+        setTimeout(step, 20)
+      }
+    }
+    step()
+  }
+
   const io = new IntersectionObserver(
     (entries) => {
       let i = 0
@@ -443,6 +525,8 @@
           el.classList.remove('reveal', 'in')
           el.style.removeProperty('transition-delay')
         }, 700 + i * 70)
+        const code = el.matches('.spotlight') && el.querySelector('.code')
+        if (code) typeCode(code)
       }
     },
     { rootMargin: '0px 0px -8% 0px' }

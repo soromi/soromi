@@ -660,6 +660,7 @@ section {
   gap: 18px;
 }
 .feature {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
@@ -1160,14 +1161,10 @@ footer .jp {
 
 /* hero settles top to bottom on load */
 .hero .kicker,
-.hero h1,
 .hero .lede,
 .hero .sub,
 .hero .cta {
   animation: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-.hero h1 {
-  animation-delay: 0.08s;
 }
 .hero .lede {
   animation-delay: 0.16s;
@@ -1187,6 +1184,116 @@ footer .jp {
 }
 .p-dot.warn {
   animation: dot-pulse 2.2s ease-out infinite;
+}
+
+/* feature cards: a green arc travels the border ring, each card at its own pace */
+@property --border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes border-spin {
+  to {
+    --border-angle: 360deg;
+  }
+}
+.feature::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 12px;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--border-angle),
+    transparent 0%,
+    transparent 82%,
+    rgba(62, 207, 142, 0.55) 91%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation-name: border-spin;
+  animation-duration: var(--spin-dur, 9s);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-direction: var(--spin-dir, normal);
+  animation-delay: var(--spin-delay, 0s);
+}
+.feature:nth-child(1) {
+  --spin-dur: 8s;
+  --spin-delay: -3s;
+}
+.feature:nth-child(2) {
+  --spin-dur: 11s;
+  --spin-delay: -7s;
+  --spin-dir: reverse;
+}
+.feature:nth-child(3) {
+  --spin-dur: 9.5s;
+  --spin-delay: -1.5s;
+}
+.feature:nth-child(4) {
+  --spin-dur: 12.5s;
+  --spin-delay: -9s;
+}
+.feature:nth-child(5) {
+  --spin-dur: 7.5s;
+  --spin-delay: -5s;
+  --spin-dir: reverse;
+}
+.feature:nth-child(6) {
+  --spin-dur: 10.5s;
+  --spin-delay: -2.5s;
+}
+.feature:nth-child(7) {
+  --spin-dur: 13s;
+  --spin-delay: -6s;
+  --spin-dir: reverse;
+}
+.feature:nth-child(8) {
+  --spin-dur: 8.8s;
+  --spin-delay: -4s;
+}
+.feature:nth-child(9) {
+  --spin-dur: 11.8s;
+  --spin-delay: -8s;
+}
+
+/* headline typing (char spans added by the script; chars keep their layout slot) */
+.hero h1 .ch {
+  opacity: 0;
+}
+.hero h1 .ch.on {
+  opacity: 1;
+}
+.hero h1 .type-cursor {
+  display: inline-block;
+  width: 0.45em;
+  height: 0.78em;
+  margin-right: -0.45em;
+  vertical-align: -0.04em;
+  background: var(--accent);
+  animation: blink 1.1s steps(1) infinite;
+  transition: opacity 0.6s;
+}
+
+/* typing cursor for the spotlight code block (added by the script) */
+.code .type-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 3px;
+  vertical-align: -1px;
+  background: var(--accent);
+  animation: blink 1.1s steps(1) infinite;
+  transition: opacity 0.6s;
 }
 
 /* scroll reveal: the script tags elements, so without JS nothing is hidden */
@@ -1299,7 +1406,6 @@ footer .jp {
   }
   .cursor,
   .hero .kicker,
-  .hero h1,
   .hero .lede,
   .hero .sub,
   .hero .cta,
@@ -1311,6 +1417,9 @@ footer .jp {
   .feature:hover,
   .btn:hover {
     transform: none;
+  }
+  .feature::before {
+    display: none;
   }
   .reveal {
     opacity: 1;
