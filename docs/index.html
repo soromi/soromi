@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Soromi: a small, fast home for AI coding agents</title>
+<meta name="description" content="Every project gets its own agent, login, and terminal. Switch between them like Slack workspaces. Free and open source." />
+<meta property="og:title" content="Soromi: a small, fast home for AI coding agents" />
+<meta property="og:description" content="Every project gets its own agent, login, and terminal. Switch between them like Slack workspaces. Free and open source." />
+<meta property="og:type" content="website" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ── Nav ─────────────────────────── -->
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <img src="assets/logo.png" alt="Soromi" />
+    </a>
+    <nav class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#remote">Remote</a>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#providers">Agents</a>
+      <a class="btn" href="https://github.com/soromi/soromi" target="_blank" rel="noopener">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.1-1.47-1.1-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+
+<!-- ── Hero ─────────────────────────── -->
+<section class="hero" id="top">
+  <div class="glow"></div>
+  <div class="wrap">
+    <span class="kicker">Agents, projects, logins. One place.</span>
+    <h1>A small, fast home for<br /><span class="accent">AI coding agents</span></h1>
+    <p class="lede">
+      Every project gets its own agent, login, and terminal.
+      Switch between them like Slack workspaces.
+    </p>
+    <p class="sub">Close the window; the work keeps going. Free and open source.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/soromi/soromi" target="_blank" rel="noopener">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.1-1.47-1.1-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        View on GitHub
+      </a>
+      <a class="btn" href="#features">Explore the features</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── App preview ─────────────────── -->
+<section class="preview">
+  <div class="wrap">
+    <div class="window">
+      <div class="titlebar">
+        <div class="traffic"><span></span><span></span><span></span></div>
+        <div class="app-name"><b>Soromi</b></div>
+      </div>
+      <div class="app">
+        <nav class="rail">
+          <div class="ws-avatar" title="Soromi menu">
+            <img src="assets/favicon.svg" alt="" aria-hidden="true" />
+            <span class="caret">⌄</span>
+          </div>
+          <hr />
+          <div class="ico on" title="Files">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </div>
+          <div class="ico" title="Skills">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 14l.6 1.7 1.7.7-1.7.6L18 18.7l-.6-1.7-1.7-.6 1.7-.7z"/></svg>
+          </div>
+          <div class="spacer"></div>
+          <div class="ico" title="New workspace">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </div>
+          <div class="ico" title="Settings">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.5-2-1.5c.07-.4.1-.8.1-1.2Z"/></svg>
+          </div>
+        </nav>
+        <aside class="sidebar">
+          <div class="sb-header">
+            <span class="ws-badge">So</span>
+            <span class="sb-ws-name">soromi</span>
+            <span class="sb-caret">⌄</span>
+            <span class="grow"></span>
+            <span class="sb-ico" title="Notifications">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.5 21a1.5 1.5 0 0 0 3 0"/></svg>
+            </span>
+            <span class="sb-ico on" title="Keep-awake on">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 9h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M7 3v2M11 4v1M15 3v2"/></svg>
+            </span>
+          </div>
+          <div class="section-label">Files</div>
+          <div class="tree-item repo"><span class="chev">▾</span> packages/protocol</div>
+          <div class="tree-item indent-1"><span class="chev">▾</span> src</div>
+          <div class="tree-item indent-2"><span class="fname">messages.ts</span></div>
+          <div class="tree-item indent-2"><span class="fname">schema.ts</span></div>
+          <div class="tree-item indent-1"><span class="fname">README.md</span></div>
+          <div class="tree-item repo"><span class="chev">▾</span> packages/gui</div>
+          <div class="tree-item indent-1"><span class="chev">▾</span> src</div>
+          <div class="tree-item indent-2"><span class="fname">app.tsx</span></div>
+          <div class="tree-item indent-2"><span class="fname">transport.ts</span></div>
+          <div class="tree-item indent-1"><span class="fname">package.json</span></div>
+        </aside>
+        <main class="content">
+          <div class="tabstrip">
+            <div class="tab active"><span class="acct-swatch"></span>personal<span class="dot ok"></span></div>
+            <div class="tab-add" title="New terminal">+</div>
+          </div>
+          <div class="terminal cc">
+            <div class="cc-head">
+              <div class="crab"><span></span><span></span></div>
+              <div>
+                <div><span class="strong">Claude Code</span> <span class="muted">v2.1.170</span></div>
+                <div class="dim">Opus 4.8 (1M context) with high effort · Claude Max</div>
+                <div class="muted">~/soromi/code/packages/protocol</div>
+              </div>
+            </div>
+            <div class="grow-v"></div>
+            <div class="cc-input"><span class="prompt">›</span> <span class="cursor"></span></div>
+            <div class="cc-foot"><span>← for agents</span><span class="link">⧉ In README.md</span></div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── The problem ─────────────────── -->
+<section class="section-pad">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Built for real projects</div>
+      <h2>Real projects are messy. Soromi isn't.</h2>
+      <p>Many folders, many logins, work that shouldn't stop when you do. Most tools handle one at a time. Soromi handles all of it.</p>
+    </div>
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="n">01</div>
+        <h3>A project has many folders</h3>
+        <p>Api, web, mobile. One workspace holds them all, so the agent understands the whole project, not just one folder at a time.</p>
+      </div>
+      <div class="problem-card">
+        <div class="n">02</div>
+        <h3>You have many logins</h3>
+        <p>Work, personal, client. Each project uses its own login, kept cleanly apart. No logging in and out, no mixing them up.</p>
+      </div>
+      <div class="problem-card">
+        <div class="n">03</div>
+        <h3>Work keeps going</h3>
+        <p>Lock your machine, close the window. The agents keep working and are right where you left them when you return.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── Features ─────────────────── -->
+<section class="section-pad" id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Features</div>
+      <h2>Everything the agent needs, nothing it doesn't</h2>
+      <p>Point it at your folders. That's the whole setup.</p>
+    </div>
+
+    <!-- Spotlight: folders as context -->
+    <div class="spotlight">
+      <div>
+        <div class="tag">Focus the agent</div>
+        <h3>Give the agent only the folders that matter</h3>
+        <p>
+          Pick the folders an agent should see: one, a few, or a whole project.
+          It works with exactly those and ignores everything else.
+        </p>
+        <p>
+          Less clutter for the agent means clearer answers and fewer wrong turns.
+        </p>
+      </div>
+      <div class="code">
+        <div><span class="c"># project: kazomi</span></div>
+        <div><span class="g">folders you picked:</span></div>
+        <div>  <span class="sel">kazomi-api</span></div>
+        <div>  <span class="p">kazomi-web</span></div>
+        <div>  <span class="p">kazomi-mobile</span></div>
+        <div>&nbsp;</div>
+        <div><span class="c"># the agent sees these, and nothing else</span></div>
+      </div>
+    </div>
+
+    <!-- Feature grid -->
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="14" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/></svg></div>
+        <h3>Run several agents at once</h3>
+        <p>Open several terminals in one project and run more projects side by side. Name them, and they all come back after a restart.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M7 6.5h.01"/></svg></div>
+        <h3>Switch like Slack workspaces</h3>
+        <p>Every project sits in the sidebar. Jump between them in a click, each with its own agent, login, and files.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/><path d="M8 13l4 4 4-4"/><path d="M12 3v14"/></svg></div>
+        <h3>Terminals that stay alive</h3>
+        <p>Close the app and your agents keep running. Open it again and pick up right where you left off.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"/></svg></div>
+        <h3>Logins kept separate</h3>
+        <p>Give each project its own login: personal, work, or client. They never mix, and Soromi stores no passwords.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 16v-5a6 6 0 1 0-12 0v5l-1.5 2h15Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></div>
+        <h3>Know when it needs you</h3>
+        <p>A sound and a notification when an agent needs your input or finishes, even when the app is closed. Mute any project you like.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 8h10v6a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4Z"/><path d="M16 9h1.5a2 2 0 0 1 0 4H16"/><path d="M9 3v2M12 3v2"/></svg></div>
+        <h3>Keep the machine awake</h3>
+        <p>Keep your machine from sleeping while an agent works, so long jobs finish instead of stalling.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4l2 2.5h7A1.5 1.5 0 0 1 20 8v10a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18Z"/></svg></div>
+        <h3>Browse files without leaving</h3>
+        <p>A quick, read-only view of your files. Glance at what the agent did; your real editor stays your editor.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 3 4 14h6l-1 7 9-11h-6l1-7Z"/></svg></div>
+        <h3>Skills at a click</h3>
+        <p>See each project's commands and skills in the sidebar, and drop one straight into the terminal.</p>
+      </div>
+      <div class="feature">
+        <div class="ficon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v4"/><path d="M5.6 5.6l2.8 2.8"/><path d="M3 12h4"/><path d="M4 20l6-6"/><path d="M21 3l-9 9 5 2 2 5 2-16Z"/></svg></div>
+        <h3>Share a setup, or skip it</h3>
+        <p>Save a project's setup to a small file others can open, or just start fresh. Either way works.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── Remote ─────────────── -->
+<section class="section-pad" id="remote">
+  <div class="wrap">
+    <div class="remote">
+      <div class="remote-copy">
+        <div class="eyebrow">Remote</div>
+        <h2>Your agents, from your phone</h2>
+        <p>
+          Step away from your desk and your agents keep going. Open Soromi in your
+          phone's browser to see what each one is doing and tap to answer when it
+          needs you.
+        </p>
+        <ul class="remote-points">
+          <li>Scan a QR code once to pair your phone.</li>
+          <li>Everything travels over a private, encrypted link.</li>
+          <li>No one else can read your work, not even us.</li>
+          <li>Prefer to run it yourself? The relay is yours to host.</li>
+        </ul>
+      </div>
+      <div class="phone-wrap">
+        <div class="phone-glow"></div>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="p-head">
+              <span class="p-badge">So</span>
+              <span class="p-name">soromi</span>
+              <span class="p-dot warn"></span>
+              <span class="grow"></span>
+              <span class="p-time">waiting</span>
+            </div>
+            <div class="p-term">
+              <div class="p-muted">Running tests…</div>
+              <div><span class="p-ok">18 passed</span>, 0 failed</div>
+              <div>&nbsp;</div>
+              <div class="p-ask">Allow write to <span class="p-path">protocol.rs</span>?</div>
+              <div class="p-btns">
+                <span class="p-btn yes">Allow</span>
+                <span class="p-btn no">Deny</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── How it works ─────────────── -->
+<section class="section-pad" id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">How it works</div>
+      <h2>Simple under the hood</h2>
+      <p>A small background service does the real work. Whatever you look at, on your laptop or your phone, is just a window onto it.</p>
+    </div>
+    <div class="how">
+      <div class="col">
+        <div class="lbl">The engine</div>
+        <h3>Runs your agents</h3>
+        <p>It runs your terminals in the background, keeps track of what each agent is doing, and sends you alerts, window open or not.</p>
+        <div class="flow">always on, quietly</div>
+      </div>
+      <div class="col">
+        <div class="lbl">One shared language</div>
+        <h3>Always in sync</h3>
+        <p>The app and the engine speak the same language, so what you see always matches what's really happening.</p>
+        <div class="flow">never out of date</div>
+      </div>
+      <div class="col">
+        <div class="lbl">The window</div>
+        <h3>Just a view</h3>
+        <p>The screen only shows what the engine sends and passes your typing back. That's why the very same view can run on your phone.</p>
+        <div class="flow">runs anywhere</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── Providers ─────────────── -->
+<section class="section-pad" id="providers">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Agents</div>
+      <h2>Works with the agents you already use</h2>
+      <p>No new agent to learn. Soromi runs the ones you already have.</p>
+    </div>
+    <div class="providers">
+      <table>
+        <thead>
+          <tr><th>Agent</th><th>Separate logins</th><th>Alerts</th><th>Folder focus</th><th>Skills</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">Claude Code</td>
+            <td><span class="yes">Yes</span></td>
+            <td><span class="yes">Yes</span></td>
+            <td><span class="yes">Yes</span></td>
+            <td>Commands + skills</td>
+          </tr>
+          <tr>
+            <td class="name">Codex</td>
+            <td><span class="yes">Yes</span></td>
+            <td>When it finishes</td>
+            <td>First folder</td>
+            <td>Prompts + skills</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── Non-goals ─────────────── -->
+<section class="section-pad">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Deliberately small</div>
+      <h2>What Soromi will never be</h2>
+      <p>What it leaves out is the point.</p>
+    </div>
+    <div class="nongoals">
+      <div class="grid">
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No roles or personas</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No boards, backlogs, or tickets</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No prompt library</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No usage dashboards</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No fiddling with your git branches</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No file editing; it stays read-only</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No AI gimmicks bolted on</div>
+        <div class="item"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg> No extra apps to install</div>
+      </div>
+      <p class="note">It does the job and <b>stays out of the way.</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Final CTA ─────────────── -->
+<section class="final">
+  <div class="wrap">
+    <h2>Gather your agents in one calm place</h2>
+    <p>MIT licensed. Point it at a folder and go.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/soromi/soromi" target="_blank" rel="noopener">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.1-1.47-1.1-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        Get Soromi on GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ─────────────── -->
+<footer>
+  <div class="wrap">
+    <div class="foot-brand">
+      <img src="assets/logo.png" alt="Soromi" />
+    </div>
+    <span class="jp">揃う · gathered, aligned, complete as a set</span>
+    <div class="foot-links">
+      <a href="https://github.com/soromi/soromi" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/soromi/soromi/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+;(() => {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  if (!('IntersectionObserver' in window)) return
+  const targets = document.querySelectorAll(
+    '.section-head, .problem-card, .spotlight, .feature, .how .col, .remote-copy, .phone-wrap, .providers, .nongoals, .final .wrap'
+  )
+  for (const el of targets) el.classList.add('reveal')
+  const io = new IntersectionObserver(
+    (entries) => {
+      let i = 0
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        const el = entry.target
+        io.unobserve(el)
+        el.style.transitionDelay = `${i++ * 70}ms`
+        el.classList.add('in')
+        setTimeout(() => {
+          el.classList.remove('reveal', 'in')
+          el.style.removeProperty('transition-delay')
+        }, 700 + i * 70)
+      }
+    },
+    { rootMargin: '0px 0px -8% 0px' }
+  )
+  for (const el of targets) io.observe(el)
+})()
+</script>
+
+</body>
+</html>
