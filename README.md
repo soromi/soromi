@@ -17,6 +17,15 @@ gets a terminal, an agent, and the right account. Switch between them like Slack
 The daemon owns the terminals, so your agents keep running when you close the window. The GUI
 is just a viewport onto them.
 
+## Download
+
+Grab the latest build for your platform from the
+[releases page](https://github.com/soromi/soromi/releases/latest):
+
+- **macOS:** the universal `.dmg` (Apple Silicon and Intel)
+- **Windows:** the `-setup.exe` installer (or the `.msi`)
+- **Linux:** the `.AppImage` (or the `.deb` / `.rpm` packages)
+
 ## Why?
 
 I built Soromi because I was tired of juggling a separate editor window for every project and
