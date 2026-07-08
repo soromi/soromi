@@ -56,6 +56,28 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Import the login shell's PATH into this process before the in-process daemon starts, so its
+/// sessions inherit the same PATH a terminal would have.
+#[cfg(target_os = "macos")]
+fn detect_launch_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = std::process::Command::new(shell)
+        .args(["-ilc", "printf %s \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .output();
+    if let Ok(out) = output {
+        if let Ok(path) = String::from_utf8(out.stdout) {
+            let path = path.trim();
+            if !path.is_empty() {
+                std::env::set_var("PATH", path);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn detect_launch_path() {}
+
 fn main() {
     // Invoked as an agent-event bridge (`<exe> hook <cue> <agent>`) by a Claude hook: deliver
     // the event to the running daemon over its socket and exit, before any Tauri/window init.
@@ -63,6 +85,9 @@ fn main() {
         soromi_daemon::hooks::bridge::deliver(&invocation);
         return;
     }
+
+    // Must run before the daemon (and its restored sessions) start.
+    detect_launch_path();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -126,13 +151,20 @@ fn main() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 // Hide instead of exit, so the in-process daemon (and its agents) stay alive.
                 // Clicking the dock icon reopens the window (see RunEvent::Reopen below).
                 let _ = window.hide();
                 api.prevent_close();
+                // A hidden window is "away", so events should fire again.
+                window.state::<DaemonState>().hub.set_focused(false);
             }
+            // Suppress agent-event sounds/banners while the window has focus; fire when away.
+            WindowEvent::Focused(focused) => {
+                window.state::<DaemonState>().hub.set_focused(*focused);
+            }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building the Soromi desktop shell")

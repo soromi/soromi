@@ -1,41 +1,48 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use soromi_protocol::{Skill, SkillKind, SkillScope};
 
 /// Lists a Claude session's slash commands (`commands/`) and skills, from the account's config
-/// dir (user scope) and the workspace root's `.claude/` (project scope).
-pub fn claude_skills(config_dir: &Path, root: &Path) -> Vec<Skill> {
-    scan(config_dir, root, ".claude", "commands")
+/// dir (user scope) and each project root's `.claude/` (project scope).
+pub fn claude_skills(config_dir: &Path, project_roots: &[PathBuf]) -> Vec<Skill> {
+    scan(config_dir, project_roots, ".claude", "commands")
 }
 
 /// Lists a Codex session's slash commands (`prompts/`) and skills, from the account's config dir
-/// (user scope) and the workspace root's `.codex/` (project scope).
-pub fn codex_skills(config_dir: &Path, root: &Path) -> Vec<Skill> {
-    scan(config_dir, root, ".codex", "prompts")
+/// (user scope) and each project root's `.codex/` (project scope).
+pub fn codex_skills(config_dir: &Path, project_roots: &[PathBuf]) -> Vec<Skill> {
+    scan(config_dir, project_roots, ".codex", "prompts")
 }
 
-/// Scans an agent's commands and skills. `project_dir` is the per-project config folder (e.g.
-/// `.claude`); `commands_dir` is the slash-command folder name (e.g. `commands` or `prompts`).
-/// Skills always live under a `skills/` folder. Read-only.
-fn scan(config_dir: &Path, root: &Path, project_dir: &str, commands_dir: &str) -> Vec<Skill> {
+/// Scans an agent's commands and skills. `project_roots` are the folders the session runs at
+/// (the selected work folders, not just the workspace root). `project_dir` is the per-project
+/// config folder (e.g. `.claude`); `commands_dir` is the slash-command folder name. Read-only.
+fn scan(
+    config_dir: &Path,
+    project_roots: &[PathBuf],
+    project_dir: &str,
+    commands_dir: &str,
+) -> Vec<Skill> {
     let mut skills = Vec::new();
     collect_commands(
         &config_dir.join(commands_dir),
         SkillScope::User,
         &mut skills,
     );
-    collect_commands(
-        &root.join(project_dir).join(commands_dir),
-        SkillScope::Project,
-        &mut skills,
-    );
     collect_skills(&config_dir.join("skills"), SkillScope::User, &mut skills);
-    collect_skills(
-        &root.join(project_dir).join("skills"),
-        SkillScope::Project,
-        &mut skills,
-    );
+    for root in project_roots {
+        collect_commands(
+            &root.join(project_dir).join(commands_dir),
+            SkillScope::Project,
+            &mut skills,
+        );
+        collect_skills(
+            &root.join(project_dir).join("skills"),
+            SkillScope::Project,
+            &mut skills,
+        );
+    }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     skills.dedup_by(|a, b| a.name == b.name && a.kind == b.kind);
     skills
@@ -139,7 +146,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = claude_skills(config.path(), root.path());
+        let skills = claude_skills(config.path(), &[root.path().to_path_buf()]);
         assert_eq!(skills.len(), 2);
         let deploy = skills.iter().find(|s| s.name == "deploy").unwrap();
         assert_eq!(deploy.kind, SkillKind::Command);
@@ -167,11 +174,30 @@ mod tests {
         )
         .unwrap();
 
-        let skills = codex_skills(config.path(), root.path());
+        let skills = codex_skills(config.path(), &[root.path().to_path_buf()]);
         let draftpr = skills.iter().find(|s| s.name == "draftpr").unwrap();
         assert_eq!(draftpr.kind, SkillKind::Command);
         assert_eq!(draftpr.description.as_deref(), Some("Draft a PR"));
         let lint = skills.iter().find(|s| s.name == "lint").unwrap();
         assert_eq!(lint.kind, SkillKind::Skill);
+    }
+
+    #[test]
+    fn finds_project_skills_in_each_selected_folder() {
+        let config = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        fs::create_dir_all(workspace.path().join("api/.claude/commands")).unwrap();
+        fs::write(workspace.path().join("api/.claude/commands/deploy.md"), "").unwrap();
+        fs::create_dir_all(workspace.path().join("web/.claude/commands")).unwrap();
+        fs::write(workspace.path().join("web/.claude/commands/build.md"), "").unwrap();
+
+        let roots = vec![workspace.path().join("api"), workspace.path().join("web")];
+        let skills = claude_skills(config.path(), &roots);
+        assert!(skills
+            .iter()
+            .any(|s| s.name == "deploy" && s.scope == SkillScope::Project));
+        assert!(skills
+            .iter()
+            .any(|s| s.name == "build" && s.scope == SkillScope::Project));
     }
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use soromi_protocol::{
@@ -59,6 +60,10 @@ pub struct WorkspaceService {
     change_tx: broadcast::Sender<()>,
     /// A newer release than the running build, once the update check finds one.
     update: Mutex<Option<UpdateInfo>>,
+    /// Whether the app window is focused. While it is, agent-event sounds and banners are
+    /// suppressed (the user is already looking at the app). Set by the shell; false by default,
+    /// so the standalone daemon always fires.
+    focused: AtomicBool,
 }
 
 impl WorkspaceService {
@@ -77,6 +82,7 @@ impl WorkspaceService {
             sound,
             change_tx,
             update: Mutex::new(None),
+            focused: AtomicBool::new(false),
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -101,6 +107,12 @@ impl WorkspaceService {
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
         self.change_tx.subscribe()
+    }
+
+    /// Sets whether the app window is focused. While focused, agent-event sounds and banners are
+    /// suppressed; they fire only when the user is away from the app.
+    pub fn set_focused(&self, focused: bool) {
+        self.focused.store(focused, Ordering::Relaxed);
     }
 
     /// Records an available update and wakes viewports so they can show the banner.
@@ -363,23 +375,28 @@ impl WorkspaceService {
                         s.agent.clone(),
                         account_for(&meta.accounts, &s.agent),
                         meta.root.clone(),
+                        meta.folders.clone(),
                     )
                 })
             })
         };
-        let Some((agent, account, root)) = resolved else {
+        let Some((agent, account, root, folders)) = resolved else {
             return Vec::new();
         };
         let command = basename(agent.split_whitespace().next().unwrap_or(&agent));
-        let root = Path::new(&root);
+        // Project skills live in the folders the session actually runs at (the selected work
+        // folders), not just the workspace root.
+        let (cwd, extra) = session_dirs(&root, &folders);
+        let mut project_roots: Vec<PathBuf> = vec![PathBuf::from(cwd)];
+        project_roots.extend(extra.into_iter().map(PathBuf::from));
         match command {
             "claude" => {
                 let dir = provider_config_dir(&account, "claude", "CLAUDE_CONFIG_DIR", ".claude");
-                crate::skills::claude_skills(&dir, root)
+                crate::skills::claude_skills(&dir, &project_roots)
             }
             "codex" => {
                 let dir = provider_config_dir(&account, "codex", "CODEX_HOME", ".codex");
-                crate::skills::codex_skills(&dir, root)
+                crate::skills::codex_skills(&dir, &project_roots)
             }
             _ => Vec::new(),
         }
@@ -613,6 +630,10 @@ impl WorkspaceService {
             return;
         };
         if self.notifications.is_muted(&workspace) {
+            return;
+        }
+        // While the user is looking at the app, a sound and banner add nothing; only fire when away.
+        if self.focused.load(Ordering::Relaxed) {
             return;
         }
         self.sound.play(cue);

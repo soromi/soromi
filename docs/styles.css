@@ -1186,6 +1186,56 @@ footer .jp {
   animation: dot-pulse 2.2s ease-out infinite;
 }
 
+/* nav logo: slide in on load, then a glint sweeps its pixels every few seconds */
+@keyframes logo-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes logo-shine {
+  0% {
+    background-position: 100% 0;
+  }
+  18% {
+    background-position: 0% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+.nav .brand {
+  position: relative;
+  animation: logo-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.nav .brand img {
+  transition: filter 0.15s;
+}
+.nav .brand:hover img {
+  filter: brightness(1.25);
+}
+.nav .brand::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  -webkit-mask: url("assets/logo.png") left center / contain no-repeat;
+  mask: url("assets/logo.png") left center / contain no-repeat;
+  background: linear-gradient(
+    115deg,
+    transparent 42%,
+    rgba(255, 255, 255, 0.85) 50%,
+    transparent 58%
+  );
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  animation: logo-shine 7s ease-in-out infinite;
+}
+
 /* feature cards: a green arc travels the border ring, each card at its own pace */
 @property --border-angle {
   syntax: "<angle>";
@@ -1419,6 +1469,12 @@ footer .jp {
     transform: none;
   }
   .feature::before {
+    display: none;
+  }
+  .nav .brand {
+    animation: none;
+  }
+  .nav .brand::after {
     display: none;
   }
   .reveal {

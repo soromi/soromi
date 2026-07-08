@@ -32,6 +32,18 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["docs/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

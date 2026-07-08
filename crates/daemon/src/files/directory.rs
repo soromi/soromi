@@ -11,7 +11,8 @@ use super::paths::resolve_within;
 /// declared folders as top-level nodes, except a single `.` folder (the whole work folder),
 /// which lists the root's own contents. Any other path is read from disk, guarded against
 /// escaping the workspace root. Directories sort before files, then alphabetically. Each entry
-/// carries whether it is git-ignored.
+/// carries whether it is git-ignored. Dot-prefixed entries are omitted (hidden) from disk
+/// listings; the declared workspace folders are always listed.
 pub fn list_directory(root: &Path, folders: &[String], path: &str) -> Vec<DirEntry> {
     let ignore = build_gitignore(root);
 
@@ -44,6 +45,9 @@ fn read_entries(target: &Path, ignore: &Gitignore) -> Vec<DirEntry> {
     };
     let mut entries: Vec<DirEntry> = read_dir
         .filter_map(|entry| entry.ok())
+        // Hide dot-prefixed entries (.git, .env, .vscode, …). A future `list-dir` param can
+        // opt into showing them; the declared workspace folders are listed separately and kept.
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .map(|entry| {
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             DirEntry {
@@ -142,7 +146,18 @@ mod tests {
         assert!(ignored("node_modules"));
         assert!(ignored("dist"));
         assert!(!ignored("src"));
-        assert!(!ignored(".gitignore"));
+    }
+
+    #[test]
+    fn hides_dot_prefixed_entries() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join(".env"), "").unwrap();
+        fs::write(dir.path().join("readme.md"), "").unwrap();
+
+        let entries = list_directory(dir.path(), &[".".into()], "");
+        assert_eq!(entries, vec![folder("src"), file("readme.md")]);
     }
 
     #[test]
