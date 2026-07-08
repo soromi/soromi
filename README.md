@@ -56,6 +56,23 @@ more confused than productive. So Soromi stays small and gets out of the way.
   with a link to download. Nothing installs behind your back.
 - **One app, nothing to wire up.** Everything runs from a single desktop app.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="assets/soromi-1.jpg" width="200" alt="Soromi" /></td>
+    <td><img src="assets/soromi-2.jpg" width="200" alt="Soromi" /></td>
+    <td><img src="assets/soromi-3.jpg" width="200" alt="Soromi" /></td>
+    <td><img src="assets/soromi-4.jpg" width="200" alt="Soromi" /></td>
+  </tr>
+  <tr>
+    <td><img src="assets/soromi-5.jpg" width="200" alt="Soromi" /></td>
+    <td><img src="assets/soromir-6.jpg" width="200" alt="Soromi" /></td>
+    <td><img src="assets/soromi-noti.jpg" width="200" alt="Soromi notifications" /></td>
+    <td></td>
+  </tr>
+</table>
+
 ## Providers
 
 A provider is a coding-agent CLI Soromi can run, isolate per account, and listen to. Adding one
