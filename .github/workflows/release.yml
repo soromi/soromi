@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]*'
   workflow_dispatch:
 
 permissions:
@@ -70,6 +71,8 @@ jobs:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
+          # Release by pushing a version tag (e.g. 0.0.0); the artifacts attach to that tag's
+          # release. github.ref_name is the pushed tag.
           tagName: ${{ github.ref_name }}
           releaseName: Soromi ${{ github.ref_name }}
           releaseBody: |

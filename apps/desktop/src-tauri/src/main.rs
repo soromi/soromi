@@ -169,7 +169,7 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building the Soromi desktop shell")
         .run(|app, event| match event {
-            // Dock-icon click on macOS: bring the hidden window back.
+            #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
