@@ -123,6 +123,27 @@ impl WorkspaceService {
         self.focused.store(focused, Ordering::Relaxed);
     }
 
+    /// Records a tab's agent conversation id (from its session-start hook), so a later restore
+    /// resumes that conversation. Persists only when it actually changed.
+    pub fn set_resume_id(&self, session_id: &str, resume_id: String) {
+        let mut changed = false;
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            for (_, meta) in metadata.iter_mut() {
+                if let Some(session) = meta.sessions.iter_mut().find(|s| s.id == session_id) {
+                    if session.resume_id.as_deref() != Some(resume_id.as_str()) {
+                        session.resume_id = Some(resume_id);
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if changed {
+            self.persist();
+        }
+    }
+
     /// Records an available update and wakes viewports so they can show the banner.
     pub fn set_update(&self, info: UpdateInfo) {
         *self.update.lock().unwrap() = Some(info);
@@ -152,6 +173,7 @@ impl WorkspaceService {
                 id: new_session_id(),
                 agent: input.agent,
                 title: None,
+                resume_id: None,
             }],
             instructions: None,
             agent: None,
@@ -170,6 +192,7 @@ impl WorkspaceService {
                 id: new_session_id(),
                 agent: a.agent.clone(),
                 title: None,
+                resume_id: None,
             })
             .collect();
         if sessions.is_empty() {
@@ -177,6 +200,7 @@ impl WorkspaceService {
                 id: new_session_id(),
                 agent: "claude".to_string(),
                 title: None,
+                resume_id: None,
             });
         }
         let space = PersistedSpace {
@@ -224,6 +248,8 @@ impl WorkspaceService {
             id: new_session_id(),
             agent: agent.clone(),
             title: None,
+            // Fresh tab; its resume_id is captured from the agent's session-start hook.
+            resume_id: None,
         };
         let (root, folders, accounts, instructions) = {
             let mut metadata = self.metadata.lock().unwrap();
@@ -531,7 +557,8 @@ impl WorkspaceService {
         })
     }
 
-    /// Spawns each of a space's sessions, wires their status watchers, and records its metadata.
+    /// Launches a space's tabs, wires their status watchers, and records its metadata. A tab that
+    /// has a captured `resume_id` resumes its prior conversation instead of starting fresh.
     fn spawn_space(&self, space: PersistedSpace) -> Option<String> {
         let mut warning = None;
         for session in &space.sessions {
@@ -591,6 +618,14 @@ impl WorkspaceService {
         {
             args.push(flag.to_string());
             args.push(text.to_string());
+        }
+        // Resume this tab's own conversation when we captured its id from a prior run. Providers
+        // without a resume flag (Codex) always start fresh.
+        if let Some(resume_id) = &session.resume_id
+            && let Some(flag) = crate::config::resume_flag(command)
+        {
+            args.push(flag.to_string());
+            args.push(resume_id.clone());
         }
 
         let account = account_for(accounts, &session.agent);
@@ -845,6 +880,7 @@ fn migrate(space: &mut PersistedSpace) -> bool {
             id: new_session_id(),
             agent,
             title: None,
+            resume_id: None,
         });
         changed = true;
     }
@@ -952,6 +988,37 @@ mod tests {
             .unwrap();
 
         assert_eq!(service.summaries()[0].folders, vec!["api".to_string()]);
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn set_resume_id_persists_for_the_tab() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let service = service();
+        service
+            .create_space(CreateSpaceInput {
+                name: "kazomi".into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "/bin/cat".into(),
+                account: "personal".into(),
+                folders: None,
+            })
+            .unwrap();
+        let session = service.summaries()[0].sessions[0].id.clone();
+
+        service.set_resume_id(&session, "conv-123".into());
+
+        // It is persisted against that tab, so a restart could resume it.
+        let spaces = crate::workspaces::space_store::load_spaces();
+        let stored = &spaces[0].sessions[0];
+        assert_eq!(stored.id, session);
+        assert_eq!(stored.resume_id.as_deref(), Some("conv-123"));
 
         service.dispose();
         crate::home::set_soromi_home(None);

@@ -50,6 +50,7 @@ mod tests {
                 id: "s1".into(),
                 agent: "claude".into(),
                 title: None,
+                resume_id: None,
             }],
             instructions: None,
             agent: None,

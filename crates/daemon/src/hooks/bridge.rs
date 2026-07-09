@@ -6,33 +6,56 @@
 pub struct Invocation {
     pub cue: String,
     pub agent: Option<String>,
+    /// The agent's own conversation id, on a `session-start` hook (read from stdin JSON).
+    pub resume_id: Option<String>,
 }
 
 /// If this process was invoked as an event bridge, returns the parsed invocation:
 /// - `<exe> hook <cue> [agent]`  (Claude hooks; we pass the cue directly as an arg)
 /// - `<exe> codex-notify <json>` (Codex `notify`; the payload `type` -> cue)
 /// - `<exe> codex-hook`          (Codex hooks; JSON on stdin, `hook_event_name` -> cue)
+///
+/// The `session-start` cue is special: its hook passes JSON on stdin whose `session_id` is the
+/// agent's own conversation id, captured so the tab can be resumed later.
 pub fn invocation() -> Option<Invocation> {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("hook") => {
             let cue = args.next()?;
             let agent = args.next();
-            Some(Invocation { cue, agent })
+            let resume_id = if cue == "session-start" {
+                read_stdin_json().and_then(|v| {
+                    v.get("session_id")?
+                        .as_str()
+                        .map(std::string::ToString::to_string)
+                })
+            } else {
+                None
+            };
+            Some(Invocation {
+                cue,
+                agent,
+                resume_id,
+            })
         }
         Some("codex-notify") => {
             let payload: serde_json::Value = serde_json::from_str(&args.next()?).ok()?;
             codex_cue(payload.get("type")?.as_str()?)
         }
         Some("codex-hook") => {
-            use std::io::Read;
-            let mut input = String::new();
-            std::io::stdin().read_to_string(&mut input).ok()?;
-            let payload: serde_json::Value = serde_json::from_str(input.trim()).ok()?;
+            let payload = read_stdin_json()?;
             codex_cue(payload.get("hook_event_name")?.as_str()?)
         }
         _ => None,
     }
+}
+
+/// Reads and parses the JSON an agent hook passes on stdin.
+fn read_stdin_json() -> Option<serde_json::Value> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).ok()?;
+    serde_json::from_str(input.trim()).ok()
 }
 
 /// Maps a Codex event name (from `notify` payload `type` or a hook's `hook_event_name`) to a cue.
@@ -45,6 +68,7 @@ fn codex_cue(event: &str) -> Option<Invocation> {
     Some(Invocation {
         cue: cue.to_string(),
         agent: Some("codex".to_string()),
+        resume_id: None,
     })
 }
 
@@ -61,6 +85,7 @@ pub fn deliver(invocation: &Invocation) {
             "cue": invocation.cue,
             "session": session,
             "agent": invocation.agent,
+            "resume_id": invocation.resume_id,
         })
         .to_string();
         let _ = writeln!(stream, "{line}");

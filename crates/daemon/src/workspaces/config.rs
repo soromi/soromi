@@ -9,6 +9,10 @@ pub struct SessionSpec {
     pub agent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The agent's own conversation id (captured from its session-start hook), used to resume
+    /// this tab's conversation on restore (`--resume <id>`). Absent until the agent reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_id: Option<String>,
 }
 
 /// The committable descriptor at the root of a work folder (`soromi.space.json`). References

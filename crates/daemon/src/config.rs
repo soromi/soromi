@@ -25,6 +25,10 @@ pub struct Provider {
     /// CLI flag that appends workspace instructions to the agent's system prompt. `None` means
     /// the provider has no per-session mechanism, so the workspace instructions are ignored.
     pub system_prompt_flag: Option<&'static str>,
+    /// CLI flag that resumes a conversation by its (agent-generated) id. `None` means the provider
+    /// cannot resume, so its tabs always start fresh. The id is captured from the agent's own
+    /// session-start hook, since the agent picks the id, not us.
+    pub resume_flag: Option<&'static str>,
 }
 
 /// The provider registry. Adding a provider is a one-line entry here.
@@ -37,6 +41,7 @@ pub const PROVIDERS: &[Provider] = &[
         credential_key: Some("oauthAccount"),
         add_dir_flag: Some("--add-dir"),
         system_prompt_flag: Some("--append-system-prompt"),
+        resume_flag: Some("--resume"),
     },
     Provider {
         key: "codex",
@@ -46,6 +51,8 @@ pub const PROVIDERS: &[Provider] = &[
         add_dir_flag: None,
         // Codex has no per-session system-prompt flag, so workspace instructions are ignored.
         system_prompt_flag: None,
+        // Codex resume is a subcommand, not a flag; not wired yet, so its tabs start fresh.
+        resume_flag: None,
     },
 ];
 
@@ -63,4 +70,12 @@ pub fn system_prompt_flag(command_basename: &str) -> Option<&'static str> {
         .iter()
         .find(|p| p.key == command_basename)
         .and_then(|p| p.system_prompt_flag)
+}
+
+/// The provider's resume-by-id flag, matched by the agent command's basename.
+pub fn resume_flag(command_basename: &str) -> Option<&'static str> {
+    PROVIDERS
+        .iter()
+        .find(|p| p.key == command_basename)
+        .and_then(|p| p.resume_flag)
 }

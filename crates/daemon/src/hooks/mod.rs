@@ -12,10 +12,13 @@ pub mod bridge;
 pub mod listen;
 
 /// The events the daemon installs hooks for, paired with the cue arg the bridge is invoked with.
+/// `session-start` is not a sound cue: it reports the agent's own conversation id so the tab can
+/// be resumed later.
 const HOOKS: &[(&str, &str)] = &[
     ("PermissionRequest", "request"),
     ("Notification", "question"),
     ("Stop", "complete"),
+    ("SessionStart", "session-start"),
 ];
 
 /// The unix socket the daemon listens on and the `hook` bridge connects to.
@@ -31,6 +34,9 @@ pub(crate) struct Event {
     /// The agent that fired it (e.g. `claude`), when the hook passed it.
     #[serde(default)]
     pub agent: Option<String>,
+    /// The agent's own conversation id, on a `session-start` event, so the tab can resume it.
+    #[serde(default)]
+    pub resume_id: Option<String>,
 }
 
 pub(crate) fn cue_from(name: &str) -> Option<Cue> {
