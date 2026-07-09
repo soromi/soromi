@@ -29,6 +29,10 @@ pub struct Provider {
     /// cannot resume, so its tabs always start fresh. The id is captured from the agent's own
     /// session-start hook, since the agent picks the id, not us.
     pub resume_flag: Option<&'static str>,
+    /// Subcommand that resumes a conversation by id (e.g. Codex's `codex resume <id>`), for
+    /// providers whose resume is a subcommand rather than a flag. Mutually exclusive with
+    /// `resume_flag`.
+    pub resume_subcommand: Option<&'static str>,
 }
 
 /// The provider registry. Adding a provider is a one-line entry here.
@@ -42,6 +46,7 @@ pub const PROVIDERS: &[Provider] = &[
         add_dir_flag: Some("--add-dir"),
         system_prompt_flag: Some("--append-system-prompt"),
         resume_flag: Some("--resume"),
+        resume_subcommand: None,
     },
     Provider {
         key: "codex",
@@ -51,8 +56,9 @@ pub const PROVIDERS: &[Provider] = &[
         add_dir_flag: None,
         // Codex has no per-session system-prompt flag, so workspace instructions are ignored.
         system_prompt_flag: None,
-        // Codex resume is a subcommand, not a flag; not wired yet, so its tabs start fresh.
         resume_flag: None,
+        // `codex resume <id>` resumes a session. The id is captured from Codex's event payloads.
+        resume_subcommand: Some("resume"),
     },
 ];
 
@@ -78,4 +84,12 @@ pub fn resume_flag(command_basename: &str) -> Option<&'static str> {
         .iter()
         .find(|p| p.key == command_basename)
         .and_then(|p| p.resume_flag)
+}
+
+/// The provider's resume-by-id subcommand, matched by the agent command's basename.
+pub fn resume_subcommand(command_basename: &str) -> Option<&'static str> {
+    PROVIDERS
+        .iter()
+        .find(|p| p.key == command_basename)
+        .and_then(|p| p.resume_subcommand)
 }

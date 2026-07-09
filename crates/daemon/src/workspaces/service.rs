@@ -619,13 +619,18 @@ impl WorkspaceService {
             args.push(flag.to_string());
             args.push(text.to_string());
         }
-        // Resume this tab's own conversation when we captured its id from a prior run. Providers
-        // without a resume flag (Codex) always start fresh.
-        if let Some(resume_id) = &session.resume_id
-            && let Some(flag) = crate::config::resume_flag(command)
-        {
-            args.push(flag.to_string());
-            args.push(resume_id.clone());
+        // Resume this tab's own conversation when we captured its id from a prior run. Claude
+        // takes a `--resume <id>` flag; Codex takes a leading `resume <id>` subcommand. Providers
+        // with neither always start fresh.
+        if let Some(resume_id) = &session.resume_id {
+            if let Some(flag) = crate::config::resume_flag(command) {
+                args.push(flag.to_string());
+                args.push(resume_id.clone());
+            } else if let Some(sub) = crate::config::resume_subcommand(command) {
+                let mut prefixed = vec![sub.to_string(), resume_id.clone()];
+                prefixed.append(&mut args);
+                args = prefixed;
+            }
         }
 
         let account = account_for(accounts, &session.agent);

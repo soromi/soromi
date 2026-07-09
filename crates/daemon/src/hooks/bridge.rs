@@ -40,11 +40,15 @@ pub fn invocation() -> Option<Invocation> {
         }
         Some("codex-notify") => {
             let payload: serde_json::Value = serde_json::from_str(&args.next()?).ok()?;
-            codex_cue(payload.get("type")?.as_str()?)
+            let mut inv = codex_cue(payload.get("type")?.as_str()?)?;
+            inv.resume_id = codex_session_id(&payload);
+            Some(inv)
         }
         Some("codex-hook") => {
             let payload = read_stdin_json()?;
-            codex_cue(payload.get("hook_event_name")?.as_str()?)
+            let mut inv = codex_cue(payload.get("hook_event_name")?.as_str()?)?;
+            inv.resume_id = codex_session_id(&payload);
+            Some(inv)
         }
         _ => None,
     }
@@ -56,6 +60,18 @@ fn read_stdin_json() -> Option<serde_json::Value> {
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input).ok()?;
     serde_json::from_str(input.trim()).ok()
+}
+
+/// Extracts Codex's session/conversation id from an event payload, so the tab can resume it.
+/// Best-effort: Codex's exact field name is unverified, so it tries the likely keys and skips a
+/// turn-scoped id (not a resume target). If none match, the tab simply starts fresh next time.
+fn codex_session_id(payload: &serde_json::Value) -> Option<String> {
+    for key in ["session_id", "thread_id", "conversation_id", "rollout_id"] {
+        if let Some(id) = payload.get(key).and_then(serde_json::Value::as_str) {
+            return Some(id.to_string());
+        }
+    }
+    None
 }
 
 /// Maps a Codex event name (from `notify` payload `type` or a hook's `hook_event_name`) to a cue.

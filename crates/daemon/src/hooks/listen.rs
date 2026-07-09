@@ -33,9 +33,12 @@ pub fn spawn(service: Arc<WorkspaceService>) {
                     return;
                 }
                 if let Ok(event) = serde_json::from_str::<super::Event>(line.trim()) {
+                    // An event may carry a resume id (session-start, or a Codex event that includes
+                    // its session id) and/or a sound cue; handle each independently.
                     if let Some(resume_id) = event.resume_id {
                         service.set_resume_id(&event.session, resume_id);
-                    } else if let Some(cue) = super::cue_from(&event.cue) {
+                    }
+                    if let Some(cue) = super::cue_from(&event.cue) {
                         service.handle_agent_event(&event.session, cue, event.agent.as_deref());
                     }
                 }
