@@ -31,6 +31,10 @@ Grab the latest build for your platform from the
 - **Windows:** the `-setup.exe` installer (or the `.msi`)
 - **Linux:** the `.AppImage` (or the `.deb` / `.rpm` packages)
 
+> **Note:** macOS builds are not notarized. On first launch, open System Settings >
+> Privacy & Security and click "Open Anyway" (or right-click Soromi and choose Open).
+> Soon the builds will be signed with an Apple developer account.
+
 ## Why?
 
 I built Soromi because I was tired of juggling a separate editor window for every project and
