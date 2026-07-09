@@ -51,6 +51,7 @@ mod tests {
                 agent: "claude".into(),
                 title: None,
             }],
+            instructions: None,
             agent: None,
             account: None,
         }];

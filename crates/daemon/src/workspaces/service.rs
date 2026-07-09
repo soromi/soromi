@@ -31,6 +31,8 @@ struct WorkspaceMeta {
     accounts: Vec<AgentAccount>,
     /// Ordered tabs; each is a live PTY keyed in the session manager by its id.
     sessions: Vec<SessionSpec>,
+    /// Instructions appended to the agent's system prompt for sessions started here.
+    instructions: Option<String>,
 }
 
 pub struct CreateSpaceInput {
@@ -151,6 +153,7 @@ impl WorkspaceService {
                 agent: input.agent,
                 title: None,
             }],
+            instructions: None,
             agent: None,
             account: None,
         };
@@ -182,6 +185,7 @@ impl WorkspaceService {
             root: loaded.root,
             accounts,
             sessions,
+            instructions: loaded.workspace.instructions,
             agent: None,
             account: None,
         };
@@ -221,7 +225,7 @@ impl WorkspaceService {
             agent: agent.clone(),
             title: None,
         };
-        let (root, folders, accounts) = {
+        let (root, folders, accounts, instructions) = {
             let mut metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter_mut()
@@ -240,9 +244,17 @@ impl WorkspaceService {
                 meta.root.clone(),
                 meta.folders.clone(),
                 meta.accounts.clone(),
+                meta.instructions.clone(),
             )
         };
-        self.start_session(workspace, &root, &folders, &accounts, &session);
+        self.start_session(
+            workspace,
+            &root,
+            &folders,
+            &accounts,
+            instructions.as_deref(),
+            &session,
+        );
         self.persist();
         self.emit_change();
         Ok(SessionSummary {
@@ -343,9 +355,11 @@ impl WorkspaceService {
                 WorkspaceSummary {
                     name: name.clone(),
                     status: aggregate_status(&sessions),
+                    root: meta.root.clone(),
                     folders: meta.folders.clone(),
                     accounts: meta.accounts.clone(),
                     sessions,
+                    instructions: meta.instructions.clone(),
                 }
             })
             .collect()
@@ -419,6 +433,7 @@ impl WorkspaceService {
             name: workspace.to_string(),
             folders: meta.folders.clone(),
             accounts: meta.accounts.clone(),
+            instructions: meta.instructions.clone(),
         };
         let path = Path::new(&meta.root).join("soromi.space.json");
         let json = serde_json::to_string_pretty(&config)?;
@@ -452,14 +467,25 @@ impl WorkspaceService {
         self.metadata.lock().unwrap().iter().any(|(n, _)| n == name)
     }
 
-    /// Replaces a workspace's account bindings, restarting only the sessions whose resolved
-    /// account changed (so a rebind to the same account leaves running tabs untouched).
+    /// Replaces a workspace's account bindings and work folders. Restarts only the sessions whose
+    /// resolved account changed (so an unchanged rebind leaves running tabs untouched). Folder
+    /// changes are not applied to running tabs: a session's cwd/add-dir is fixed at launch, and
+    /// removing a folder should not kill a running agent. New tabs pick up the new folders. Keeps
+    /// at least one folder: an empty list falls back to the whole root (`.`).
     pub fn update_space(
         &self,
         name: &str,
         accounts: Vec<AgentAccount>,
+        folders: Vec<String>,
+        instructions: Option<String>,
     ) -> anyhow::Result<OpenResult> {
-        let (root, folders, sessions, old_accounts) = {
+        let folders = if folders.is_empty() {
+            vec![".".to_string()]
+        } else {
+            folders
+        };
+        let instructions = instructions.filter(|text| !text.trim().is_empty());
+        let (root, sessions, old_accounts) = {
             let metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter()
@@ -467,7 +493,6 @@ impl WorkspaceService {
                 .ok_or_else(|| anyhow::anyhow!("workspace not found: {name}"))?;
             (
                 meta.root.clone(),
-                meta.folders.clone(),
                 meta.sessions.clone(),
                 meta.accounts.clone(),
             )
@@ -480,13 +505,22 @@ impl WorkspaceService {
             .find(|(n, _)| n == name)
         {
             meta.accounts = accounts.clone();
+            meta.folders = folders.clone();
+            meta.instructions = instructions.clone();
         }
         let mut warning = None;
         for session in &sessions {
             if account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent)
             {
                 self.manager.dispose(&session.id);
-                warning = warning.or(self.start_session(name, &root, &folders, &accounts, session));
+                warning = warning.or(self.start_session(
+                    name,
+                    &root,
+                    &folders,
+                    &accounts,
+                    instructions.as_deref(),
+                    session,
+                ));
             }
         }
         self.persist();
@@ -506,6 +540,7 @@ impl WorkspaceService {
                 &space.root,
                 &space.folders,
                 &space.accounts,
+                space.instructions.as_deref(),
                 session,
             ));
         }
@@ -516,6 +551,7 @@ impl WorkspaceService {
                 root: space.root,
                 accounts: space.accounts,
                 sessions: space.sessions,
+                instructions: space.instructions,
             },
         ));
         warning
@@ -529,6 +565,7 @@ impl WorkspaceService {
         root: &str,
         folders: &[String],
         accounts: &[AgentAccount],
+        instructions: Option<&str>,
         session: &SessionSpec,
     ) -> Option<String> {
         let parsed = match parse_agent_command(&session.agent) {
@@ -539,12 +576,21 @@ impl WorkspaceService {
         // Run at the picked folders, not their common parent: cwd is the first folder and the
         // rest are named via the provider's add-dir flag, so the agent's scope is exactly them.
         let (cwd, extra_dirs) = session_dirs(root, folders);
+        let command = basename(&parsed.command);
         let mut args = parsed.args;
-        if let Some(flag) = crate::config::add_dir_flag(basename(&parsed.command)) {
+        if let Some(flag) = crate::config::add_dir_flag(command) {
             for dir in &extra_dirs {
                 args.push(flag.to_string());
                 args.push(dir.clone());
             }
+        }
+        // Append the workspace instructions to the agent's system prompt, when it has a flag for
+        // it (Claude does; Codex does not, so its sessions run without them).
+        if let Some(text) = instructions.map(str::trim).filter(|t| !t.is_empty())
+            && let Some(flag) = crate::config::system_prompt_flag(command)
+        {
+            args.push(flag.to_string());
+            args.push(text.to_string());
         }
 
         let account = account_for(accounts, &session.agent);
@@ -670,6 +716,7 @@ impl WorkspaceService {
                 root: meta.root.clone(),
                 accounts: meta.accounts.clone(),
                 sessions: meta.sessions.clone(),
+                instructions: meta.instructions.clone(),
                 agent: None,
                 account: None,
             })
@@ -873,6 +920,38 @@ mod tests {
 
         service.remove_space("kazomi");
         assert!(service.summaries().is_empty());
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn update_space_can_drop_a_folder() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("api")).unwrap();
+        std::fs::create_dir_all(root.path().join("web")).unwrap();
+
+        let service = service();
+        service
+            .create_space(CreateSpaceInput {
+                name: "kazomi".into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "/bin/cat".into(),
+                account: "personal".into(),
+                folders: Some(vec!["api".into(), "web".into()]),
+            })
+            .unwrap();
+
+        let accounts = service.summaries()[0].accounts.clone();
+        service
+            .update_space("kazomi", accounts, vec!["api".into()], None)
+            .unwrap();
+
+        assert_eq!(service.summaries()[0].folders, vec!["api".to_string()]);
 
         service.dispose();
         crate::home::set_soromi_home(None);

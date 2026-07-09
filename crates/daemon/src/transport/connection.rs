@@ -71,7 +71,12 @@ impl Connection {
             ClientMessage::UpdateSpace {
                 workspace,
                 accounts,
-            } => match self.hub.update_space(&workspace, accounts) {
+                folders,
+                instructions,
+            } => match self
+                .hub
+                .update_space(&workspace, accounts, folders, instructions)
+            {
                 Ok(result) => self.send(ServerMessage::WorkspaceOpened {
                     workspace: result.workspace,
                     warning: result.warning,

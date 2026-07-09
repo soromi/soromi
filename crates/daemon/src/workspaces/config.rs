@@ -19,6 +19,9 @@ pub struct Workspace {
     pub folders: Vec<String>,
     /// Which account each agent runs under, one entry per agent.
     pub accounts: Vec<AgentAccount>,
+    /// Instructions appended to the agent's system prompt for this workspace's sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
 /// A persisted space under `~/.soromi/spaces.json`: the committable config plus its absolute
@@ -33,6 +36,8 @@ pub struct PersistedSpace {
     pub accounts: Vec<AgentAccount>,
     #[serde(default)]
     pub sessions: Vec<SessionSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

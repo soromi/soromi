@@ -13,6 +13,7 @@
   overflow: hidden;
   color: var(--soromi-text);
   transition: background 0.1s;
+  user-select: none;
 }
 
 .row:hover {
@@ -64,4 +65,49 @@
 .empty {
   padding: 4px 8px;
   color: var(--soromi-text-faint);
+}
+
+/* Custom right-click menu: a full-screen backdrop for dismissal, plus the positioned popup. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.menu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--soromi-bg-sidebar);
+  border: 1px solid var(--soromi-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  user-select: none;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--soromi-text);
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--soromi-bg-hover);
+}
+
+.menuDanger {
+  color: #f87171;
+}
+
+.menuDivider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--soromi-border);
 }

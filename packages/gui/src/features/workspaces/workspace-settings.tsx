@@ -1,4 +1,4 @@
-import { Button, Divider, Group, Select, Stack, Text, Title } from '@mantine/core'
+import { Button, Divider, Group, Select, Stack, Text, Textarea, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -53,6 +53,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const [bindings, setBindings] = useState<Record<string, string>>(() =>
     Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])),
   )
+  const [instructions, setInstructions] = useState(summary?.instructions ?? '')
 
   // Only accounts that actually have a login configured for this agent's provider, plus the
   // built-in `personal` default and whatever the agent is currently bound to.
@@ -66,13 +67,24 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     ].map((name) => ({ value: name, label: name }))
   const agentLabel = (agent: string) => PROVIDERS.find((p) => p.value === agent)?.label ?? agent
 
-  const changed = agents.some((agent) => (bindings[agent] ?? 'personal') !== boundAccount(agent))
+  const accountsChanged = agents.some(
+    (agent) => (bindings[agent] ?? 'personal') !== boundAccount(agent),
+  )
+  const instructionsChanged = instructions.trim() !== (summary?.instructions ?? '').trim()
+  const changed = accountsChanged || instructionsChanged
   const save = () => {
     const next: AgentAccount[] = agents.map((agent) => ({
       id: bindings[agent] ?? 'personal',
       agent,
     }))
-    transport.send({ type: 'update-space', workspace, accounts: next })
+    // Folders are edited from the file tree's context menu; pass them through unchanged.
+    transport.send({
+      type: 'update-space',
+      workspace,
+      accounts: next,
+      folders: summary?.folders ?? [],
+      instructions: instructions.trim() || undefined,
+    })
     popOverlay()
   }
 
@@ -117,6 +129,18 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
               allowDeselect={false}
             />
           ))}
+
+          <Textarea
+            label="Instructions"
+            description="Appended to the agent's system prompt. Applies to new tabs (Claude only for now)."
+            placeholder="e.g. This is a monorepo. Prefer pnpm. Never edit generated files."
+            autosize
+            minRows={3}
+            maxRows={10}
+            value={instructions}
+            onChange={(event) => setInstructions(event.currentTarget.value)}
+          />
+
           <Button onClick={save} disabled={!changed}>
             Save
           </Button>

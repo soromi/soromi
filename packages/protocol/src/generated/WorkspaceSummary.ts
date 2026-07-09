@@ -6,4 +6,12 @@ import type { Status } from "./Status";
 /**
  * Rail-facing summary of a workspace. `status` is the aggregate of its sessions.
  */
-export type WorkspaceSummary = { name: string, status: Status, folders: Array<string>, accounts: Array<AgentAccount>, sessions: Array<SessionSummary>, };
+export type WorkspaceSummary = { name: string, status: Status, 
+/**
+ * Absolute path the folders are relative to (for building absolute paths in the viewport).
+ */
+root: string, folders: Array<string>, accounts: Array<AgentAccount>, sessions: Array<SessionSummary>, 
+/**
+ * Extra instructions appended to the agent's system prompt for this workspace's sessions.
+ */
+instructions?: string, };

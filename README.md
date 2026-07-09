@@ -5,6 +5,11 @@
   </picture>
 </p>
 
+<p align="center">
+  <br />
+  <a href="https://www.producthunt.com/products/soromi?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-soromi" target="_blank" rel="noopener noreferrer"><img alt="Soromi - A small, fast home for AI coding agents | Product Hunt" width="150" height="32" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1191241&amp;theme=light&amp;t=1783600141858"></a>
+</p>
+
 # Soromi
 
 _From Japanese 揃う (sorou), to be gathered, aligned, complete as a set._
@@ -63,6 +68,8 @@ more confused than productive. So Soromi stays small and gets out of the way.
   no file at all.
 - **Know when there's a new version.** Soromi checks for newer releases and shows a quiet banner
   with a link to download. Nothing installs behind your back.
+- **Remote web/app, coming very soon.** Open Soromi from your phone's browser and get the same
+  live terminal: watch the output, type into it, and answer prompts with a tap.
 - **One app, nothing to wire up.** Everything runs from a single desktop app.
 
 ## Screenshots

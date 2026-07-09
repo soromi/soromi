@@ -22,6 +22,9 @@ pub struct Provider {
     /// CLI flag that adds an extra working directory, so a session scoped to several picked
     /// folders can name each one. `None` means the provider only uses its cwd.
     pub add_dir_flag: Option<&'static str>,
+    /// CLI flag that appends workspace instructions to the agent's system prompt. `None` means
+    /// the provider has no per-session mechanism, so the workspace instructions are ignored.
+    pub system_prompt_flag: Option<&'static str>,
 }
 
 /// The provider registry. Adding a provider is a one-line entry here.
@@ -33,6 +36,7 @@ pub const PROVIDERS: &[Provider] = &[
         credential_file: ".claude.json",
         credential_key: Some("oauthAccount"),
         add_dir_flag: Some("--add-dir"),
+        system_prompt_flag: Some("--append-system-prompt"),
     },
     Provider {
         key: "codex",
@@ -40,6 +44,8 @@ pub const PROVIDERS: &[Provider] = &[
         credential_file: "auth.json",
         credential_key: None,
         add_dir_flag: None,
+        // Codex has no per-session system-prompt flag, so workspace instructions are ignored.
+        system_prompt_flag: None,
     },
 ];
 
@@ -49,4 +55,12 @@ pub fn add_dir_flag(command_basename: &str) -> Option<&'static str> {
         .iter()
         .find(|p| p.key == command_basename)
         .and_then(|p| p.add_dir_flag)
+}
+
+/// The provider's append-system-prompt flag, matched by the agent command's basename.
+pub fn system_prompt_flag(command_basename: &str) -> Option<&'static str> {
+    PROVIDERS
+        .iter()
+        .find(|p| p.key == command_basename)
+        .and_then(|p| p.system_prompt_flag)
 }

@@ -100,11 +100,15 @@ fn client_update_space_carries_account_bindings() {
                 id: "work".into(),
                 agent: "claude".into(),
             }],
+            folders: vec!["api".into(), "web".into()],
+            instructions: Some("Prefer TypeScript".into()),
         },
         json!({
             "type": "update-space",
             "workspace": "kazomi",
-            "accounts": [{ "id": "work", "agent": "claude" }]
+            "accounts": [{ "id": "work", "agent": "claude" }],
+            "folders": ["api", "web"],
+            "instructions": "Prefer TypeScript"
         }),
     );
 }
@@ -282,6 +286,7 @@ fn server_workspace_list_and_summary() {
             workspaces: vec![WorkspaceSummary {
                 name: "kazomi".into(),
                 status: Status::Idle,
+                root: "/w/kazomi".into(),
                 folders: vec!["api".into()],
                 accounts: vec![AgentAccount {
                     id: "personal".into(),
@@ -294,6 +299,7 @@ fn server_workspace_list_and_summary() {
                     status: Status::Idle,
                     title: Some("build".into()),
                 }],
+                instructions: None,
             }],
         },
         json!({
@@ -301,6 +307,7 @@ fn server_workspace_list_and_summary() {
             "workspaces": [{
                 "name": "kazomi",
                 "status": "idle",
+                "root": "/w/kazomi",
                 "folders": ["api"],
                 "accounts": [{ "id": "personal", "agent": "claude" }],
                 "sessions": [{

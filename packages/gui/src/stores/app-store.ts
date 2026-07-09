@@ -76,6 +76,8 @@ interface UiState {
   closeOverlays: () => void
   setFileContent: (workspace: string, path: string, content: FileContent) => void
   setListing: (workspace: string, path: string, entries: DirEntry[]) => void
+  /** Drops a workspace's cached tree, so it re-fetches (e.g. after its folders changed). */
+  resetTree: (workspace: string) => void
   toggleTreeNode: (workspace: string, path: string) => void
   setSidebarMode: (mode: SidebarMode) => void
   setNotice: (notice: string | null) => void
@@ -154,6 +156,12 @@ export const useAppStore = create<UiState>()((set) => ({
         [workspace]: { ...state.treeListings[workspace], [path]: entries },
       },
     })),
+  resetTree: (workspace) =>
+    set((state) => {
+      const { [workspace]: _l, ...treeListings } = state.treeListings
+      const { [workspace]: _e, ...treeExpanded } = state.treeExpanded
+      return { treeListings, treeExpanded }
+    }),
   toggleTreeNode: (workspace, path) =>
     set((state) => {
       const current = state.treeExpanded[workspace] ?? {}

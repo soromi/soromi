@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 
 //Constants
 import { isTauri } from '@/config'
@@ -25,4 +25,14 @@ export async function pickFolder(title: string): Promise<string | null> {
 /** Quits the app (desktop only; a no-op outside the Tauri shell). */
 export function quit() {
   if (isTauri) invoke('quit')
+}
+
+/** Shows a path in the OS file manager (Finder). Desktop only. */
+export function revealInFinder(path: string) {
+  if (isTauri) revealItemInDir(path)
+}
+
+/** Copies text to the clipboard. */
+export function copyText(text: string) {
+  void navigator.clipboard?.writeText(text)
 }

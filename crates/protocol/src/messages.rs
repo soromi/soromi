@@ -117,9 +117,15 @@ pub struct SessionSummary {
 pub struct WorkspaceSummary {
     pub name: String,
     pub status: Status,
+    /// Absolute path the folders are relative to (for building absolute paths in the viewport).
+    pub root: String,
     pub folders: Vec<String>,
     pub accounts: Vec<AgentAccount>,
     pub sessions: Vec<SessionSummary>,
+    /// Extra instructions appended to the agent's system prompt for this workspace's sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub instructions: Option<String>,
 }
 
 /// Viewport -> daemon. A discriminated union on `type`.
@@ -215,6 +221,14 @@ pub enum ClientMessage {
     UpdateSpace {
         workspace: String,
         accounts: Vec<AgentAccount>,
+        /// The workspace's work folders (relative to its root). Applies to sessions opened after
+        /// the change; running tabs keep their launch folders.
+        folders: Vec<String>,
+        /// Instructions appended to the agent's system prompt. Applies to sessions opened after
+        /// the change. `None`/empty clears them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        instructions: Option<String>,
     },
     /// Re-run the update check now (the "Check for updates" menu item).
     CheckUpdate,
