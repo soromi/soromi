@@ -259,11 +259,11 @@
     <div class="remote">
       <div class="remote-copy">
         <div class="eyebrow">Remote</div>
-        <h2>Your agents, from your phone</h2>
+        <h2>Your agents, from your phone <span class="soon">coming very soon</span></h2>
         <p>
           Step away from your desk and your agents keep going. Open Soromi in your
-          phone's browser to see what each one is doing and tap to answer when it
-          needs you.
+          phone's browser and you get the same live terminal: watch the output,
+          type into it, and answer prompts with a tap.
         </p>
         <ul class="remote-points">
           <li>Scan a QR code once to pair your phone.</li>
@@ -284,8 +284,10 @@
               <span class="p-time">waiting</span>
             </div>
             <div class="p-term">
-              <div class="p-muted">Running tests…</div>
+              <div class="p-cmd"><span class="p-prompt">›</span> fix the failing wire test</div>
+              <div class="p-muted">● Running cargo test…</div>
               <div><span class="p-ok">18 passed</span>, 0 failed</div>
+              <div class="p-muted">● Editing crates/protocol…</div>
               <div>&nbsp;</div>
               <div class="p-ask">Allow write to <span class="p-path">protocol.rs</span>?</div>
               <div class="p-btns">
@@ -293,6 +295,7 @@
                 <span class="p-btn no">Deny</span>
               </div>
             </div>
+            <div class="p-input"><span class="p-prompt">›</span><span class="p-cursor"></span>type here too</div>
           </div>
         </div>
       </div>
