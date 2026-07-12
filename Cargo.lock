@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-daemon"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -3831,7 +3831,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-desktop"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "soromi-daemon",
  "soromi-protocol",
@@ -3845,7 +3845,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-protocol"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde",
  "serde_json",
