@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "daemon": "cargo run -p soromi-daemon",
     "desktop": "pnpm --filter @soromi/desktop dev",
+    "web": "pnpm --filter @soromi/web dev",
     "gen:protocol": "cargo test -p soromi-protocol --features ts",
     "clean": "turbo run clean && rm -rf node_modules"
   },

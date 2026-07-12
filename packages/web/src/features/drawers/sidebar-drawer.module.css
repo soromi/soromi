@@ -1,0 +1,80 @@
+.toggle {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.tab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--soromi-text-faint);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.on {
+  background: var(--soromi-bg-active);
+  color: var(--soromi-text);
+}
+
+.empty {
+  padding: 16px 8px;
+  color: var(--soromi-text-faint);
+  font-size: 14px;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  font-size: 14px;
+  color: var(--soromi-text);
+}
+
+.entryIcon {
+  width: 12px;
+  color: var(--soromi-text-faint);
+}
+
+.entryName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ignored {
+  color: var(--soromi-text-faint);
+}
+
+.skill {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 10px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill:active {
+  background: var(--soromi-bg-active);
+}
+
+.skillName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--soromi-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.skillDesc {
+  font-size: 13px;
+  color: var(--soromi-text-faint);
+}

@@ -1,0 +1,16 @@
+.deck {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--soromi-bg-terminal);
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--soromi-text-faint);
+  font-size: 14px;
+}

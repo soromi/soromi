@@ -1,0 +1,40 @@
+.bar {
+  flex-shrink: 0;
+  background: var(--soromi-bg-sidebar);
+  border-top: 1px solid var(--soromi-border);
+  padding-bottom: var(--safe-bottom);
+}
+
+.keys {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.keys::-webkit-scrollbar {
+  display: none;
+}
+
+.key {
+  flex: 0 0 auto;
+  min-width: 42px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--soromi-border);
+  border-radius: 8px;
+  background: var(--soromi-bg-tab);
+  color: var(--soromi-text-dim);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.key:active {
+  background: var(--soromi-bg-active);
+  color: var(--soromi-text);
+}
+
+.key:disabled {
+  opacity: 0.4;
+}

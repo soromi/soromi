@@ -1,0 +1,30 @@
+{
+  "name": "@soromi/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@mantine/core": "^7.15.0",
+    "@mantine/hooks": "^7.15.0",
+    "@soromi/client": "workspace:*",
+    "@soromi/protocol": "workspace:*",
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5",
+    "vite-plugin-svgr": "^5.2.0"
+  }
+}

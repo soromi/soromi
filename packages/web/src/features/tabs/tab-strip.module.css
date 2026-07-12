@@ -1,0 +1,85 @@
+.strip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  height: 44px;
+  background: var(--soromi-bg-tab);
+  border-bottom: 1px solid var(--soromi-border);
+}
+
+.tabs {
+  flex: 1;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--soromi-text-dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.active {
+  color: var(--soromi-text);
+  border-bottom-color: var(--soromi-accent);
+  background: var(--soromi-bg-terminal);
+}
+
+.label {
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.add {
+  flex-shrink: 0;
+  width: 44px;
+  border: none;
+  border-left: 1px solid var(--soromi-border);
+  background: none;
+  color: var(--soromi-text-faint);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.thinking {
+  background: var(--soromi-accent);
+}
+
+.waiting {
+  background: var(--soromi-warn);
+}
+
+.blocked {
+  background: #f87171;
+}
+
+.done {
+  background: var(--soromi-ok);
+}
+
+.idle {
+  background: var(--soromi-text-faint);
+}

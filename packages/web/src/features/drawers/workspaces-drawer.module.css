@@ -1,0 +1,82 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: var(--soromi-text);
+  cursor: pointer;
+}
+
+.active {
+  background: var(--soromi-bg-active);
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px dashed var(--soromi-border);
+  border-radius: 12px;
+  background: none;
+  color: var(--soromi-text-faint);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.thinking {
+  background: var(--soromi-accent);
+}
+
+.waiting {
+  background: var(--soromi-warn);
+}
+
+.blocked {
+  background: #f87171;
+}
+
+.done {
+  background: var(--soromi-ok);
+}
+
+.idle {
+  background: var(--soromi-text-faint);
+}

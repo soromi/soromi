@@ -1,0 +1,131 @@
+.screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: calc(var(--safe-top) + 24px) 24px calc(var(--safe-bottom) + 24px);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--soromi-text-faint);
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--soromi-border);
+  border-radius: 16px;
+  background: var(--soromi-bg-sidebar);
+}
+
+.cardTitle {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  border: 1px dashed var(--soromi-border);
+  border-radius: 12px;
+  background: var(--soromi-bg-tab);
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+}
+
+.qrGlyph {
+  font-size: 56px;
+  line-height: 1;
+  color: var(--soromi-text-faint);
+}
+
+.qrLabel {
+  font-size: 13px;
+  text-align: center;
+}
+
+.or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--soromi-text-faint);
+  font-size: 12px;
+}
+
+.or::before,
+.or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--soromi-border);
+}
+
+.code {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--soromi-border);
+  border-radius: 12px;
+  background: var(--soromi-bg-tab);
+  color: var(--soromi-text);
+  font-size: 18px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
+.code::placeholder {
+  color: var(--soromi-text-faint);
+  letter-spacing: 4px;
+}
+
+.connect {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--soromi-text-faint);
+  text-align: center;
+}
