@@ -1,6 +1,6 @@
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import clsx from 'clsx'
@@ -46,6 +46,8 @@ export function TerminalSurface({
       fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
+      // Cap scrollback per terminal; parked tabs each keep their own buffer, so this bounds memory.
+      scrollback: 2000,
       theme: { background, foreground },
     })
     const fit = new FitAddon()
@@ -58,11 +60,11 @@ export function TerminalSurface({
     termRef.current = term
     fitRef.current = fit
 
-    // GPU renderer; falls back to the DOM renderer on context loss.
+    // Canvas renderer: GPU-composited, reliable in WKWebView, and free of WebGL's per-page
+    // context limit (which the parked-buffer model, one live terminal per tab, can hit). The DOM
+    // renderer stays as a fallback if canvas fails.
     try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      term.loadAddon(webgl)
+      term.loadAddon(new CanvasAddon())
     } catch {
       // DOM renderer stays.
     }

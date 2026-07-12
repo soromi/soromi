@@ -11,7 +11,9 @@ use tokio::sync::broadcast;
 use crate::accounts::loader::{accounts_dir, load_account_profile};
 use crate::accounts::resolver::{expand_home, resolve_launch_env};
 use crate::files::directory::list_directory;
+use crate::files::paths::resolve_within;
 use crate::files::reader::{FileRead, read_file_within};
+use crate::files::watcher::DirectoryWatcher;
 use crate::home::soromi_home;
 use crate::keep_awake::controller::KeepAwakeController;
 use crate::notifications::controller::NotificationController;
@@ -70,6 +72,10 @@ pub struct WorkspaceService {
     /// app has no shell PATH). The shell resolves it and passes it here; `None` keeps the
     /// process PATH (a terminal-launched daemon already has the full one).
     launch_path: Option<String>,
+    /// Watches the directories the file tree shows; announces which one changed on `dir_change_tx`.
+    watcher: DirectoryWatcher,
+    /// `(workspace, path)` of a directory that changed on disk, for viewports to re-list.
+    dir_change_tx: broadcast::Sender<(String, String)>,
 }
 
 impl WorkspaceService {
@@ -81,6 +87,8 @@ impl WorkspaceService {
         launch_path: Option<String>,
     ) -> Arc<Self> {
         let (change_tx, _) = broadcast::channel(64);
+        let (dir_change_tx, _) = broadcast::channel(64);
+        let watcher = DirectoryWatcher::new(dir_change_tx.clone());
         let service = Arc::new(Self {
             manager: SessionManager::new(),
             metadata: Mutex::new(Vec::new()),
@@ -91,6 +99,8 @@ impl WorkspaceService {
             update: Mutex::new(None),
             focused: AtomicBool::new(false),
             launch_path,
+            watcher,
+            dir_change_tx,
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -115,6 +125,11 @@ impl WorkspaceService {
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
         self.change_tx.subscribe()
+    }
+
+    /// Subscribes to `(workspace, path)` notifications for directories that changed on disk.
+    pub fn subscribe_dir_changes(&self) -> broadcast::Receiver<(String, String)> {
+        self.dir_change_tx.subscribe()
     }
 
     /// Sets whether the app window is focused. While focused, agent-event sounds and banners are
@@ -345,6 +360,7 @@ impl WorkspaceService {
             self.manager.dispose(&id);
         }
         self.metadata.lock().unwrap().retain(|(n, _)| n != name);
+        self.watcher.unwatch_workspace(name);
         self.persist();
         self.emit_change();
     }
@@ -392,11 +408,22 @@ impl WorkspaceService {
     }
 
     pub fn list_dir(&self, workspace: &str, path: &str) -> Vec<DirEntry> {
-        let metadata = self.metadata.lock().unwrap();
-        match metadata.iter().find(|(name, _)| name == workspace) {
-            Some((_, meta)) => list_directory(Path::new(&meta.root), &meta.folders, path),
-            None => Vec::new(),
+        // Copy what listing needs, then drop the lock before disk reads and watch registration.
+        let dirs = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(name, _)| name == workspace)
+                .map(|(_, meta)| (meta.root.clone(), meta.folders.clone()))
+        };
+        let Some((root, folders)) = dirs else {
+            return Vec::new();
+        };
+        // Watch the directory this listing reads, so a change to it re-lists live.
+        if let Some(dir) = listing_dir(&root, &folders, path) {
+            self.watcher.watch(workspace, path, &dir);
         }
+        list_directory(Path::new(&root), &folders, path)
     }
 
     pub fn read_file(&self, workspace: &str, path: &str) -> FileRead {
@@ -910,6 +937,20 @@ fn existing_folders(root: &str, folders: &[String]) -> Vec<String> {
     }
 }
 
+/// The absolute directory a listing reads from disk, or `None` when the listing is not a single
+/// on-disk directory (the empty path of a multi-folder space just lists the declared folders).
+fn listing_dir(root: &str, folders: &[String], path: &str) -> Option<PathBuf> {
+    if path.is_empty() || path == "." {
+        if folders.len() == 1 && folders[0] == "." {
+            Some(PathBuf::from(root))
+        } else {
+            None
+        }
+    } else {
+        resolve_within(Path::new(root), path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1119,6 +1160,28 @@ mod tests {
             existing_folders(&root, &[".".into()]),
             vec![".".to_string()]
         );
+    }
+
+    #[test]
+    fn listing_dir_picks_the_directory_to_watch() {
+        // Whole-root space: the empty listing reads the root itself.
+        assert_eq!(
+            listing_dir("/w", &[".".into()], ""),
+            Some(PathBuf::from("/w"))
+        );
+        // A subpath reads that directory.
+        assert_eq!(
+            listing_dir("/w", &[".".into()], "src"),
+            Some(PathBuf::from("/w/src"))
+        );
+        assert_eq!(
+            listing_dir("/w", &["api".into(), "web".into()], "api/src"),
+            Some(PathBuf::from("/w/api/src"))
+        );
+        // Multi-folder root listing is just the declared folders, not one on-disk dir.
+        assert_eq!(listing_dir("/w", &["api".into(), "web".into()], ""), None);
+        // Escapes are rejected (never watched).
+        assert_eq!(listing_dir("/w", &[".".into()], "../etc"), None);
     }
 
     #[tokio::test]

@@ -15,6 +15,22 @@ export interface FileContent {
   binary: boolean
 }
 
+/** The sidebar's resizable width, clamped and remembered across sessions. */
+const SIDEBAR_WIDTH_KEY = 'soromi.sidebarWidth'
+const DEFAULT_SIDEBAR_WIDTH = 230
+const MIN_SIDEBAR_WIDTH = 180
+const MAX_SIDEBAR_WIDTH = 640
+const clampSidebarWidth = (width: number) =>
+  Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(width)))
+const readSidebarWidth = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    return stored ? clampSidebarWidth(stored) : DEFAULT_SIDEBAR_WIDTH
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH
+  }
+}
+
 /** Ensures each workspace keeps a valid active session, defaulting to its first tab. */
 function reconcileActiveSession(
   workspaces: WorkspaceInfo[],
@@ -62,6 +78,8 @@ interface UiState {
   treeListings: Record<string, Record<string, DirEntry[]>>
   treeExpanded: Record<string, Record<string, boolean>>
   sidebarMode: SidebarMode
+  /** The Files/Skills sidebar width in px (draggable, persisted). */
+  sidebarWidth: number
   notice: string | null
   error: string | null
   select: (name: string) => void
@@ -80,6 +98,7 @@ interface UiState {
   resetTree: (workspace: string) => void
   toggleTreeNode: (workspace: string, path: string) => void
   setSidebarMode: (mode: SidebarMode) => void
+  setSidebarWidth: (width: number) => void
   setNotice: (notice: string | null) => void
   setError: (error: string | null) => void
 }
@@ -91,6 +110,7 @@ export const useAppStore = create<UiState>()((set) => ({
   treeListings: {},
   treeExpanded: {},
   sidebarMode: 'files',
+  sidebarWidth: readSidebarWidth(),
   notice: null,
   error: null,
   select: (name) => set({ active: name, error: null, overlays: [] }),
@@ -173,6 +193,13 @@ export const useAppStore = create<UiState>()((set) => ({
       }
     }),
   setSidebarMode: (sidebarMode) => set({ sidebarMode }),
+  setSidebarWidth: (width) => {
+    const sidebarWidth = clampSidebarWidth(width)
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+    } catch {}
+    set({ sidebarWidth })
+  },
   setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
 }))

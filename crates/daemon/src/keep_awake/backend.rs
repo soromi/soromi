@@ -20,8 +20,10 @@ impl KeepAwake for CaffeinateKeepAwake {
             return;
         }
         // -i prevent idle system sleep, -m keep the disk awake, -s prevent system sleep on AC.
+        // -w <pid> ties caffeinate to this process, so it exits (releasing the assertion) if we
+        // are force-quit or crash without running cleanup. Normal release still kills it directly.
         if let Ok(child) = Command::new("/usr/bin/caffeinate")
-            .args(["-i", "-m", "-s"])
+            .args(["-i", "-m", "-s", "-w", &std::process::id().to_string()])
             .spawn()
         {
             *process = Some(child);

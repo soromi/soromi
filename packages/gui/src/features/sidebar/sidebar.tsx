@@ -1,5 +1,6 @@
 import { Menu } from '@mantine/core'
 import clsx from 'clsx'
+import { useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
@@ -38,15 +39,43 @@ const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
  */
 export function Sidebar() {
   const transport = useTransport()
-  const { active, sidebarMode, select, openCreateSpace, openWorkspaceSettings } = useAppStore(
+  const {
+    active,
+    sidebarMode,
+    sidebarWidth,
+    select,
+    openCreateSpace,
+    openWorkspaceSettings,
+    setSidebarWidth,
+  } = useAppStore(
     useShallow((s) => ({
       active: s.active,
       sidebarMode: s.sidebarMode,
+      sidebarWidth: s.sidebarWidth,
       select: s.select,
       openCreateSpace: s.openCreateSpace,
       openWorkspaceSettings: s.openWorkspaceSettings,
+      setSidebarWidth: s.setSidebarWidth,
     })),
   )
+  const asideRef = useRef<HTMLElement>(null)
+
+  // Drag the right edge to resize; width is derived from the pointer's x minus the sidebar's left.
+  const startResize = (event: React.PointerEvent) => {
+    event.preventDefault()
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0
+    const onMove = (move: PointerEvent) => setSidebarWidth(move.clientX - left)
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
   const { workspaces, mutedMap, keepAwake, keepAwakeMode, setMuted, setKeepAwakeMode } =
     useClientStore(
       useShallow((s) => ({
@@ -72,7 +101,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className={styles.sidebar}>
+    <aside ref={asideRef} className={styles.sidebar} style={{ width: sidebarWidth }}>
       <div className={styles.header}>
         <Menu position="bottom-start" width={230} withinPortal disabled={!active}>
           <Menu.Target>
@@ -168,6 +197,8 @@ export function Sidebar() {
           </>
         )}
       </div>
+
+      <div className={styles.resizer} onPointerDown={startResize} title="Drag to resize" />
     </aside>
   )
 }

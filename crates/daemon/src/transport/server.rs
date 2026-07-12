@@ -66,6 +66,28 @@ async fn handle_connection(
         }
     });
 
+    // Dir-change task: when a watched directory changes on disk, re-list it and push the update,
+    // so the file tree stays live without the viewport polling.
+    let dir_hub = hub.clone();
+    let dir_out = out_tx.clone();
+    let mut dir_changes = hub.subscribe_dir_changes();
+    let dir_task = tokio::spawn(async move {
+        loop {
+            match dir_changes.recv().await {
+                Ok((workspace, path)) => {
+                    let entries = dir_hub.list_dir(&workspace, &path);
+                    let _ = dir_out.send(ServerMessage::DirListing {
+                        workspace,
+                        path,
+                        entries,
+                    });
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
     let mut connection = Connection::new(hub, accounts, out_tx);
     while let Some(Ok(message)) = source.next().await {
         match message {
@@ -81,5 +103,6 @@ async fn handle_connection(
 
     connection.dispose();
     change_task.abort();
+    dir_task.abort();
     writer.abort();
 }
