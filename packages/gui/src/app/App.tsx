@@ -8,6 +8,9 @@ import { LocalWebSocketTransport, TransportProvider, useClientStore } from '@sor
 //Store
 import { useAppStore } from '@/stores/app-store'
 
+//Utils
+import { focusWindow, onNotificationClick } from '@/lib/host'
+
 //Constants
 import { DAEMON_URL } from '@/config'
 import { theme } from '@/config/theme'
@@ -18,6 +21,9 @@ import { AppLayout } from './app-layout'
 /** Root: sets up the theme and transport, routes daemon messages into the store. */
 export function App() {
   const transport = useMemo(() => new LocalWebSocketTransport(DAEMON_URL), [])
+
+  // Clicking an OS notification brings the app forward (the window is hidden, not closed, on close).
+  useEffect(() => onNotificationClick(focusWindow), [])
 
   useEffect(() => {
     // Daemon-mirrored data lands in the client store; navigation/banners in the UI store.

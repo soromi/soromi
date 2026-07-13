@@ -103,11 +103,21 @@ export function TerminalSurface({
       attached = false
       syncSize()
     })
+    // The agent was relaunched (folders/account changed): clear and re-attach, so the pane shows
+    // the fresh process. The re-attach snapshot's reset-prefix keeps it clean.
+    const offReset = transport.onMessage((message) => {
+      if (message.type === 'session-reset' && message.session === session) {
+        term.reset()
+        attached = false
+        syncSize()
+      }
+    })
 
     return () => {
       observer.disconnect()
       offMessage()
       offOpen()
+      offReset()
       inputSub.dispose()
       term.dispose()
       termRef.current = null

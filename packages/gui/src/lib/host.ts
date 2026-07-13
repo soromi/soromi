@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
+import { onAction } from '@tauri-apps/plugin-notification'
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
 
 //Constants
@@ -35,4 +37,20 @@ export function revealInFinder(path: string) {
 /** Copies text to the clipboard. */
 export function copyText(text: string) {
   void navigator.clipboard?.writeText(text)
+}
+
+/** Brings the app window to the front (the window is hidden, not closed, on close). Desktop only. */
+export async function focusWindow() {
+  if (!isTauri) return
+
+  const window = getCurrentWindow()
+  await window.show()
+  await window.unminimize()
+  await window.setFocus()
+}
+
+/** Runs `handler` when an OS notification is clicked (to open the app). Desktop only; no-op else. */
+export function onNotificationClick(handler: () => void) {
+  if (!isTauri) return
+  void onAction(() => handler())
 }

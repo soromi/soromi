@@ -6,6 +6,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::accounts::store::FileAccountManager;
+use crate::pairing::PairingService;
 use crate::workspaces::service::{CreateSpaceInput, WorkspaceService};
 
 pub type Outbound = mpsc::UnboundedSender<ServerMessage>;
@@ -16,6 +17,8 @@ pub type Outbound = mpsc::UnboundedSender<ServerMessage>;
 pub struct Connection {
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
+    /// Present only on the trusted local link; device management is refused without it.
+    pairing: Option<Arc<PairingService>>,
     out: Outbound,
     attached: HashMap<String, JoinHandle<()>>,
 }
@@ -24,11 +27,13 @@ impl Connection {
     pub fn new(
         hub: Arc<WorkspaceService>,
         accounts: Arc<FileAccountManager>,
+        pairing: Option<Arc<PairingService>>,
         out: Outbound,
     ) -> Self {
         Self {
             hub,
             accounts,
+            pairing,
             out,
             attached: HashMap::new(),
         }
@@ -72,10 +77,11 @@ impl Connection {
                 workspace,
                 accounts,
                 folders,
+                root,
                 instructions,
             } => match self
                 .hub
-                .update_space(&workspace, accounts, folders, instructions)
+                .update_space(&workspace, accounts, folders, root, instructions)
             {
                 Ok(result) => self.send(ServerMessage::WorkspaceOpened {
                     workspace: result.workspace,
@@ -151,6 +157,26 @@ impl Connection {
                 let _ = self.accounts.remove(&name);
                 self.send_accounts();
             }
+            ClientMessage::CreateDevice { name } => {
+                if let Some(pairing) = &self.pairing {
+                    let device = pairing.create_device(name);
+                    let _ = self.out.send(ServerMessage::DevicePaired { device });
+                }
+            }
+            ClientMessage::ListDevices => {
+                if let Some(pairing) = &self.pairing {
+                    let _ = self.out.send(ServerMessage::DeviceList {
+                        devices: pairing.list_devices(),
+                    });
+                }
+            }
+            ClientMessage::RevokeDevice { id } => {
+                if let Some(pairing) = &self.pairing {
+                    let _ = self.out.send(ServerMessage::DeviceList {
+                        devices: pairing.revoke_device(&id),
+                    });
+                }
+            }
             ClientMessage::CheckUpdate => {
                 // Run the check off the message loop; report back to this viewport. A found
                 // update goes through the hub so every viewport's banner updates, not just this one.
@@ -169,6 +195,10 @@ impl Connection {
             ClientMessage::Input { session, data } => {
                 if let Some(session) = self.hub.get(&session) {
                     session.write(&data);
+                    // Submitting (Enter) starts a new turn: the agent is working again.
+                    if data.contains('\r') {
+                        session.mark_active();
+                    }
                 }
             }
             ClientMessage::Resize {

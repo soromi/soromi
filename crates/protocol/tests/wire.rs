@@ -101,6 +101,7 @@ fn client_update_space_carries_account_bindings() {
                 agent: "claude".into(),
             }],
             folders: vec!["api".into(), "web".into()],
+            root: None,
             instructions: Some("Prefer TypeScript".into()),
         },
         json!({

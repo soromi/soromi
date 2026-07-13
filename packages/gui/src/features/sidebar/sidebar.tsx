@@ -1,10 +1,5 @@
-import { Menu } from '@mantine/core'
-import clsx from 'clsx'
 import { useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-
-//Packages
-import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -12,49 +7,22 @@ import { useAppStore } from '@/stores/app-store'
 //Components
 import { FileTree } from '@/features/files/file-tree'
 import { SkillList } from '@/features/skills/skill-list'
-
-//Icons
-import BellOffSvg from '@/assets/icons/bell-off.svg?react'
-import BellSvg from '@/assets/icons/bell.svg?react'
-import CaretSvg from '@/assets/icons/caret.svg?react'
-import CheckSvg from '@/assets/icons/check.svg?react'
-import MugSvg from '@/assets/icons/mug.svg?react'
-import PlusSvg from '@/assets/icons/plus.svg?react'
+import { WorkspaceSwitcher } from '@/features/workspaces/workspace-switcher'
 
 //Styles
 import styles from './sidebar.module.css'
 
-//Types
-import type { KeepAwakeMode } from '@soromi/protocol'
-
-const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
-  { mode: 'off', label: 'Off' },
-  { mode: 'working', label: 'While agent works' },
-  { mode: 'always', label: 'Always on' },
-]
-
 /**
- * Contextual second column. The header holds the workspace switcher plus the notification and
- * keep-awake controls; below it is the section the rail selected (file tree or skills list).
+ * Contextual second column. The header holds the workspace switcher; below it is the section the
+ * rail selected (file tree or skills list). Notification and keep-awake controls live in the
+ * top-right bar, so the switcher has the full width for long workspace names.
  */
 export function Sidebar() {
-  const transport = useTransport()
-  const {
-    active,
-    sidebarMode,
-    sidebarWidth,
-    select,
-    openCreateSpace,
-    openWorkspaceSettings,
-    setSidebarWidth,
-  } = useAppStore(
+  const { active, sidebarMode, sidebarWidth, setSidebarWidth } = useAppStore(
     useShallow((s) => ({
       active: s.active,
       sidebarMode: s.sidebarMode,
       sidebarWidth: s.sidebarWidth,
-      select: s.select,
-      openCreateSpace: s.openCreateSpace,
-      openWorkspaceSettings: s.openWorkspaceSettings,
       setSidebarWidth: s.setSidebarWidth,
     })),
   )
@@ -64,6 +32,7 @@ export function Sidebar() {
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault()
     const left = asideRef.current?.getBoundingClientRect().left ?? 0
+
     const onMove = (move: PointerEvent) => setSidebarWidth(move.clientX - left)
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -71,122 +40,17 @@ export function Sidebar() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }
-  const { workspaces, mutedMap, keepAwake, keepAwakeMode, setMuted, setKeepAwakeMode } =
-    useClientStore(
-      useShallow((s) => ({
-        workspaces: s.workspaces,
-        mutedMap: s.muted,
-        keepAwake: s.keepAwake,
-        keepAwakeMode: s.keepAwakeMode,
-        setMuted: s.setMuted,
-        setKeepAwakeMode: s.setKeepAwakeMode,
-      })),
-    )
-  const muted = active ? (mutedMap[active] ?? false) : false
-
-  const toggleMute = () => {
-    if (!active) return
-    const next = !muted
-    setMuted(active, next)
-    transport.send({ type: 'mute-workspace', workspace: active, muted: next })
-  }
-  const selectKeepAwake = (mode: KeepAwakeMode) => {
-    setKeepAwakeMode(mode)
-    transport.send({ type: 'set-keep-awake-mode', mode })
-  }
 
   return (
     <aside ref={asideRef} className={styles.sidebar} style={{ width: sidebarWidth }}>
       <div className={styles.header}>
-        <Menu position="bottom-start" width={230} withinPortal disabled={!active}>
-          <Menu.Target>
-            <button type="button" className={styles.switcher}>
-              {active && <span className={styles.avatar}>{abbreviate(active)}</span>}
-              <span className={styles.name}>{active ?? 'No workspace'}</span>
-              <CaretSvg width={14} height={14} className={styles.caret} />
-            </button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>Workspaces</Menu.Label>
-            {workspaces.map((workspace) => (
-              <Menu.Item
-                key={workspace.name}
-                leftSection={<span className={styles.avatarSm}>{abbreviate(workspace.name)}</span>}
-                rightSection={
-                  workspace.name === active ? <CheckSvg width={14} height={14} /> : undefined
-                }
-                onClick={() => select(workspace.name)}
-              >
-                {workspace.name}
-              </Menu.Item>
-            ))}
-            <Menu.Divider />
-            <Menu.Item
-              leftSection={
-                <span className={styles.newBox}>
-                  <PlusSvg width={12} height={12} />
-                </span>
-              }
-              onClick={openCreateSpace}
-            >
-              New workspace…
-            </Menu.Item>
-            {active && (
-              <>
-                <Menu.Divider />
-                <Menu.Item onClick={() => openWorkspaceSettings(active)}>
-                  Workspace settings
-                </Menu.Item>
-              </>
-            )}
-          </Menu.Dropdown>
-        </Menu>
-
-        <span className={styles.spacer} />
-
-        <button
-          type="button"
-          className={clsx(styles.action, !muted && styles.on)}
-          onClick={toggleMute}
-          disabled={!active}
-          title={muted ? 'Notifications muted' : 'Notifications on'}
-        >
-          {muted ? <BellOffSvg width={16} height={16} /> : <BellSvg width={16} height={16} />}
-        </button>
-        <Menu position="bottom-end" width={200} withinPortal>
-          <Menu.Target>
-            <button
-              type="button"
-              className={clsx(styles.action, keepAwake && styles.on)}
-              title={`Keep awake: ${KEEP_AWAKE_MODES.find((m) => m.mode === keepAwakeMode)?.label}`}
-            >
-              <MugSvg width={16} height={16} />
-            </button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>Keep awake</Menu.Label>
-            {KEEP_AWAKE_MODES.map(({ mode, label }) => (
-              <Menu.Item
-                key={mode}
-                leftSection={
-                  <CheckSvg
-                    width={14}
-                    height={14}
-                    className={clsx(styles.check, mode === keepAwakeMode && styles.checkOn)}
-                  />
-                }
-                onClick={() => selectKeepAwake(mode)}
-              >
-                {label}
-              </Menu.Item>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
+        <WorkspaceSwitcher />
       </div>
 
       <div className={styles.body}>
@@ -201,8 +65,4 @@ export function Sidebar() {
       <div className={styles.resizer} onPointerDown={startResize} title="Drag to resize" />
     </aside>
   )
-}
-
-function abbreviate(name: string): string {
-  return name.slice(0, 2).replace(/^./, (c) => c.toUpperCase())
 }

@@ -46,6 +46,8 @@ const readDismissedUpdate = (): string | null => {
  */
 interface ClientState {
   connected: boolean
+  /** True once the first workspace list has arrived, so the shell can wait behind a splash. */
+  ready: boolean
   keepAwake: boolean
   keepAwakeMode: KeepAwakeMode
   workspaces: WorkspaceInfo[]
@@ -75,6 +77,7 @@ interface ClientState {
 
 export const useClientStore = create<ClientState>()((set) => ({
   connected: false,
+  ready: false,
   keepAwake: false,
   keepAwakeMode: 'off',
   workspaces: [],
@@ -87,7 +90,7 @@ export const useClientStore = create<ClientState>()((set) => ({
   setConnected: (connected) => set({ connected }),
   setKeepAwake: (keepAwake) => set({ keepAwake }),
   setKeepAwakeMode: (keepAwakeMode) => set({ keepAwakeMode }),
-  setWorkspaces: (workspaces) => set({ workspaces }),
+  setWorkspaces: (workspaces) => set({ workspaces, ready: true }),
   setSessionStatus: (session, status) =>
     set((state) => ({
       workspaces: state.workspaces.map((w) => {

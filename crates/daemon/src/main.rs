@@ -70,8 +70,20 @@ async fn main() {
     };
     println!("soromi: listening on ws://localhost:{port}");
 
+    // Dial the relay too, if configured (SOROMI_RELAY_URL + SOROMI_RELAY_ROOM), so a phone can
+    // reach this daemon off-network.
+    soromi_daemon::transport::relay::spawn_from_env(hub.clone(), accounts.clone());
+
+    // Paired devices: dial the relay per device; the local link can create/list/revoke them.
+    let pairing = soromi_daemon::pairing::PairingService::new(
+        hub.clone(),
+        accounts.clone(),
+        soromi_daemon::pairing::relay_url(),
+        soromi_daemon::pairing::web_url(),
+    );
+
     tokio::select! {
-        _ = serve(listener, hub.clone(), accounts) => {}
+        _ = serve(listener, hub.clone(), accounts, pairing) => {}
         _ = shutdown() => {}
     }
 

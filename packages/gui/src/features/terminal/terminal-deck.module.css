@@ -12,12 +12,19 @@
   flex-direction: column;
 }
 
-.tabs {
+.tabBar {
   display: flex;
   align-items: stretch;
   min-height: 54px;
   background: var(--soromi-bg-tab);
   border-bottom: 1px solid var(--soromi-border);
+}
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
 }
 

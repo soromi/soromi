@@ -31,6 +31,22 @@ const readSidebarWidth = (): number => {
   }
 }
 
+/** The workspace open when the app last closed, restored on launch (falls back to the first). */
+const ACTIVE_WORKSPACE_KEY = 'soromi.activeWorkspace'
+const readActiveWorkspace = (): string | null => {
+  try {
+    return localStorage.getItem(ACTIVE_WORKSPACE_KEY)
+  } catch {
+    return null
+  }
+}
+const writeActiveWorkspace = (name: string | null): void => {
+  try {
+    if (name === null) localStorage.removeItem(ACTIVE_WORKSPACE_KEY)
+    else localStorage.setItem(ACTIVE_WORKSPACE_KEY, name)
+  } catch {}
+}
+
 /** Ensures each workspace keeps a valid active session, defaulting to its first tab. */
 function reconcileActiveSession(
   workspaces: WorkspaceInfo[],
@@ -54,6 +70,7 @@ export type Overlay =
   | { id: string; type: 'create-space' }
   | { id: string; type: 'settings' }
   | { id: string; type: 'workspace-settings'; workspace: string }
+  | { id: string; type: 'connect-phone' }
 
 /**
  * How much an overlay covers. `full` covers the whole shell (rail + sidebar + content) for
@@ -61,7 +78,12 @@ export type Overlay =
  * visible so it reads as workspace-scoped.
  */
 export function overlayScope(overlay: Overlay): 'full' | 'content' {
-  return overlay.type === 'settings' || overlay.type === 'create-space' ? 'full' : 'content'
+  return overlay.type === 'settings' ||
+    overlay.type === 'create-space' ||
+    overlay.type === 'connect-phone' ||
+    overlay.type === 'workspace-settings'
+    ? 'full'
+    : 'content'
 }
 
 /**
@@ -80,9 +102,16 @@ interface UiState {
   sidebarMode: SidebarMode
   /** The Files/Skills sidebar width in px (draggable, persisted). */
   sidebarWidth: number
+  /** Workspaces that finished while you weren't looking at them (per-viewer "needs review"). */
+  needsReview: Record<string, boolean>
+  /** Last-seen aggregate status per workspace, to detect the transition into "finished". */
+  lastStatus: Record<string, string>
   notice: string | null
   error: string | null
   select: (name: string) => void
+  /** Re-derive `needsReview` from fresh statuses: a workspace that just became `done` while it is
+   * not the active one needs review; opening it (via `select`) clears it. */
+  applyStatuses: (workspaces: WorkspaceInfo[]) => void
   selectSession: (workspace: string, session: string) => void
   /** Re-derive active workspace/tab against a fresh workspace list from the daemon. */
   reconcile: (workspaces: WorkspaceInfo[]) => void
@@ -90,6 +119,7 @@ interface UiState {
   openCreateSpace: () => void
   openSettings: () => void
   openWorkspaceSettings: (workspace: string) => void
+  openConnectPhone: () => void
   popOverlay: () => void
   closeOverlays: () => void
   setFileContent: (workspace: string, path: string, content: FileContent) => void
@@ -104,25 +134,50 @@ interface UiState {
 }
 
 export const useAppStore = create<UiState>()((set) => ({
-  active: null,
+  active: readActiveWorkspace(),
   activeSession: {},
   overlays: [],
   treeListings: {},
   treeExpanded: {},
   sidebarMode: 'files',
   sidebarWidth: readSidebarWidth(),
+  needsReview: {},
+  lastStatus: {},
   notice: null,
   error: null,
-  select: (name) => set({ active: name, error: null, overlays: [] }),
+  select: (name) =>
+    set((state) => {
+      writeActiveWorkspace(name)
+      const { [name]: _seen, ...needsReview } = state.needsReview
+      return { active: name, error: null, overlays: [], needsReview }
+    }),
+  applyStatuses: (workspaces) =>
+    set((state) => {
+      const needsReview = { ...state.needsReview }
+      const lastStatus: Record<string, string> = {}
+
+      for (const workspace of workspaces) {
+        const became = workspace.status === 'done' && state.lastStatus[workspace.name] !== 'done'
+        if (became && workspace.name !== state.active) needsReview[workspace.name] = true
+        if (workspace.status !== 'done') delete needsReview[workspace.name]
+        lastStatus[workspace.name] = workspace.status
+      }
+
+      return { needsReview, lastStatus }
+    }),
   selectSession: (workspace, session) =>
     set((state) => ({ activeSession: { ...state.activeSession, [workspace]: session } })),
   reconcile: (workspaces) =>
     set((state) => {
       const activeSession = reconcileActiveSession(workspaces, state.activeSession)
+      // Keep the restored/selected workspace if it still exists; otherwise fall back to the first.
       const stillActive = state.active !== null && workspaces.some((w) => w.name === state.active)
       if (stillActive) return { activeSession }
-      if (workspaces.length === 0) return { activeSession, active: null, overlays: [] }
-      return { activeSession, active: workspaces[0].name, overlays: [] }
+
+      const next = workspaces[0]?.name ?? null
+      writeActiveWorkspace(next)
+
+      return { activeSession, active: next, overlays: [] }
     }),
   openFile: (workspace, path) =>
     set((state) => {
@@ -149,6 +204,11 @@ export const useAppStore = create<UiState>()((set) => ({
     set((state) => {
       if (state.overlays.at(-1)?.type === 'settings') return {}
       return { overlays: [...state.overlays, { id: crypto.randomUUID(), type: 'settings' }] }
+    }),
+  openConnectPhone: () =>
+    set((state) => {
+      if (state.overlays.at(-1)?.type === 'connect-phone') return {}
+      return { overlays: [...state.overlays, { id: crypto.randomUUID(), type: 'connect-phone' }] }
     }),
   openWorkspaceSettings: (workspace) =>
     set((state) => {

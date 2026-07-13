@@ -192,6 +192,16 @@ function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps
 
   const indent = { paddingLeft: 8 + depth * 14 }
 
+  // Fetch children whenever this folder is open but its listing is missing: on first expand, and
+  // again if the cache was cleared (e.g. folders changed) while it stayed expanded. Without this,
+  // an expanded folder can sit empty because a plain toggle only fetches on the collapse->expand
+  // edge. (No-op for files.)
+  useEffect(() => {
+    if (type === 'dir' && expanded && children === undefined) {
+      transport.send({ type: 'list-dir', workspace, path })
+    }
+  }, [type, expanded, children, workspace, path, transport])
+
   if (type === 'file') {
     const open = () => {
       openFile(workspace, path)
@@ -217,12 +227,7 @@ function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps
     )
   }
 
-  const onToggle = () => {
-    toggle(workspace, path)
-    if (!expanded && children === undefined) {
-      transport.send({ type: 'list-dir', workspace, path })
-    }
-  }
+  const onToggle = () => toggle(workspace, path)
 
   return (
     <>

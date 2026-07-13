@@ -13,12 +13,17 @@ export type ClientMessage = { "type": "attach", session: string, } | { "type": "
  */
 account?: string, } | { "type": "close-session", session: string, } | { "type": "rename-session", session: string, title: string, } | { "type": "list-workspaces" } | { "type": "open-workspace", dir: string, } | { "type": "create-space", name: string, root: string, agent: string, account: string, folders?: Array<string>, } | { "type": "remove-space", workspace: string, } | { "type": "mute-workspace", workspace: string, muted: boolean, } | { "type": "list-dir", workspace: string, path: string, } | { "type": "read-file", workspace: string, path: string, } | { "type": "list-skills", session: string, } | { "type": "list-accounts" } | { "type": "save-account", profile: AccountProfile, } | { "type": "delete-account", name: string, } | { "type": "set-keep-awake-mode", mode: KeepAwakeMode, } | { "type": "export-space", workspace: string, } | { "type": "check-provider", provider: string, configDir: string, } | { "type": "update-space", workspace: string, accounts: Array<AgentAccount>, 
 /**
- * The workspace's work folders (relative to its root). Applies to sessions opened after
- * the change; running tabs keep their launch folders.
+ * The workspace's work folders (relative to its root). Changing them relaunches every tab
+ * so agents pick up the new `--add-dir` paths.
  */
 folders: Array<string>, 
+/**
+ * A new root for the folders (their common parent), when adding a folder outside the
+ * current root shifts it. Absent keeps the existing root.
+ */
+root?: string, 
 /**
  * Instructions appended to the agent's system prompt. Applies to sessions opened after
  * the change. `None`/empty clears them.
  */
-instructions?: string, } | { "type": "check-update" };
+instructions?: string, } | { "type": "check-update" } | { "type": "create-device", name: string, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, };

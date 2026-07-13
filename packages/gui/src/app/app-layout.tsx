@@ -1,8 +1,11 @@
 //Packages
-import { useTransport } from '@soromi/client'
+import { useClientStore, useTransport } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
+
+//Hooks
+import { useWorkspaceShortcuts } from '@/features/workspaces/use-workspace-shortcuts'
 
 //Components
 import { Rail } from '@/features/workspaces/rail'
@@ -10,6 +13,7 @@ import { Sidebar } from '@/features/sidebar/sidebar'
 import { TerminalDeck } from '@/features/terminal/terminal-deck'
 import { Welcome } from '@/features/welcome/welcome'
 import { OverlayHost } from './overlay-host'
+import { Splash } from './splash'
 import { StatusBanner } from './status-banner'
 import { UpdateBanner } from './update-banner'
 
@@ -23,6 +27,13 @@ import styles from './app-layout.module.css'
 export function AppLayout() {
   const transport = useTransport()
   const active = useAppStore((s) => s.active)
+  const ready = useClientStore((s) => s.ready)
+
+  useWorkspaceShortcuts()
+
+  // Wait behind a splash until the first workspace list lands, so the shell never flashes the
+  // empty/welcome state before the active workspace resolves.
+  if (!ready) return <Splash />
 
   return (
     <div className={styles.shell}>

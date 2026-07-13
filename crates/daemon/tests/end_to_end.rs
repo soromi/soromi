@@ -82,7 +82,13 @@ async fn resize_reaches_the_pty() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, hub, accounts));
+    let pairing = soromi_daemon::pairing::PairingService::new(
+        hub.clone(),
+        accounts.clone(),
+        "ws://localhost:8787".to_string(),
+        "http://localhost:1430".to_string(),
+    );
+    tokio::spawn(serve(listener, hub, accounts, pairing));
 
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
@@ -157,7 +163,13 @@ async fn gui_can_create_list_attach_and_exchange_io() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, hub, accounts));
+    let pairing = soromi_daemon::pairing::PairingService::new(
+        hub.clone(),
+        accounts.clone(),
+        "ws://localhost:8787".to_string(),
+        "http://localhost:1430".to_string(),
+    );
+    tokio::spawn(serve(listener, hub, accounts, pairing));
 
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await

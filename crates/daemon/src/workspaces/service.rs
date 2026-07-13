@@ -76,6 +76,8 @@ pub struct WorkspaceService {
     watcher: DirectoryWatcher,
     /// `(workspace, path)` of a directory that changed on disk, for viewports to re-list.
     dir_change_tx: broadcast::Sender<(String, String)>,
+    /// A session id whose agent was just relaunched, for viewports to re-attach.
+    reset_tx: broadcast::Sender<String>,
 }
 
 impl WorkspaceService {
@@ -88,6 +90,7 @@ impl WorkspaceService {
     ) -> Arc<Self> {
         let (change_tx, _) = broadcast::channel(64);
         let (dir_change_tx, _) = broadcast::channel(64);
+        let (reset_tx, _) = broadcast::channel(64);
         let watcher = DirectoryWatcher::new(dir_change_tx.clone());
         let service = Arc::new(Self {
             manager: SessionManager::new(),
@@ -101,6 +104,7 @@ impl WorkspaceService {
             launch_path,
             watcher,
             dir_change_tx,
+            reset_tx,
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -130,6 +134,11 @@ impl WorkspaceService {
     /// Subscribes to `(workspace, path)` notifications for directories that changed on disk.
     pub fn subscribe_dir_changes(&self) -> broadcast::Receiver<(String, String)> {
         self.dir_change_tx.subscribe()
+    }
+
+    /// Subscribes to session ids whose agent was relaunched, so viewports can re-attach.
+    pub fn subscribe_resets(&self) -> broadcast::Receiver<String> {
+        self.reset_tx.subscribe()
     }
 
     /// Sets whether the app window is focused. While focused, agent-event sounds and banners are
@@ -530,6 +539,7 @@ impl WorkspaceService {
         name: &str,
         accounts: Vec<AgentAccount>,
         folders: Vec<String>,
+        root: Option<String>,
         instructions: Option<String>,
     ) -> anyhow::Result<OpenResult> {
         let folders = if folders.is_empty() {
@@ -538,7 +548,7 @@ impl WorkspaceService {
             folders
         };
         let instructions = instructions.filter(|text| !text.trim().is_empty());
-        let (root, sessions, old_accounts) = {
+        let (old_root, sessions, old_accounts, old_folders) = {
             let metadata = self.metadata.lock().unwrap();
             let (_, meta) = metadata
                 .iter()
@@ -548,8 +558,13 @@ impl WorkspaceService {
                 meta.root.clone(),
                 meta.sessions.clone(),
                 meta.accounts.clone(),
+                meta.folders.clone(),
             )
         };
+        let root = root.filter(|r| !r.is_empty()).unwrap_or(old_root.clone());
+        // Changing the folders or the root changes every session's launch dirs (cwd / `--add-dir`),
+        // so all tabs relaunch to pick them up; an account change relaunches just that tab.
+        let folders_changed = old_folders != folders || old_root != root;
         if let Some((_, meta)) = self
             .metadata
             .lock()
@@ -559,12 +574,14 @@ impl WorkspaceService {
         {
             meta.accounts = accounts.clone();
             meta.folders = folders.clone();
+            meta.root = root.clone();
             meta.instructions = instructions.clone();
         }
         let mut warning = None;
         for session in &sessions {
-            if account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent)
-            {
+            let account_changed =
+                account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent);
+            if account_changed || folders_changed {
                 self.manager.dispose(&session.id);
                 warning = warning.or(self.start_session(
                     name,
@@ -574,6 +591,8 @@ impl WorkspaceService {
                     instructions.as_deref(),
                     session,
                 ));
+                // Tell viewports to re-attach, so the terminal shows the relaunched agent.
+                let _ = self.reset_tx.send(session.id.clone());
             }
         }
         self.persist();
@@ -746,6 +765,17 @@ impl WorkspaceService {
     /// and if it is not muted, plays the cue and fires a banner. `agent` is the source that fired
     /// it (e.g. `claude`), named in the banner when present.
     pub fn handle_agent_event(&self, session_id: &str, cue: Cue, agent: Option<&str>) {
+        // Reflect the event in the tab's status (the reliable, per-agent-normalized signal),
+        // regardless of focus or mute; only the sound and banner below are conditional.
+        let status = match cue {
+            Cue::Complete => Status::Done,
+            Cue::Request => Status::WaitingInput,
+            Cue::Question => Status::Blocked,
+        };
+        if let Some(session) = self.manager.get(session_id) {
+            session.set_hook_status(status);
+        }
+
         let workspace = {
             let metadata = self.metadata.lock().unwrap();
             metadata
@@ -1030,7 +1060,7 @@ mod tests {
 
         let accounts = service.summaries()[0].accounts.clone();
         service
-            .update_space("kazomi", accounts, vec!["api".into()], None)
+            .update_space("kazomi", accounts, vec!["api".into()], None, None)
             .unwrap();
 
         assert_eq!(service.summaries()[0].folders, vec!["api".to_string()]);

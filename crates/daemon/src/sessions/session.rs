@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -33,7 +34,12 @@ pub struct Session {
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     scrollback: Arc<Mutex<ScrollbackBuffer>>,
     output_tx: broadcast::Sender<String>,
+    status_tx: Arc<watch::Sender<Status>>,
     status_rx: watch::Receiver<Status>,
+    /// Set when a hook reported an authoritative status (done / waiting-input). While set, the PTY
+    /// parser can't move the status (its trailing output would otherwise fight the hook). Cleared
+    /// on the user's next input, which starts a new turn.
+    settled: Arc<AtomicBool>,
     reader_handle: Option<JoinHandle<()>>,
 }
 
@@ -79,8 +85,16 @@ impl Session {
         let scrollback = Arc::new(Mutex::new(ScrollbackBuffer::new(SCROLLBACK_BYTES)));
         let (output_tx, _) = broadcast::channel(OUTPUT_CAPACITY);
         let (status_tx, status_rx) = watch::channel(Status::Idle);
+        let status_tx = Arc::new(status_tx);
+        let settled = Arc::new(AtomicBool::new(false));
 
-        let reader_handle = spawn_reader(reader, scrollback.clone(), output_tx.clone(), status_tx);
+        let reader_handle = spawn_reader(
+            reader,
+            scrollback.clone(),
+            output_tx.clone(),
+            status_tx.clone(),
+            settled.clone(),
+        );
 
         Ok(Session {
             master: Arc::new(Mutex::new(pair.master)),
@@ -88,7 +102,9 @@ impl Session {
             child: Arc::new(Mutex::new(child)),
             scrollback,
             output_tx,
+            status_tx,
             status_rx,
+            settled,
             reader_handle: Some(reader_handle),
         })
     }
@@ -103,6 +119,19 @@ impl Session {
 
     pub fn status(&self) -> Status {
         *self.status_rx.borrow()
+    }
+
+    /// Records an authoritative status from an agent hook (its turn finished, or it needs input),
+    /// overriding the PTY parser until the next user input.
+    pub fn set_hook_status(&self, status: Status) {
+        self.settled.store(true, Ordering::Relaxed);
+        let _ = self.status_tx.send(status);
+    }
+
+    /// The user sent input: the agent is working again. Starts a fresh turn, so the parser resumes.
+    pub fn mark_active(&self) {
+        self.settled.store(false, Ordering::Relaxed);
+        let _ = self.status_tx.send(Status::Thinking);
     }
 
     /// A live feed of output frames produced after this call.
@@ -154,7 +183,8 @@ fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
     scrollback: Arc<Mutex<ScrollbackBuffer>>,
     output_tx: broadcast::Sender<String>,
-    status_tx: watch::Sender<Status>,
+    status_tx: Arc<watch::Sender<Status>>,
+    settled: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut decoder = Utf8Decoder::default();
@@ -171,7 +201,10 @@ fn spawn_reader(
                     if let Ok(mut sb) = scrollback.lock() {
                         sb.append(&text);
                     }
-                    if let Some(status) = status_state.update(&text) {
+                    // A hook status wins over the parser's live guess until the next turn.
+                    if let Some(status) = status_state.update(&text)
+                        && !settled.load(Ordering::Relaxed)
+                    {
                         let _ = status_tx.send(status);
                     }
                     let _ = output_tx.send(text);

@@ -10,7 +10,7 @@ pub mod status;
 
 pub use account::{AccountProfile, ProviderConfig};
 pub use messages::{
-    AgentAccount, ClientMessage, DirEntry, EntryKind, ServerMessage, SessionSummary, Skill,
-    SkillKind, SkillScope, WorkspaceSummary,
+    AgentAccount, ClientMessage, DeviceSummary, DirEntry, EntryKind, ServerMessage, SessionSummary,
+    Skill, SkillKind, SkillScope, WorkspaceSummary,
 };
 pub use status::{KeepAwakeMode, Status};

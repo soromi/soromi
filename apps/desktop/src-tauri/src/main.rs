@@ -124,8 +124,20 @@ fn main() {
                 );
                 let accounts = Arc::new(FileAccountManager);
 
+                // Dial the relay too, if configured (SOROMI_RELAY_URL + SOROMI_RELAY_ROOM), so a
+                // phone can reach this daemon off-network.
+                soromi_daemon::transport::relay::spawn_from_env(hub.clone(), accounts.clone());
+
+                // Paired devices: dial the relay per device; the local link manages them.
+                let pairing = soromi_daemon::pairing::PairingService::new(
+                    hub.clone(),
+                    accounts.clone(),
+                    soromi_daemon::pairing::relay_url(),
+                    soromi_daemon::pairing::web_url(),
+                );
+
                 let serve_hub = hub.clone();
-                tauri::async_runtime::spawn(serve(listener, serve_hub, accounts));
+                tauri::async_runtime::spawn(serve(listener, serve_hub, accounts, pairing));
 
                 // Notify-only update check: flags newer releases to the viewport.
                 soromi_daemon::updates::spawn(hub.clone());

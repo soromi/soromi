@@ -128,6 +128,23 @@ pub struct WorkspaceSummary {
     pub instructions: Option<String>,
 }
 
+/// A paired remote device (a phone). `pairingUrl` opens the web viewport already configured with
+/// this device's relay, room, and end-to-end key; the desktop renders it as a QR to scan. Only
+/// ever sent to the trusted local viewport, never over the relay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct DeviceSummary {
+    pub id: String,
+    pub name: String,
+    #[cfg_attr(feature = "ts", ts(rename = "pairingUrl"))]
+    #[serde(rename = "pairingUrl")]
+    pub pairing_url: String,
+}
+
 /// Viewport -> daemon. A discriminated union on `type`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -221,9 +238,14 @@ pub enum ClientMessage {
     UpdateSpace {
         workspace: String,
         accounts: Vec<AgentAccount>,
-        /// The workspace's work folders (relative to its root). Applies to sessions opened after
-        /// the change; running tabs keep their launch folders.
+        /// The workspace's work folders (relative to its root). Changing them relaunches every tab
+        /// so agents pick up the new `--add-dir` paths.
         folders: Vec<String>,
+        /// A new root for the folders (their common parent), when adding a folder outside the
+        /// current root shifts it. Absent keeps the existing root.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        root: Option<String>,
         /// Instructions appended to the agent's system prompt. Applies to sessions opened after
         /// the change. `None`/empty clears them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,6 +254,17 @@ pub enum ClientMessage {
     },
     /// Re-run the update check now (the "Check for updates" menu item).
     CheckUpdate,
+    /// Pair a new remote device: mint a room + key, persist it, start dialing the relay for it,
+    /// and reply with `DevicePaired` (whose `pairingUrl` the desktop shows as a QR).
+    CreateDevice {
+        name: String,
+    },
+    /// List paired devices (for the settings screen). Replies with `DeviceList`.
+    ListDevices,
+    /// Revoke a paired device: forget it and stop dialing its relay room. Replies with `DeviceList`.
+    RevokeDevice {
+        id: String,
+    },
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -263,6 +296,11 @@ pub enum ServerMessage {
     SessionOpened {
         workspace: String,
         session: SessionSummary,
+    },
+    /// A session's agent was relaunched (its workspace folders or account changed). The viewport
+    /// re-attaches so the terminal reflects the fresh process.
+    SessionReset {
+        session: String,
     },
     WorkspaceList {
         workspaces: Vec<WorkspaceSummary>,
@@ -318,4 +356,12 @@ pub enum ServerMessage {
     },
     /// The manual update check found nothing newer (only sent in reply to `CheckUpdate`).
     UpToDate,
+    /// A device was just paired; `device.pairingUrl` is shown as a QR to scan.
+    DevicePaired {
+        device: DeviceSummary,
+    },
+    /// The current set of paired devices (reply to `ListDevices` / `RevokeDevice`).
+    DeviceList {
+        devices: Vec<DeviceSummary>,
+    },
 }

@@ -15,6 +15,7 @@ import { colors, statusVariant } from '@/config/theme'
 
 //Components
 import { ProviderIcon } from '@/shared/provider-icon'
+import { WorkspaceControls } from '@/features/workspaces/workspace-controls'
 
 //Icons
 import CloseIcon from '@/assets/icons/close.svg?react'
@@ -94,43 +95,46 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
   return (
     <div className={styles.deck}>
       {workspace && (
-        <div className={styles.tabs}>
-          {sessions.map((session) => (
-            <Tab
-              key={session.id}
-              session={session}
-              label={displayLabel(session, sessions)}
-              active={session.id === currentSession}
-              onSelect={() => active && selectSession(active, session.id)}
-              onRename={(title) =>
-                transport.send({ type: 'rename-session', session: session.id, title })
-              }
-              onClose={sessions.length > 1 ? () => closeTab(session.id) : undefined}
-            />
-          ))}
-          <Menu position="bottom-start" width={160}>
-            <Menu.Target>
-              <button type="button" className={styles.newTab} title="New session">
-                <PlusIcon width={16} height={16} />
-              </button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>New session</Menu.Label>
-              {availableProviders.length === 0 ? (
-                <Menu.Item disabled>No accounts configured</Menu.Item>
-              ) : (
-                availableProviders.map((provider) => (
-                  <Menu.Item
-                    key={provider.value}
-                    leftSection={<ProviderIcon provider={provider.value} size={14} />}
-                    onClick={() => openTab(provider.value)}
-                  >
-                    {provider.label}
-                  </Menu.Item>
-                ))
-              )}
-            </Menu.Dropdown>
-          </Menu>
+        <div className={styles.tabBar}>
+          <div className={styles.tabs}>
+            {sessions.map((session) => (
+              <Tab
+                key={session.id}
+                session={session}
+                label={displayLabel(session, sessions)}
+                active={session.id === currentSession}
+                onSelect={() => active && selectSession(active, session.id)}
+                onRename={(title) =>
+                  transport.send({ type: 'rename-session', session: session.id, title })
+                }
+                onClose={sessions.length > 1 ? () => closeTab(session.id) : undefined}
+              />
+            ))}
+            <Menu position="bottom-start" width={160}>
+              <Menu.Target>
+                <button type="button" className={styles.newTab} title="New session">
+                  <PlusIcon width={16} height={16} />
+                </button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>New session</Menu.Label>
+                {availableProviders.length === 0 ? (
+                  <Menu.Item disabled>No accounts configured</Menu.Item>
+                ) : (
+                  availableProviders.map((provider) => (
+                    <Menu.Item
+                      key={provider.value}
+                      leftSection={<ProviderIcon provider={provider.value} size={14} />}
+                      onClick={() => openTab(provider.value)}
+                    >
+                      {provider.label}
+                    </Menu.Item>
+                  ))
+                )}
+              </Menu.Dropdown>
+            </Menu>
+          </div>
+          <WorkspaceControls />
         </div>
       )}
       <div className={styles.panes}>
