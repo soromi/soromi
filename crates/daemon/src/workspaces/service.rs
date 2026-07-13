@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use soromi_protocol::{
     AgentAccount, DirEntry, KeepAwakeMode, SessionSummary, Status, WorkspaceSummary,
@@ -78,7 +80,16 @@ pub struct WorkspaceService {
     dir_change_tx: broadcast::Sender<(String, String)>,
     /// A session id whose agent was just relaunched, for viewports to re-attach.
     reset_tx: broadcast::Sender<String>,
+    /// Cached usage per account config dir (`expiry`, resolved entry). `None` = nothing to show.
+    /// Avoids hitting the provider APIs on every popup open; a manual refresh skips it.
+    usage_cache: Mutex<HashMap<String, (Instant, Option<soromi_protocol::AgentUsage>)>>,
 }
+
+/// How long a stable usage result (fetched, scope-denied, or not signed in) stays cached.
+const USAGE_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// A shorter cache for a temporary failure (rate limit / server error), so it recovers sooner.
+const USAGE_TTL_TEMPORARY: Duration = Duration::from_secs(60);
 
 impl WorkspaceService {
     /// Must be called within a tokio runtime: restoring spaces spawns their status watchers.
@@ -105,6 +116,7 @@ impl WorkspaceService {
             watcher,
             dir_change_tx,
             reset_tx,
+            usage_cache: Mutex::new(HashMap::new()),
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -471,17 +483,96 @@ impl WorkspaceService {
         let (cwd, extra) = session_dirs(&root, &folders);
         let mut project_roots: Vec<PathBuf> = vec![PathBuf::from(cwd)];
         project_roots.extend(extra.into_iter().map(PathBuf::from));
-        match command {
-            "claude" => {
-                let dir = provider_config_dir(&account, "claude", "CLAUDE_CONFIG_DIR", ".claude");
-                crate::skills::claude_skills(&dir, &project_roots)
+        let Some(provider) = crate::providers::provider(command) else {
+            return Vec::new();
+        };
+        let dir = provider_config_dir(&account, provider);
+
+        crate::skills::skills_for(provider, &dir, &project_roots)
+    }
+
+    /// Fetches plan usage for each agent active in a workspace, reading OAuth tokens from the
+    /// bound accounts' config dirs and calling each provider's usage endpoint. Agents whose account
+    /// is signed in but whose login lacks the usage scope get a `note` instead of windows, so the
+    /// viewport can prompt a re-login. Agents with no usage endpoint, no login, or a transient error
+    /// are omitted. Returns one entry per distinct agent.
+    pub async fn request_usage(
+        &self,
+        workspace: &str,
+        force: bool,
+    ) -> Vec<soromi_protocol::AgentUsage> {
+        let targets = {
+            let metadata = self.metadata.lock().unwrap();
+            let Some((_, meta)) = metadata.iter().find(|(name, _)| name == workspace) else {
+                return Vec::new();
+            };
+
+            let mut seen: Vec<(&'static dyn crate::providers::Provider, PathBuf)> = Vec::new();
+            for session in &meta.sessions {
+                let command = basename(
+                    session
+                        .agent
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(&session.agent),
+                );
+                let Some(provider) = crate::providers::provider(command) else {
+                    continue;
+                };
+                if seen.iter().any(|(p, _)| p.key() == provider.key()) {
+                    continue;
+                }
+                let account = account_for(&meta.accounts, &session.agent);
+                seen.push((provider, provider_config_dir(&account, provider)));
             }
-            "codex" => {
-                let dir = provider_config_dir(&account, "codex", "CODEX_HOME", ".codex");
-                crate::skills::codex_skills(&dir, &project_roots)
-            }
-            _ => Vec::new(),
+
+            seen
+        };
+
+        if targets.is_empty() {
+            return Vec::new();
         }
+
+        let client = reqwest::Client::new();
+        let fetches = targets.iter().map(|(provider, dir)| {
+            let client = &client;
+            async move {
+                let key = dir.to_string_lossy().into_owned();
+
+                // Serve a cache entry that has not expired without touching the network (unless
+                // forced).
+                if !force
+                    && let Some((expiry, entry)) = self.usage_cache.lock().unwrap().get(&key)
+                    && *expiry > Instant::now()
+                {
+                    return entry.clone();
+                }
+
+                use crate::providers::usage::UsageOutcome;
+                let (entry, ttl) =
+                    match crate::providers::usage::fetch(*provider, dir, client).await {
+                        UsageOutcome::Usage(usage) => (Some(usage), USAGE_TTL),
+                        UsageOutcome::Forbidden => (Some(usage_scope_note(*provider)), USAGE_TTL),
+                        UsageOutcome::Temporary => {
+                            (Some(usage_temporary_note(*provider)), USAGE_TTL_TEMPORARY)
+                        }
+                        UsageOutcome::NotSignedIn => (None, USAGE_TTL),
+                    };
+
+                self.usage_cache
+                    .lock()
+                    .unwrap()
+                    .insert(key, (Instant::now() + ttl, entry.clone()));
+
+                entry
+            }
+        });
+
+        futures_util::future::join_all(fetches)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Writes the space's committable config to `<root>/soromi.space.json`. Returns the path.
@@ -579,8 +670,8 @@ impl WorkspaceService {
         }
         let mut warning = None;
         for session in &sessions {
-            let account_changed =
-                account_for(&old_accounts, &session.agent) != account_for(&accounts, &session.agent);
+            let account_changed = account_for(&old_accounts, &session.agent)
+                != account_for(&accounts, &session.agent);
             if account_changed || folders_changed {
                 self.manager.dispose(&session.id);
                 warning = warning.or(self.start_session(
@@ -650,32 +741,25 @@ impl WorkspaceService {
         // rest are named via the provider's add-dir flag, so the agent's scope is exactly them.
         let (cwd, extra_dirs) = session_dirs(root, folders);
         let command = basename(&parsed.command);
+        let provider = crate::providers::provider(command);
         let mut args = parsed.args;
-        if let Some(flag) = crate::config::add_dir_flag(command) {
-            for dir in &extra_dirs {
-                args.push(flag.to_string());
-                args.push(dir.clone());
+        if let Some(provider) = provider {
+            // Name each extra folder, append the workspace instructions to the system prompt, and
+            // resume this tab's prior conversation, each per the provider's own mechanism.
+            if let Some(flag) = provider.add_dir_flag() {
+                for dir in &extra_dirs {
+                    args.push(flag.to_string());
+                    args.push(dir.clone());
+                }
             }
-        }
-        // Append the workspace instructions to the agent's system prompt, when it has a flag for
-        // it (Claude does; Codex does not, so its sessions run without them).
-        if let Some(text) = instructions.map(str::trim).filter(|t| !t.is_empty())
-            && let Some(flag) = crate::config::system_prompt_flag(command)
-        {
-            args.push(flag.to_string());
-            args.push(text.to_string());
-        }
-        // Resume this tab's own conversation when we captured its id from a prior run. Claude
-        // takes a `--resume <id>` flag; Codex takes a leading `resume <id>` subcommand. Providers
-        // with neither always start fresh.
-        if let Some(resume_id) = &session.resume_id {
-            if let Some(flag) = crate::config::resume_flag(command) {
+            if let Some(text) = instructions.map(str::trim).filter(|t| !t.is_empty())
+                && let Some(flag) = provider.system_prompt_flag()
+            {
                 args.push(flag.to_string());
-                args.push(resume_id.clone());
-            } else if let Some(sub) = crate::config::resume_subcommand(command) {
-                let mut prefixed = vec![sub.to_string(), resume_id.clone()];
-                prefixed.append(&mut args);
-                args = prefixed;
+                args.push(text.to_string());
+            }
+            if let Some(resume_id) = &session.resume_id {
+                provider.apply_resume(&mut args, resume_id);
             }
         }
 
@@ -717,18 +801,13 @@ impl WorkspaceService {
 
         // Install Soromi's event hooks into the agent's config dir, so permission / done events
         // reach the daemon reliably (no terminal parsing).
-        match basename(&parsed.command) {
-            "claude" => {
-                let config_dir = config_dir_from(&env, "CLAUDE_CONFIG_DIR", ".claude");
-                let _ = crate::hooks::ensure_claude_hooks(&config_dir);
-            }
-            "codex" => {
-                let config_dir = config_dir_from(&env, "CODEX_HOME", ".codex");
-                // `notify` (no trust) covers complete; the hook (needs `/hooks` trust) adds request.
-                let _ = crate::hooks::ensure_codex_notify(&config_dir);
-                let _ = crate::hooks::ensure_codex_hooks(&config_dir);
-            }
-            _ => {}
+        if let Some(provider) = provider {
+            let config_dir = config_dir_from(
+                &env,
+                provider.config_env_var(),
+                provider.default_config_dir(),
+            );
+            let _ = provider.install_hooks(&config_dir);
         }
 
         let options = SessionOptions {
@@ -836,12 +915,12 @@ fn basename(command: &str) -> &str {
 
 /// A provider's config dir for an account: its profile `configDir` if set, else the provider's
 /// config env var (e.g. `CLAUDE_CONFIG_DIR` / `CODEX_HOME`), else `~/<default>`.
-fn provider_config_dir(account: &str, provider: &str, env_var: &str, default: &str) -> PathBuf {
+fn provider_config_dir(account: &str, provider: &dyn crate::providers::Provider) -> PathBuf {
     if let Ok(profile) = load_account_profile(account, &accounts_dir())
         && let Some(dir) = profile
             .providers
-            .get(provider)
-            .and_then(|provider| provider.config_dir.as_ref())
+            .get(provider.key())
+            .and_then(|entry| entry.config_dir.as_ref())
     {
         let home = dirs::home_dir()
             .unwrap_or_default()
@@ -849,9 +928,46 @@ fn provider_config_dir(account: &str, provider: &str, env_var: &str, default: &s
             .into_owned();
         return PathBuf::from(expand_home(dir, &home));
     }
-    std::env::var(env_var)
+    std::env::var(provider.config_env_var())
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(default))
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(provider.default_config_dir())
+        })
+}
+
+/// A usage entry (no windows) for a signed-in account whose login lacks the usage scope: the
+/// endpoint returned 401/403. The note tells the user how to enable it.
+fn usage_scope_note(provider: &dyn crate::providers::Provider) -> soromi_protocol::AgentUsage {
+    usage_note(
+        provider,
+        "This account's login can't read usage. Re-run the login for this account (open a tab on \
+         it and sign in again) to enable it.",
+    )
+}
+
+/// A usage entry (no windows) for a signed-in account whose usage could not be read right now (rate
+/// limit or server error). Cached briefly, so a refresh soon after may recover.
+fn usage_temporary_note(provider: &dyn crate::providers::Provider) -> soromi_protocol::AgentUsage {
+    usage_note(
+        provider,
+        "Usage isn't available for this account right now (the provider may be rate-limiting). Try \
+         refresh in a bit.",
+    )
+}
+
+/// Builds a windows-less usage entry carrying a note, for an agent whose usage can't be shown.
+fn usage_note(
+    provider: &dyn crate::providers::Provider,
+    note: &str,
+) -> soromi_protocol::AgentUsage {
+    soromi_protocol::AgentUsage {
+        agent: provider.key().to_string(),
+        plan: None,
+        windows: Vec::new(),
+        note: Some(note.to_string()),
+    }
 }
 
 /// The agent's config dir: the resolved env var if set, else `~/<default>`.

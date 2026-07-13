@@ -3,7 +3,6 @@ import { assertNever } from '@/lib/assert-never'
 
 //Components
 import { FilePreview } from '@/features/files/file-preview'
-import { ConnectPhone } from '@/features/pairing/connect-phone'
 import { Settings } from '@/features/settings/settings'
 import { WorkspaceSettings } from '@/features/workspaces/workspace-settings'
 import { CreateSpaceOverlay } from '@/features/welcome/welcome'
@@ -25,8 +24,6 @@ export function OverlayScreen({ overlay }: { overlay: Overlay }) {
       return <Settings />
     case 'workspace-settings':
       return <WorkspaceSettings workspace={overlay.workspace} />
-    case 'connect-phone':
-      return <ConnectPhone />
     default:
       return assertNever(overlay)
   }

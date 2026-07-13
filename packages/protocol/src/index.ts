@@ -3,6 +3,7 @@
 
 export type { AccountProfile } from './generated/AccountProfile'
 export type { AgentAccount } from './generated/AgentAccount'
+export type { AgentUsage } from './generated/AgentUsage'
 export type { ClientMessage } from './generated/ClientMessage'
 export type { DeviceSummary } from './generated/DeviceSummary'
 export type { DirEntry } from './generated/DirEntry'
@@ -15,4 +16,5 @@ export type { Skill } from './generated/Skill'
 export type { SkillKind } from './generated/SkillKind'
 export type { SkillScope } from './generated/SkillScope'
 export type { Status } from './generated/Status'
+export type { UsageWindow } from './generated/UsageWindow'
 export type { WorkspaceSummary } from './generated/WorkspaceSummary'

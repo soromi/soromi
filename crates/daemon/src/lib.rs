@@ -11,6 +11,7 @@ pub mod hooks;
 pub mod keep_awake;
 pub mod notifications;
 pub mod pairing;
+pub mod providers;
 pub mod sessions;
 pub mod skills;
 pub mod sound;

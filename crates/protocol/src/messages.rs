@@ -145,6 +145,42 @@ pub struct DeviceSummary {
     pub pairing_url: String,
 }
 
+/// One usage window for an agent (e.g. the 5-hour session or the weekly cap). `percent` is 0-100;
+/// `resetsAt` is a unix timestamp in seconds, when the window rolls over.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct UsageWindow {
+    pub label: String,
+    pub percent: f64,
+    #[serde(rename = "resetsAt", default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(rename = "resetsAt", optional))]
+    pub resets_at: Option<f64>,
+}
+
+/// An agent's plan usage, as read from that provider's usage API.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct AgentUsage {
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub plan: Option<String>,
+    pub windows: Vec<UsageWindow>,
+    /// Set instead of windows when usage could not be read but the account is signed in (e.g. the
+    /// login lacks the scope the usage endpoint needs). A short, actionable line for the viewport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub note: Option<String>,
+}
+
 /// Viewport -> daemon. A discriminated union on `type`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -259,6 +295,14 @@ pub enum ClientMessage {
     CreateDevice {
         name: String,
     },
+    /// Fetch plan usage for the workspace's agents (from each provider's usage API). Replies with
+    /// `Usage`. Results are cached briefly on the daemon; `force` skips the cache (a manual refresh).
+    RequestUsage {
+        workspace: String,
+        /// Skip the daemon's usage cache and re-fetch (a manual refresh). Defaults to false.
+        #[serde(default)]
+        force: bool,
+    },
     /// List paired devices (for the settings screen). Replies with `DeviceList`.
     ListDevices,
     /// Revoke a paired device: forget it and stop dialing its relay room. Replies with `DeviceList`.
@@ -268,7 +312,8 @@ pub enum ClientMessage {
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// No `Eq`: `Usage` carries `f64` utilization, which is `PartialEq` only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     tag = "type",
@@ -363,5 +408,11 @@ pub enum ServerMessage {
     /// The current set of paired devices (reply to `ListDevices` / `RevokeDevice`).
     DeviceList {
         devices: Vec<DeviceSummary>,
+    },
+    /// Plan usage for a workspace's agents (reply to `RequestUsage`). Agents whose usage could not
+    /// be fetched are omitted.
+    Usage {
+        workspace: String,
+        agents: Vec<AgentUsage>,
     },
 }

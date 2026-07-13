@@ -30,25 +30,17 @@ const abbreviate = (name: string) => name.slice(0, 2).replace(/^./, (c) => c.toU
  */
 export function WorkspaceSwitcher() {
   const workspaces = useClientStore((s) => s.workspaces)
-  const {
-    active,
-    needsReview,
-    select,
-    applyStatuses,
-    openCreateSpace,
-    openConnectPhone,
-    openWorkspaceSettings,
-  } = useAppStore(
-    useShallow((s) => ({
-      active: s.active,
-      needsReview: s.needsReview,
-      select: s.select,
-      applyStatuses: s.applyStatuses,
-      openCreateSpace: s.openCreateSpace,
-      openConnectPhone: s.openConnectPhone,
-      openWorkspaceSettings: s.openWorkspaceSettings,
-    })),
-  )
+  const { active, needsReview, select, applyStatuses, openCreateSpace, openWorkspaceSettings } =
+    useAppStore(
+      useShallow((s) => ({
+        active: s.active,
+        needsReview: s.needsReview,
+        select: s.select,
+        applyStatuses: s.applyStatuses,
+        openCreateSpace: s.openCreateSpace,
+        openWorkspaceSettings: s.openWorkspaceSettings,
+      })),
+    )
 
   // Keep "needs review" in sync as the daemon reports status changes.
   useEffect(() => applyStatuses(workspaces), [workspaces, applyStatuses])

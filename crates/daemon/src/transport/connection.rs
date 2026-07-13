@@ -191,6 +191,15 @@ impl Connection {
                     }
                 });
             }
+            ClientMessage::RequestUsage { workspace, force } => {
+                // Fetch off the message loop: it makes network calls per agent.
+                let hub = self.hub.clone();
+                let out = self.out.clone();
+                tokio::spawn(async move {
+                    let agents = hub.request_usage(&workspace, force).await;
+                    let _ = out.send(ServerMessage::Usage { workspace, agents });
+                });
+            }
             ClientMessage::Attach { session } => self.attach(&session),
             ClientMessage::Input { session, data } => {
                 if let Some(session) = self.hub.get(&session) {

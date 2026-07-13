@@ -27,7 +27,9 @@ pub fn spawn_from_env(hub: Arc<WorkspaceService>, accounts: Arc<FileAccountManag
         return;
     }
 
-    let key = std::env::var("SOROMI_RELAY_KEY").ok().filter(|k| !k.is_empty());
+    let key = std::env::var("SOROMI_RELAY_KEY")
+        .ok()
+        .filter(|k| !k.is_empty());
 
     spawn(hub, accounts, url, room, key);
 }
@@ -61,7 +63,13 @@ pub fn spawn_device(
     room: String,
     key: String,
 ) -> tokio::task::AbortHandle {
-    tokio::spawn(connect_loop(hub, accounts, endpoint(&url, &room), Some(key))).abort_handle()
+    tokio::spawn(connect_loop(
+        hub,
+        accounts,
+        endpoint(&url, &room),
+        Some(key),
+    ))
+    .abort_handle()
 }
 
 /// Dials `endpoint`, runs one viewport connection over it, and reconnects with backoff forever.
@@ -101,7 +109,13 @@ mod tests {
 
     #[test]
     fn builds_the_room_endpoint() {
-        assert_eq!(endpoint("ws://localhost:8787", "abc"), "ws://localhost:8787/?room=abc");
-        assert_eq!(endpoint("ws://localhost:8787/", "abc"), "ws://localhost:8787/?room=abc");
+        assert_eq!(
+            endpoint("ws://localhost:8787", "abc"),
+            "ws://localhost:8787/?room=abc"
+        );
+        assert_eq!(
+            endpoint("ws://localhost:8787/", "abc"),
+            "ws://localhost:8787/?room=abc"
+        );
     }
 }

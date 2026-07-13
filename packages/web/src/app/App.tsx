@@ -9,19 +9,22 @@ import { useUiStore } from '@/stores/ui-store'
 
 //Constants
 import { theme } from '@/config/theme'
+import { selectTransport } from '@/config/transport'
 
 //Components
 import { ConnectScreen } from '@/features/connect/connect-screen'
 import { MobileShell } from './mobile-shell'
 
-//Mock
-import { MockTransport } from '@/mock/mock-transport'
-
 /** Root: theme + transport, routes daemon messages into the stores, gates on pairing. */
 export function App() {
-  // Swapped for the relay-backed transport later; the UI above it does not change.
-  const transport = useMemo(() => new MockTransport(), [])
+  // Relay transport when the URL carries relay config, otherwise the standalone mock.
+  const { transport, remote } = useMemo(selectTransport, [])
   const paired = useUiStore((s) => s.paired)
+
+  // A real relay connection skips the (mock) connect screen; pairing gates it later.
+  useEffect(() => {
+    if (remote) useUiStore.getState().setPaired(true)
+  }, [remote])
 
   useEffect(() => {
     const client = useClientStore.getState()

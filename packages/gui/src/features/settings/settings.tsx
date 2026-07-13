@@ -7,9 +7,6 @@ import { useShallow } from 'zustand/react/shallow'
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
 
-//Store
-import { useAppStore } from '@/stores/app-store'
-
 //Constants
 import { PROVIDERS } from '@/config/providers'
 
@@ -26,7 +23,7 @@ import TrashSvg from '@/assets/icons/trash.svg?react'
 import styles from './settings.module.css'
 
 //Types
-import type { AccountProfile, DeviceSummary } from '@soromi/protocol'
+import type { AccountProfile } from '@soromi/protocol'
 
 interface ProviderRow {
   provider: string
@@ -48,11 +45,9 @@ export function Settings() {
       setMuted: s.setMuted,
     })),
   )
-  const openConnectPhone = useAppStore((s) => s.openConnectPhone)
   const [name, setName] = useState('')
   const [rows, setRows] = useState<ProviderRow[]>([{ provider: 'claude', configDir: '' }])
   const [formOpen, setFormOpen] = useState(false)
-  const [devices, setDevices] = useState<DeviceSummary[]>([])
   const mutedNames = workspaces.filter((w) => muted[w.name]).map((w) => w.name)
 
   // Prepare each account's view data once, so the JSX maps below only render (no per-item logic).
@@ -77,16 +72,6 @@ export function Settings() {
 
   useEffect(() => {
     transport.send({ type: 'list-accounts' })
-  }, [transport])
-
-  // Paired devices are local-only state (never mirrored to the remote store); fetch on open.
-  useEffect(() => {
-    const off = transport.onMessage((message) => {
-      if (message.type === 'device-list') setDevices(message.devices)
-    })
-    transport.send({ type: 'list-devices' })
-
-    return off
   }, [transport])
 
   // Validate each existing account's providers so the list can show logged-in status.
@@ -142,20 +127,6 @@ export function Settings() {
   const unmute = (workspace: string) => {
     setMuted(workspace, false)
     transport.send({ type: 'mute-workspace', workspace, muted: false })
-  }
-
-  const revokeDevice = (device: DeviceSummary) => {
-    modals.openConfirmModal({
-      title: 'Revoke device',
-      children: (
-        <Text size="sm">
-          Revoke "{device.name}"? It can no longer connect until you pair it again.
-        </Text>
-      ),
-      labels: { confirm: 'Revoke', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => transport.send({ type: 'revoke-device', id: device.id }),
-    })
   }
 
   return (
@@ -216,49 +187,6 @@ export function Settings() {
             <button type="button" className={styles.addBtn} onClick={() => setFormOpen(true)}>
               <PlusSvg width={16} height={16} />
               Add account
-            </button>
-          </section>
-
-          <div className={styles.divider} />
-
-          <section className={styles.section}>
-            <div className={styles.sectionHead}>
-              <div>
-                <h2 className={styles.h2}>Devices</h2>
-                <p className={styles.desc}>
-                  Phones paired to control this app remotely. Each has its own encrypted room;
-                  revoke one to cut it off.
-                </p>
-              </div>
-              <span className={styles.count}>
-                {devices.length} {devices.length === 1 ? 'device' : 'devices'}
-              </span>
-            </div>
-
-            {devices.length === 0 ? (
-              <div className={styles.empty}>
-                <div className={styles.emptyTitle}>No paired devices</div>
-                <div className={styles.emptyDesc}>Pair a phone to control this app from it.</div>
-              </div>
-            ) : (
-              devices.map((device) => (
-                <div key={device.id} className={styles.mutedRow}>
-                  <span className={styles.cardName}>{device.name}</span>
-                  <Button
-                    variant="subtle"
-                    color="red"
-                    size="compact-sm"
-                    onClick={() => revokeDevice(device)}
-                  >
-                    Revoke
-                  </Button>
-                </div>
-              ))
-            )}
-
-            <button type="button" className={styles.addBtn} onClick={openConnectPhone}>
-              <PlusSvg width={16} height={16} />
-              Connect a phone
             </button>
           </section>
 

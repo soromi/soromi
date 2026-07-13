@@ -40,6 +40,10 @@ pub struct Session {
     /// parser can't move the status (its trailing output would otherwise fight the hook). Cleared
     /// on the user's next input, which starts a new turn.
     settled: Arc<AtomicBool>,
+    /// Set once the user has started a turn (first input). Until then the PTY parser stays quiet, so
+    /// a fresh or resumed session's startup / replayed output can't produce a phantom status (a
+    /// resumed transcript that says "done" must not read as Finished).
+    activated: Arc<AtomicBool>,
     reader_handle: Option<JoinHandle<()>>,
 }
 
@@ -87,6 +91,7 @@ impl Session {
         let (status_tx, status_rx) = watch::channel(Status::Idle);
         let status_tx = Arc::new(status_tx);
         let settled = Arc::new(AtomicBool::new(false));
+        let activated = Arc::new(AtomicBool::new(false));
 
         let reader_handle = spawn_reader(
             reader,
@@ -94,6 +99,7 @@ impl Session {
             output_tx.clone(),
             status_tx.clone(),
             settled.clone(),
+            activated.clone(),
         );
 
         Ok(Session {
@@ -105,6 +111,7 @@ impl Session {
             status_tx,
             status_rx,
             settled,
+            activated,
             reader_handle: Some(reader_handle),
         })
     }
@@ -128,8 +135,10 @@ impl Session {
         let _ = self.status_tx.send(status);
     }
 
-    /// The user sent input: the agent is working again. Starts a fresh turn, so the parser resumes.
+    /// The user sent input: the agent is working again. Starts a fresh turn, so the parser resumes
+    /// (and is enabled for the first time, if this is the session's first input).
     pub fn mark_active(&self) {
+        self.activated.store(true, Ordering::Relaxed);
         self.settled.store(false, Ordering::Relaxed);
         let _ = self.status_tx.send(Status::Thinking);
     }
@@ -185,6 +194,7 @@ fn spawn_reader(
     output_tx: broadcast::Sender<String>,
     status_tx: Arc<watch::Sender<Status>>,
     settled: Arc<AtomicBool>,
+    activated: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut decoder = Utf8Decoder::default();
@@ -201,9 +211,12 @@ fn spawn_reader(
                     if let Ok(mut sb) = scrollback.lock() {
                         sb.append(&text);
                     }
-                    // A hook status wins over the parser's live guess until the next turn.
-                    if let Some(status) = status_state.update(&text)
+                    // The parser only runs after the user starts a turn (so startup / resume replay
+                    // can't set a phantom status, and its internal state doesn't drift on that
+                    // output), and while a hook hasn't settled the status for this turn.
+                    if activated.load(Ordering::Relaxed)
                         && !settled.load(Ordering::Relaxed)
+                        && let Some(status) = status_state.update(&text)
                     {
                         let _ = status_tx.send(status);
                     }
@@ -270,6 +283,30 @@ mod tests {
     fn resize_does_not_error() {
         let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
         session.resize(120, 40);
+        session.shutdown();
+    }
+
+    #[test]
+    fn parser_stays_quiet_until_the_first_turn() {
+        let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
+
+        // Startup / resume-replay output that mentions "done" must not move the status yet.
+        session.write("all done\n");
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(session.status(), Status::Idle);
+
+        // After the user starts a turn, the parser drives status again.
+        session.mark_active();
+        session.write("tests passed\n");
+        let mut became_done = false;
+        for _ in 0..100 {
+            if session.status() == Status::Done {
+                became_done = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(became_done, "status was {:?}", session.status());
         session.shutdown();
     }
 

@@ -1,22 +1,16 @@
-use std::fs;
 use std::path::Path;
 
-use crate::config::{PROVIDERS, Provider};
+use crate::providers::provider;
 
 use super::resolver::expand_home;
 
-pub fn provider(key: &str) -> Option<&'static Provider> {
-    PROVIDERS.iter().find(|p| p.key == key)
-}
-
 /// The env var a provider reads to find its config directory (e.g. `CLAUDE_CONFIG_DIR`).
 pub fn config_env_var(key: &str) -> Option<&'static str> {
-    provider(key).map(|p| p.config_env_var)
+    provider(key).map(|p| p.config_env_var())
 }
 
-/// Whether a config directory looks logged in: the provider's credential file exists and, if
-/// the provider requires it, carries a non-null account key (the token itself may be in the
-/// keychain).
+/// Whether a config directory looks logged in for a provider (delegates to the provider's own
+/// credential check). `config_dir` may use `~`; it is expanded against the home dir.
 pub fn is_logged_in(provider_key: &str, config_dir: &str) -> bool {
     let Some(provider) = provider(provider_key) else {
         return false;
@@ -25,17 +19,8 @@ pub fn is_logged_in(provider_key: &str, config_dir: &str) -> bool {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let file = Path::new(&expand_home(config_dir, &home)).join(provider.credential_file);
-    let Ok(contents) = fs::read_to_string(&file) else {
-        return false;
-    };
-    match provider.credential_key {
-        None => true,
-        Some(key) => serde_json::from_str::<serde_json::Value>(&contents)
-            .ok()
-            .and_then(|value| value.get(key).cloned())
-            .is_some_and(|value| !value.is_null()),
-    }
+
+    provider.is_logged_in(Path::new(&expand_home(config_dir, &home)))
 }
 
 #[cfg(test)]
@@ -50,16 +35,11 @@ mod tests {
     }
 
     #[test]
-    fn detects_a_logged_in_claude_directory() {
+    fn expands_and_checks_a_logged_in_directory() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_str().unwrap();
 
-        // No config file yet.
         assert!(!is_logged_in("claude", path));
-        // Config file present but no account key -> still not logged in.
-        std::fs::write(dir.path().join(".claude.json"), r#"{ "numStartups": 3 }"#).unwrap();
-        assert!(!is_logged_in("claude", path));
-        // Account key present -> logged in.
         std::fs::write(
             dir.path().join(".claude.json"),
             r#"{ "oauthAccount": { "emailAddress": "a@b.co" } }"#,
@@ -68,14 +48,5 @@ mod tests {
         assert!(is_logged_in("claude", path));
         // Unknown providers are never "logged in".
         assert!(!is_logged_in("nope", path));
-    }
-
-    #[test]
-    fn detects_a_codex_directory_by_file_presence() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().to_str().unwrap();
-        assert!(!is_logged_in("codex", path));
-        std::fs::write(dir.path().join("auth.json"), "{}").unwrap();
-        assert!(is_logged_in("codex", path));
     }
 }

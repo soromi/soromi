@@ -70,7 +70,6 @@ export type Overlay =
   | { id: string; type: 'create-space' }
   | { id: string; type: 'settings' }
   | { id: string; type: 'workspace-settings'; workspace: string }
-  | { id: string; type: 'connect-phone' }
 
 /**
  * How much an overlay covers. `full` covers the whole shell (rail + sidebar + content) for
@@ -80,7 +79,6 @@ export type Overlay =
 export function overlayScope(overlay: Overlay): 'full' | 'content' {
   return overlay.type === 'settings' ||
     overlay.type === 'create-space' ||
-    overlay.type === 'connect-phone' ||
     overlay.type === 'workspace-settings'
     ? 'full'
     : 'content'
@@ -119,7 +117,6 @@ interface UiState {
   openCreateSpace: () => void
   openSettings: () => void
   openWorkspaceSettings: (workspace: string) => void
-  openConnectPhone: () => void
   popOverlay: () => void
   closeOverlays: () => void
   setFileContent: (workspace: string, path: string, content: FileContent) => void
@@ -157,7 +154,12 @@ export const useAppStore = create<UiState>()((set) => ({
       const lastStatus: Record<string, string> = {}
 
       for (const workspace of workspaces) {
-        const became = workspace.status === 'done' && state.lastStatus[workspace.name] !== 'done'
+        const previous = state.lastStatus[workspace.name]
+        // Only a transition we actually observed (idle -> done) counts. The first snapshot after
+        // launch/reconnect has no prior status, so a workspace already sitting at `done` (it
+        // finished before we connected) is not treated as fresh, no phantom "needs review".
+        const became = previous !== undefined && previous !== 'done' && workspace.status === 'done'
+
         if (became && workspace.name !== state.active) needsReview[workspace.name] = true
         if (workspace.status !== 'done') delete needsReview[workspace.name]
         lastStatus[workspace.name] = workspace.status
@@ -204,11 +206,6 @@ export const useAppStore = create<UiState>()((set) => ({
     set((state) => {
       if (state.overlays.at(-1)?.type === 'settings') return {}
       return { overlays: [...state.overlays, { id: crypto.randomUUID(), type: 'settings' }] }
-    }),
-  openConnectPhone: () =>
-    set((state) => {
-      if (state.overlays.at(-1)?.type === 'connect-phone') return {}
-      return { overlays: [...state.overlays, { id: crypto.randomUUID(), type: 'connect-phone' }] }
     }),
   openWorkspaceSettings: (workspace) =>
     set((state) => {

@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/app-store'
 import { useWorkspaceShortcuts } from '@/features/workspaces/use-workspace-shortcuts'
 
 //Components
+import { StatusBar } from '@/features/status-bar/status-bar'
 import { Rail } from '@/features/workspaces/rail'
 import { Sidebar } from '@/features/sidebar/sidebar'
 import { TerminalDeck } from '@/features/terminal/terminal-deck'
@@ -36,21 +37,24 @@ export function AppLayout() {
   if (!ready) return <Splash />
 
   return (
-    <div className={styles.shell}>
-      <Rail />
-      <Sidebar />
-      <main className={styles.content}>
-        <UpdateBanner />
-        <StatusBanner />
-        {active !== null ? (
-          <div className={styles.terminalArea}>
-            <TerminalDeck transport={transport} />
-          </div>
-        ) : (
-          <Welcome />
-        )}
-        <OverlayHost scope="content" />
-      </main>
+    <div className={styles.root}>
+      <div className={styles.shell}>
+        <Rail />
+        <Sidebar />
+        <main className={styles.content}>
+          <UpdateBanner />
+          <StatusBanner />
+          {active !== null ? (
+            <div className={styles.terminalArea}>
+              <TerminalDeck transport={transport} />
+            </div>
+          ) : (
+            <Welcome />
+          )}
+          <OverlayHost scope="content" />
+        </main>
+      </div>
+      <StatusBar />
       <OverlayHost scope="full" handleEsc />
     </div>
   )

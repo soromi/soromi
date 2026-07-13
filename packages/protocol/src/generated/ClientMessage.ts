@@ -26,4 +26,8 @@ root?: string,
  * Instructions appended to the agent's system prompt. Applies to sessions opened after
  * the change. `None`/empty clears them.
  */
-instructions?: string, } | { "type": "check-update" } | { "type": "create-device", name: string, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, };
+instructions?: string, } | { "type": "check-update" } | { "type": "create-device", name: string, } | { "type": "request-usage", workspace: string, 
+/**
+ * Skip the daemon's usage cache and re-fetch (a manual refresh). Defaults to false.
+ */
+force: boolean, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, };

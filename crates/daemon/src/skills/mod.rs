@@ -3,16 +3,22 @@ use std::path::{Path, PathBuf};
 
 use soromi_protocol::{Skill, SkillKind, SkillScope};
 
-/// Lists a Claude session's slash commands (`commands/`) and skills, from the account's config
-/// dir (user scope) and each project root's `.claude/` (project scope).
-pub fn claude_skills(config_dir: &Path, project_roots: &[PathBuf]) -> Vec<Skill> {
-    scan(config_dir, project_roots, ".claude", "commands")
-}
+use crate::providers::Provider;
 
-/// Lists a Codex session's slash commands (`prompts/`) and skills, from the account's config dir
-/// (user scope) and each project root's `.codex/` (project scope).
-pub fn codex_skills(config_dir: &Path, project_roots: &[PathBuf]) -> Vec<Skill> {
-    scan(config_dir, project_roots, ".codex", "prompts")
+/// Lists a provider session's slash commands and skills, from the account's config dir (user scope)
+/// and each project root's per-project config folder (project scope). Empty for providers with no
+/// skills mechanism.
+pub fn skills_for(
+    provider: &dyn Provider,
+    config_dir: &Path,
+    project_roots: &[PathBuf],
+) -> Vec<Skill> {
+    match provider.skill_dirs() {
+        Some((project_dir, commands_dir)) => {
+            scan(config_dir, project_roots, project_dir, commands_dir)
+        }
+        None => Vec::new(),
+    }
 }
 
 /// Scans an agent's commands and skills. `project_roots` are the folders the session runs at
@@ -146,7 +152,11 @@ mod tests {
         )
         .unwrap();
 
-        let skills = claude_skills(config.path(), &[root.path().to_path_buf()]);
+        let skills = skills_for(
+            &crate::providers::claude::Claude,
+            config.path(),
+            &[root.path().to_path_buf()],
+        );
         assert_eq!(skills.len(), 2);
         let deploy = skills.iter().find(|s| s.name == "deploy").unwrap();
         assert_eq!(deploy.kind, SkillKind::Command);
@@ -174,7 +184,11 @@ mod tests {
         )
         .unwrap();
 
-        let skills = codex_skills(config.path(), &[root.path().to_path_buf()]);
+        let skills = skills_for(
+            &crate::providers::codex::Codex,
+            config.path(),
+            &[root.path().to_path_buf()],
+        );
         let draftpr = skills.iter().find(|s| s.name == "draftpr").unwrap();
         assert_eq!(draftpr.kind, SkillKind::Command);
         assert_eq!(draftpr.description.as_deref(), Some("Draft a PR"));
@@ -192,7 +206,7 @@ mod tests {
         fs::write(workspace.path().join("web/.claude/commands/build.md"), "").unwrap();
 
         let roots = vec![workspace.path().join("api"), workspace.path().join("web")];
-        let skills = claude_skills(config.path(), &roots);
+        let skills = skills_for(&crate::providers::claude::Claude, config.path(), &roots);
         assert!(
             skills
                 .iter()

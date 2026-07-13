@@ -40,7 +40,9 @@ impl Codec {
                 let mut nonce = [0u8; NONCE_LEN];
                 getrandom::getrandom(&mut nonce).ok()?;
 
-                let ciphertext = cipher.encrypt(XNonce::from_slice(&nonce), json.as_ref()).ok()?;
+                let ciphertext = cipher
+                    .encrypt(XNonce::from_slice(&nonce), json.as_ref())
+                    .ok()?;
 
                 let mut frame = Vec::with_capacity(NONCE_LEN + ciphertext.len());
                 frame.extend_from_slice(&nonce);
@@ -100,7 +102,10 @@ mod tests {
         // Re-decode: encode produces a ServerMessage frame; decode expects a ClientMessage frame,
         // so round-trip a ClientMessage through the same cipher instead.
         let client_frame = encrypt_client(&codec, &ClientMessage::ListWorkspaces);
-        assert!(matches!(codec.decode(client_frame), Some(ClientMessage::ListWorkspaces)));
+        assert!(matches!(
+            codec.decode(client_frame),
+            Some(ClientMessage::ListWorkspaces)
+        ));
     }
 
     #[test]
@@ -120,7 +125,9 @@ mod tests {
         let json = serde_json::to_vec(message).unwrap();
         let mut nonce = [0u8; NONCE_LEN];
         getrandom::getrandom(&mut nonce).unwrap();
-        let ciphertext = cipher.encrypt(XNonce::from_slice(&nonce), json.as_ref()).unwrap();
+        let ciphertext = cipher
+            .encrypt(XNonce::from_slice(&nonce), json.as_ref())
+            .unwrap();
         let mut frame = nonce.to_vec();
         frame.extend_from_slice(&ciphertext);
 
