@@ -1,18 +1,22 @@
-<p align="center">
+<h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo.png" />
     <img src="assets/logo-dark.png" alt="Soromi" width="240" />
   </picture>
+</h1>
+
+<br />
+
+<p align="center">
+ <a href="https://www.producthunt.com/products/soromi?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-soromi" target="_blank" rel="noopener noreferrer"><img alt="Soromi - A small, fast home for AI coding agents | Product Hunt" width="150" height="32" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1191241&amp;theme=light&amp;t=1783600141858"></a>
 </p>
 
 <p align="center">
-  <br />
-  <a href="https://www.producthunt.com/products/soromi?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-soromi" target="_blank" rel="noopener noreferrer"><img alt="Soromi - A small, fast home for AI coding agents | Product Hunt" width="150" height="32" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1191241&amp;theme=light&amp;t=1783600141858"></a>
+  <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/soromi/soromi?style=flat-square">
+  <a href="https://github.com/soromi/soromi/releases"><img alt="GitHub Downloads (all assets, latest release)" src="https://img.shields.io/github/downloads/soromi/soromi/total?style=flat-square"></a>
+  <img alt="GitHub License" src="https://img.shields.io/github/license/soromi/soromi?style=flat-square">
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat-square&color=555" alt="Supported platforms: macOS, Windows, and Linux" />
 </p>
-
-# Soromi
-
-_From Japanese 揃う (sorou), to be gathered, aligned, complete as a set._
 
 ## What is Soromi?
 
