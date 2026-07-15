@@ -5,4 +5,9 @@
  * this device's relay, room, and end-to-end key; the desktop renders it as a QR to scan. Only
  * ever sent to the trusted local viewport, never over the relay.
  */
-export type DeviceSummary = { id: string, name: string, pairingUrl: string, };
+export type DeviceSummary = { id: string, name: string, pairingUrl: string, 
+/**
+ * Whether this device's phone is currently connected through the relay (live). A paired device
+ * with no phone attached, or an unreachable relay, is `false`.
+ */
+connected: boolean, };

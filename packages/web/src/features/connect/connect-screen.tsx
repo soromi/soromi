@@ -3,16 +3,32 @@ import { useState } from 'react'
 //Store
 import { useUiStore } from '@/stores/ui-store'
 
+//Utils
+import { pairingUrl, parsePairingLink } from '@/config/transport'
+
 //Styles
 import styles from './connect-screen.module.css'
 
 /**
- * Placeholder pairing screen: shown before a device is connected. Visuals only, no relay,
- * pairing, or crypto yet. "Connect" flips the mock paired flag so the session UI can be seen.
+ * Pairing screen: shown when the app is opened without relay config in the URL. Scanning the QR in
+ * the desktop app opens the app already paired (its link carries `?relay&room&key`); this screen is
+ * the fallback for pasting that link by hand. "Preview the demo" runs the standalone mock UI.
  */
 export function ConnectScreen() {
   const setPaired = useUiStore((s) => s.setPaired)
-  const [code, setCode] = useState('')
+  const [link, setLink] = useState('')
+  const [error, setError] = useState(false)
+
+  const connect = () => {
+    const config = parsePairingLink(link)
+    if (!config) {
+      setError(true)
+      return
+    }
+
+    // Navigate to the pairing URL so the app reloads and dials the real relay transport.
+    window.location.href = pairingUrl(config)
+  }
 
   return (
     <div className={styles.screen}>
@@ -25,30 +41,38 @@ export function ConnectScreen() {
       <div className={styles.card}>
         <div className={styles.cardTitle}>Connect to your Mac</div>
 
-        <button type="button" className={styles.qr} aria-label="Scan QR code">
-          <span className={styles.qrGlyph}>▣</span>
-          <span className={styles.qrLabel}>Scan the QR code shown in the desktop app</span>
-        </button>
+        <p className={styles.qrLabel}>
+          Open Soromi on your Mac, choose <strong>Connect a phone</strong>, and scan the QR code
+          with your camera. It opens this app already paired.
+        </p>
 
         <div className={styles.or}>
-          <span>or enter the pairing code</span>
+          <span>or paste the pairing link</span>
         </div>
 
         <input
           className={styles.code}
-          placeholder="0000-0000"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          value={code}
-          onChange={(event) => setCode(event.currentTarget.value)}
+          placeholder="https://…?relay=…&room=…&key=…"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          value={link}
+          onChange={(event) => {
+            setLink(event.currentTarget.value)
+            setError(false)
+          }}
+          onKeyDown={(event) => event.key === 'Enter' && connect()}
         />
+        {error && <div className={styles.error}>That doesn't look like a pairing link.</div>}
 
-        <button type="button" className={styles.connect} onClick={() => setPaired(true)}>
+        <button type="button" className={styles.connect} onClick={connect}>
           Connect
         </button>
       </div>
 
-      <div className={styles.hint}>Open Soromi on your Mac, then Connect a phone.</div>
+      <button type="button" className={styles.hint} onClick={() => setPaired(true)}>
+        Preview the demo
+      </button>
     </div>
   )
 }

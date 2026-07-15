@@ -2,6 +2,7 @@
 import type { AccountProfile } from "./AccountProfile";
 import type { AgentAccount } from "./AgentAccount";
 import type { KeepAwakeMode } from "./KeepAwakeMode";
+import type { RemoteConfig } from "./RemoteConfig";
 
 /**
  * Viewport -> daemon. A discriminated union on `type`.
@@ -11,7 +12,12 @@ export type ClientMessage = { "type": "attach", session: string, } | { "type": "
  * The account to bind this agent to. Optional when the workspace already binds the
  * agent; required (and recorded) the first time an agent is used.
  */
-account?: string, } | { "type": "close-session", session: string, } | { "type": "rename-session", session: string, title: string, } | { "type": "list-workspaces" } | { "type": "open-workspace", dir: string, } | { "type": "create-space", name: string, root: string, agent: string, account: string, folders?: Array<string>, } | { "type": "remove-space", workspace: string, } | { "type": "mute-workspace", workspace: string, muted: boolean, } | { "type": "list-dir", workspace: string, path: string, } | { "type": "read-file", workspace: string, path: string, } | { "type": "list-skills", session: string, } | { "type": "list-accounts" } | { "type": "save-account", profile: AccountProfile, } | { "type": "delete-account", name: string, } | { "type": "set-keep-awake-mode", mode: KeepAwakeMode, } | { "type": "export-space", workspace: string, } | { "type": "check-provider", provider: string, configDir: string, } | { "type": "update-space", workspace: string, accounts: Array<AgentAccount>, 
+account?: string, } | { "type": "close-session", session: string, } | { "type": "rename-session", session: string, title: string, } | { "type": "list-workspaces" } | { "type": "open-workspace", dir: string, } | { "type": "create-space", name: string, root: string, agent: string, account: string, folders?: Array<string>, } | { "type": "remove-space", workspace: string, } | { "type": "mute-workspace", workspace: string, muted: boolean, } | { "type": "list-dir", workspace: string, path: string, } | { "type": "read-file", workspace: string, path: string, } | { "type": "list-skills", session: string, } | { "type": "list-accounts" } | { "type": "save-account", profile: AccountProfile, } | { "type": "delete-account", name: string, } | { "type": "set-keep-awake-mode", mode: KeepAwakeMode, } | { "type": "export-space", workspace: string, } | { "type": "check-provider", provider: string, configDir: string, } | { "type": "update-space", workspace: string, 
+/**
+ * A new name for the workspace. Absent/empty keeps the current one; renaming fails if
+ * another workspace already has that name.
+ */
+name?: string, accounts: Array<AgentAccount>, 
 /**
  * The workspace's work folders (relative to its root). Changing them relaunches every tab
  * so agents pick up the new `--add-dir` paths.
@@ -30,4 +36,4 @@ instructions?: string, } | { "type": "check-update" } | { "type": "create-device
 /**
  * Skip the daemon's usage cache and re-fetch (a manual refresh). Defaults to false.
  */
-force: boolean, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, };
+force: boolean, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, } | { "type": "get-remote-config" } | { "type": "set-remote-config", config: RemoteConfig, };

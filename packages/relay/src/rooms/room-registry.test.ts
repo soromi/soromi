@@ -56,3 +56,17 @@ test('drops the room once empty', () => {
   registry.leave('r', a.socket)
   expect(registry.size('r')).toBe(0)
 })
+
+test('announces the peer count to every peer as a presence frame', () => {
+  const registry = new RoomRegistry()
+  const a = fakeSocket()
+  const b = fakeSocket()
+  registry.join('r', a.socket)
+  registry.join('r', b.socket)
+
+  registry.announce('r')
+
+  const frame = JSON.stringify({ __relay: 'presence', peers: 2 })
+  expect(a.sent).toEqual([frame])
+  expect(b.sent).toEqual([frame])
+})

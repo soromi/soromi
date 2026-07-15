@@ -75,22 +75,25 @@ impl Connection {
             ClientMessage::RemoveSpace { workspace } => self.hub.remove_space(&workspace),
             ClientMessage::UpdateSpace {
                 workspace,
+                name,
                 accounts,
                 folders,
                 root,
                 instructions,
-            } => match self
-                .hub
-                .update_space(&workspace, accounts, folders, root, instructions)
-            {
-                Ok(result) => self.send(ServerMessage::WorkspaceOpened {
-                    workspace: result.workspace,
-                    warning: result.warning,
-                }),
-                Err(error) => self.send(ServerMessage::Error {
-                    message: error.to_string(),
-                }),
-            },
+            } => {
+                match self
+                    .hub
+                    .update_space(&workspace, name, accounts, folders, root, instructions)
+                {
+                    Ok(result) => self.send(ServerMessage::WorkspaceOpened {
+                        workspace: result.workspace,
+                        warning: result.warning,
+                    }),
+                    Err(error) => self.send(ServerMessage::Error {
+                        message: error.to_string(),
+                    }),
+                }
+            }
             ClientMessage::OpenSession {
                 workspace,
                 agent,
@@ -175,6 +178,28 @@ impl Connection {
                     let _ = self.out.send(ServerMessage::DeviceList {
                         devices: pairing.revoke_device(&id),
                     });
+                }
+            }
+            ClientMessage::GetRemoteConfig => {
+                // Local-link only, like device management: the relay/web URLs are a host setting.
+                if self.pairing.is_some() {
+                    self.send(ServerMessage::RemoteConfig {
+                        config: crate::config::remote_config(),
+                    });
+                }
+            }
+            ClientMessage::SetRemoteConfig { config } => {
+                if let Some(pairing) = &self.pairing {
+                    match crate::config::set_remote_config(&config) {
+                        Ok(resolved) => {
+                            // Apply live so new pairings + existing dials use the new relay.
+                            pairing.set_urls(resolved.relay_url.clone(), resolved.web_url.clone());
+                            self.send(ServerMessage::RemoteConfig { config: resolved });
+                        }
+                        Err(error) => self.send(ServerMessage::Error {
+                            message: error.to_string(),
+                        }),
+                    }
                 }
             }
             ClientMessage::CheckUpdate => {

@@ -78,7 +78,7 @@ export function DevicesWidget() {
           <div className={clsx(styles.popup, styles.popupRight)}>
             <div className={styles.popupHead}>
               <span className={styles.popupTitle}>
-                {step === 'list' ? 'Connected devices' : 'Pair a device'}
+                {step === 'list' ? 'Paired devices' : 'Pair a device'}
               </span>
               <button
                 type="button"
@@ -100,7 +100,16 @@ export function DevicesWidget() {
                 ) : (
                   devices.map((device) => (
                     <div key={device.id} className={styles.deviceRow}>
-                      <span className={styles.deviceName}>{device.name}</span>
+                      <span className={styles.deviceName}>
+                        <span
+                          className={clsx(styles.deviceDot, device.connected && styles.deviceDotOn)}
+                          title={device.connected ? 'Connected' : 'Offline'}
+                        />
+                        {device.name}
+                        <span className={styles.deviceState}>
+                          {device.connected ? 'Connected' : 'Offline'}
+                        </span>
+                      </span>
                       <button
                         type="button"
                         className={styles.revoke}

@@ -195,6 +195,23 @@
   background: var(--soromi-border);
 }
 
+/* Remote (self-host) settings form. */
+.remoteForm {
+  padding: 16px;
+}
+
+.remoteActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.remoteSaved {
+  font-size: 13px;
+  color: var(--soromi-accent);
+}
+
 /* Empty state (no muted workspaces). */
 .empty {
   display: flex;

@@ -25,4 +25,16 @@
   --soromi-badge-personal-bg: #223345;
   --soromi-badge-work-fg: #8b7ec8;
   --soromi-badge-work-bg: #2e2a45;
+
+  /* Z-index ladder: the single source of truth for layer order. Change a layer's rank here, not
+     inline. Root-level / fixed layers stack globally, low to high:
+       sidebar resize handle < status bar < full-page overlay < splash < popover scrim < popover
+       < right-click menu. */
+  --z-sidebar-resize: 5;
+  --z-status-bar: 10;
+  --z-overlay: 20;
+  --z-splash: 50;
+  --z-popover-backdrop: 60;
+  --z-popover: 70;
+  --z-context-menu: 100;
 }

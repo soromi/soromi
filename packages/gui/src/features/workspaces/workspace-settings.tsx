@@ -1,4 +1,4 @@
-import { Button, Select, Textarea } from '@mantine/core'
+import { Button, Select, Switch, Textarea, TextInput } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -42,13 +42,21 @@ const SHOW_NAV = false
 /** Full-page workspace settings: section nav, folders, agent accounts, instructions, danger zone. */
 export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const transport = useTransport()
-  const { summary, accounts } = useClientStore(
+  const { summary, accounts, muted, setMuted } = useClientStore(
     useShallow((s) => ({
       summary: s.workspaces.find((w) => w.name === workspace),
       accounts: s.accounts,
+      muted: s.muted,
+      setMuted: s.setMuted,
     })),
   )
   const popOverlay = useAppStore((s) => s.popOverlay)
+
+  const notificationsOn = !(muted[workspace] ?? false)
+  const setNotifications = (on: boolean) => {
+    setMuted(workspace, !on)
+    transport.send({ type: 'mute-workspace', workspace, muted: !on })
+  }
 
   useEffect(() => {
     transport.send({ type: 'list-accounts' })
@@ -73,6 +81,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const [bindings, setBindings] = useState<Record<string, string>>(() =>
     Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])),
   )
+  const [name, setName] = useState(workspace)
   const [instructions, setInstructions] = useState(summary?.instructions ?? '')
   const [folderPaths, setFolderPaths] = useState<string[]>(initialFolders)
 
@@ -94,6 +103,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     [agents, accounts, bindings],
   )
 
+  const nameChanged = name.trim() !== '' && name.trim() !== workspace
   const accountsChanged = agents.some(
     (agent) => (bindings[agent] ?? 'personal') !== boundAccount(agent),
   )
@@ -101,7 +111,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const foldersChanged =
     folderPaths.length !== initialFolders.length ||
     folderPaths.some((path) => !initialFolders.includes(path))
-  const changed = accountsChanged || instructionsChanged || foldersChanged
+  const changed = nameChanged || accountsChanged || instructionsChanged || foldersChanged
 
   const addFolder = async () => {
     const picked = await pickFolder('Add a work folder')
@@ -111,6 +121,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     setFolderPaths((prev) => (prev.length > 1 ? prev.filter((p) => p !== path) : prev))
 
   const discard = () => {
+    setName(workspace)
     setBindings(Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])))
     setInstructions(summary?.instructions ?? '')
     setFolderPaths(initialFolders)
@@ -125,6 +136,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     transport.send({
       type: 'update-space',
       workspace,
+      name: nameChanged ? name.trim() : undefined,
       accounts: next,
       folders,
       root,
@@ -211,6 +223,25 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
               </div>
             </header>
 
+            <section data-sec="name">
+              <div className={styles.sectionHead}>
+                <h2 className={styles.h2}>Name</h2>
+              </div>
+              <TextInput
+                value={name}
+                placeholder="Workspace name"
+                onChange={(event) => setName(event.currentTarget.value)}
+                styles={{
+                  input: {
+                    background: 'var(--soromi-bg-tab)',
+                    borderColor: 'var(--soromi-border)',
+                    borderRadius: 10,
+                    color: 'var(--soromi-text)',
+                  },
+                }}
+              />
+            </section>
+
             <section data-sec="folders">
               <div className={styles.sectionHead}>
                 <h2 className={styles.h2}>Folders</h2>
@@ -295,6 +326,27 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                 value={instructions}
                 onChange={(event) => setInstructions(event.currentTarget.value)}
               />
+            </section>
+
+            <section data-sec="notifications">
+              <div className={styles.sectionHead}>
+                <h2 className={styles.h2}>Notifications</h2>
+              </div>
+              <div className={styles.card}>
+                <div className={styles.folderRow}>
+                  <div className={styles.folderText}>
+                    <span>Desktop notifications</span>
+                    <span className={styles.folderPath}>
+                      Play a sound and show a banner when this workspace needs you (while the app is
+                      in the background).
+                    </span>
+                  </div>
+                  <Switch
+                    checked={notificationsOn}
+                    onChange={(event) => setNotifications(event.currentTarget.checked)}
+                  />
+                </div>
+              </div>
             </section>
 
             <section data-sec="danger">

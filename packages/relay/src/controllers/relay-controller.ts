@@ -21,11 +21,16 @@ export function relayController(registry: RoomRegistry, heartbeat: Heartbeat): F
         return
       }
       heartbeat.track(socket)
+      // Tell the room (both peers) that occupancy changed, so each side knows the other is present.
+      registry.announce(room)
 
       socket.on('message', (data: Buffer, isBinary: boolean) =>
         registry.forward(room, socket, data, isBinary),
       )
-      const leave = () => registry.leave(room, socket)
+      const leave = () => {
+        registry.leave(room, socket)
+        registry.announce(room)
+      }
       socket.on('close', leave)
       socket.on('error', () => {
         leave()

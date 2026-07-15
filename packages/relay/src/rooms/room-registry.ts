@@ -45,6 +45,20 @@ export class RoomRegistry {
     }
   }
 
+  /**
+   * Announces the room's current peer count to every peer as a text control frame
+   * (`{"__relay":"presence","peers":n}`), so a peer can tell when the other side attaches or drops.
+   * Presence metadata only, never content: the relay stays content-blind.
+   */
+  announce(room: string): void {
+    const peers = this.rooms.get(room)
+    if (!peers) return
+    const frame = JSON.stringify({ __relay: 'presence', peers: peers.size })
+    for (const peer of peers) {
+      if (peer.readyState === peer.OPEN) peer.send(frame)
+    }
+  }
+
   /** How many peers are in a room (for tests/metrics). */
   size(room: string): number {
     return this.rooms.get(room)?.size ?? 0

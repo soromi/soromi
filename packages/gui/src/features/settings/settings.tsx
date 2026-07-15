@@ -12,6 +12,7 @@ import { PROVIDERS } from '@/config/providers'
 
 //Components
 import { OverlayShell } from '@/shared/overlay-shell'
+import { RemoteSettings } from './remote-settings'
 
 //Icons
 import BellOffSvg from '@/assets/icons/bell-off.svg?react'
@@ -219,6 +220,10 @@ export function Settings() {
               ))
             )}
           </section>
+
+          <div className={styles.divider} />
+
+          <RemoteSettings />
         </div>
 
         <Modal

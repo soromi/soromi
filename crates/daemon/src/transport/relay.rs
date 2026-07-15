@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio_tungstenite::connect_async;
 
 use super::codec::Codec;
-use super::server::handle_connection;
+use super::server::{PresenceSink, handle_connection};
 use crate::accounts::store::FileAccountManager;
 use crate::workspaces::service::WorkspaceService;
 
@@ -51,7 +51,13 @@ pub fn spawn(
         return;
     }
 
-    tokio::spawn(connect_loop(hub, accounts, endpoint(&url, &room), key));
+    tokio::spawn(connect_loop(
+        hub,
+        accounts,
+        endpoint(&url, &room),
+        key,
+        None,
+    ));
 }
 
 /// Spawns a reconnecting relay client for one paired device, returning a handle so revoking the
@@ -62,12 +68,14 @@ pub fn spawn_device(
     url: String,
     room: String,
     key: String,
+    on_presence: PresenceSink,
 ) -> tokio::task::AbortHandle {
     tokio::spawn(connect_loop(
         hub,
         accounts,
         endpoint(&url, &room),
         Some(key),
+        Some(on_presence),
     ))
     .abort_handle()
 }
@@ -79,6 +87,7 @@ async fn connect_loop(
     accounts: Arc<FileAccountManager>,
     endpoint: String,
     key: Option<String>,
+    on_presence: Option<PresenceSink>,
 ) {
     let mut backoff = INITIAL_BACKOFF;
     loop {
@@ -90,7 +99,20 @@ async fn connect_loop(
                 None => Codec::Plain,
             };
             // Runs until the relay link drops; then we loop to reconnect and re-register.
-            handle_connection(ws, hub.clone(), accounts.clone(), codec, None).await;
+            handle_connection(
+                ws,
+                hub.clone(),
+                accounts.clone(),
+                codec,
+                None,
+                on_presence.clone(),
+            )
+            .await;
+        }
+
+        // The link is down, so the phone is not reachable through it: report it disconnected.
+        if let Some(sink) = &on_presence {
+            sink(false);
         }
 
         tokio::time::sleep(backoff).await;

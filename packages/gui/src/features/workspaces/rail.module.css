@@ -166,6 +166,20 @@
   background: var(--soromi-accent);
 }
 
+/* Keep-awake mug: tinted when a keep-awake mode is active. */
+.section.sectionOn {
+  color: var(--soromi-accent);
+}
+
+/* The check mark in the keep-awake menu: shown only for the selected mode. */
+.check {
+  opacity: 0;
+}
+
+.checkOn {
+  opacity: 1;
+}
+
 .spacer {
   flex: 1;
 }

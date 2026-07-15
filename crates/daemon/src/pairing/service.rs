@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use soromi_protocol::DeviceSummary;
+use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
 use crate::accounts::store::FileAccountManager;
@@ -14,11 +15,17 @@ use crate::workspaces::service::WorkspaceService;
 pub struct PairingService {
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
-    relay_url: String,
-    web_url: String,
+    /// The relay + web URLs; behind a lock so a self-host settings change applies live.
+    relay_url: Mutex<String>,
+    web_url: Mutex<String>,
     devices: Mutex<Vec<Device>>,
     /// device id -> its relay dial task, so revoking can stop it.
     connections: Mutex<HashMap<String, AbortHandle>>,
+    /// device id -> whether its phone is currently attached through the relay (live). Shared with
+    /// the per-device relay clients, which flip it as the phone joins / drops.
+    connected: Arc<Mutex<HashMap<String, bool>>>,
+    /// Fires when any device's connection state changes, so viewports re-fetch the device list.
+    changed_tx: broadcast::Sender<()>,
 }
 
 impl PairingService {
@@ -29,13 +36,16 @@ impl PairingService {
         relay_url: String,
         web_url: String,
     ) -> Arc<Self> {
+        let (changed_tx, _) = broadcast::channel(16);
         let service = Arc::new(Self {
             hub,
             accounts,
-            relay_url,
-            web_url,
+            relay_url: Mutex::new(relay_url),
+            web_url: Mutex::new(web_url),
             devices: Mutex::new(load_devices()),
             connections: Mutex::new(HashMap::new()),
+            connected: Arc::new(Mutex::new(HashMap::new())),
+            changed_tx,
         });
 
         for device in service.devices.lock().unwrap().iter() {
@@ -73,6 +83,7 @@ impl PairingService {
         if let Some(handle) = self.connections.lock().unwrap().remove(id) {
             handle.abort();
         }
+        self.connected.lock().unwrap().remove(id);
 
         let mut devices = self.devices.lock().unwrap();
         devices.retain(|device| device.id != id);
@@ -81,14 +92,49 @@ impl PairingService {
         devices.iter().map(|device| self.summary(device)).collect()
     }
 
-    /// Dials the relay for a device's room and records the task so revoking can stop it.
+    /// Updates the relay + web URLs (self-host settings change). Re-dials every device onto the new
+    /// relay so the change is live, not restart-gated.
+    pub fn set_urls(&self, relay_url: String, web_url: String) {
+        *self.web_url.lock().unwrap() = web_url;
+
+        let relay_changed = {
+            let mut current = self.relay_url.lock().unwrap();
+            let changed = *current != relay_url;
+            *current = relay_url;
+            changed
+        };
+        if !relay_changed {
+            return;
+        }
+
+        for handle in self.connections.lock().unwrap().drain() {
+            handle.1.abort();
+        }
+        for device in self.devices.lock().unwrap().iter() {
+            self.dial(device);
+        }
+    }
+
+    /// Dials the relay for a device's room and records the task so revoking can stop it. The relay
+    /// client reports the phone's live presence back into `connected`, waking viewports on change.
     fn dial(&self, device: &Device) {
+        let connected = self.connected.clone();
+        let changed_tx = self.changed_tx.clone();
+        let id = device.id.clone();
+        let on_presence: crate::transport::server::PresenceSink = Arc::new(move |present| {
+            let changed = connected.lock().unwrap().insert(id.clone(), present) != Some(present);
+            if changed {
+                let _ = changed_tx.send(());
+            }
+        });
+
         let handle = crate::transport::relay::spawn_device(
             self.hub.clone(),
             self.accounts.clone(),
-            self.relay_url.clone(),
+            self.relay_url.lock().unwrap().clone(),
             device.room.clone(),
             device.key.clone(),
+            on_presence,
         );
         self.connections
             .lock()
@@ -96,11 +142,22 @@ impl PairingService {
             .insert(device.id.clone(), handle);
     }
 
+    /// Subscribes to device connection-state changes, so a viewport can push a fresh device list.
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
+        self.changed_tx.subscribe()
+    }
+
     fn summary(&self, device: &Device) -> DeviceSummary {
         DeviceSummary {
             id: device.id.clone(),
             name: device.name.clone(),
             pairing_url: self.pairing_url(device),
+            connected: *self
+                .connected
+                .lock()
+                .unwrap()
+                .get(&device.id)
+                .unwrap_or(&false),
         }
     }
 
@@ -108,8 +165,8 @@ impl PairingService {
     fn pairing_url(&self, device: &Device) -> String {
         format!(
             "{}/?relay={}&room={}&key={}",
-            self.web_url.trim_end_matches('/'),
-            urlencoding::encode(&self.relay_url),
+            self.web_url.lock().unwrap().trim_end_matches('/'),
+            urlencoding::encode(&self.relay_url.lock().unwrap()),
             urlencoding::encode(&device.room),
             urlencoding::encode(&device.key),
         )

@@ -15,6 +15,10 @@ use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
 use crate::workspaces::service::WorkspaceService;
 
+/// Called with a relay link's live peer presence (`true` once the phone attaches, `false` when it
+/// drops). Set only for relay device links; local links pass `None`.
+pub(crate) type PresenceSink = Arc<dyn Fn(bool) + Send + Sync>;
+
 /// Accepts local viewport connections forever. Each connection runs independently and, being
 /// local (trusted), carries the pairing service so the desktop can manage devices.
 pub async fn serve(
@@ -33,7 +37,7 @@ pub async fn serve(
         tokio::spawn(async move {
             if let Ok(ws) = accept_async(stream).await {
                 // Local links are trusted, so they run plaintext and can manage devices.
-                handle_connection(ws, hub, accounts, Codec::Plain, Some(pairing)).await;
+                handle_connection(ws, hub, accounts, Codec::Plain, Some(pairing), None).await;
             }
         });
     }
@@ -49,6 +53,7 @@ pub(crate) async fn handle_connection<S>(
     accounts: Arc<FileAccountManager>,
     codec: Codec,
     pairing: Option<Arc<PairingService>>,
+    on_presence: Option<PresenceSink>,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -121,10 +126,39 @@ pub(crate) async fn handle_connection<S>(
         }
     });
 
+    // Devices task (local link only): push a fresh device list whenever a phone attaches / drops,
+    // so the desktop's devices panel shows live connection state.
+    let devices_task = pairing.as_ref().map(|pairing| {
+        let devices_out = out_tx.clone();
+        let devices_pairing = pairing.clone();
+        let mut device_changes = pairing.subscribe_changes();
+        tokio::spawn(async move {
+            loop {
+                match device_changes.recv().await {
+                    Ok(()) => {
+                        let _ = devices_out.send(ServerMessage::DeviceList {
+                            devices: devices_pairing.list_devices(),
+                        });
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    });
+
     let mut connection = Connection::new(hub, accounts, pairing, out_tx);
     while let Some(Ok(message)) = source.next().await {
         if matches!(message, Message::Close(_)) {
             break;
+        }
+        // Relay control frames (peer presence) arrive as text and are not client messages; on a
+        // device link they report whether the phone is attached.
+        if let (Some(sink), Message::Text(text)) = (&on_presence, &message)
+            && let Some(present) = parse_presence(text)
+        {
+            sink(present);
+            continue;
         }
         if let Some(client) = codec.decode(message) {
             connection.handle(client);
@@ -135,5 +169,45 @@ pub(crate) async fn handle_connection<S>(
     change_task.abort();
     dir_task.abort();
     reset_task.abort();
+    if let Some(task) = devices_task {
+        task.abort();
+    }
     writer.abort();
+}
+
+/// Parses a relay presence control frame (`{"__relay":"presence","peers":n}`), returning whether
+/// the other peer is present (`peers > 1`). `None` for any other frame.
+fn parse_presence(text: &str) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if value.get("__relay").and_then(|v| v.as_str()) != Some("presence") {
+        return None;
+    }
+
+    Some(value.get("peers").and_then(|v| v.as_u64()).unwrap_or(0) > 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presence_frame_reports_the_other_peer() {
+        // Only the daemon in the room: the phone is not present.
+        assert_eq!(
+            parse_presence(r#"{"__relay":"presence","peers":1}"#),
+            Some(false)
+        );
+        // Both peers: the phone is present.
+        assert_eq!(
+            parse_presence(r#"{"__relay":"presence","peers":2}"#),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn non_presence_frames_are_ignored() {
+        // A real client message must not be mistaken for presence.
+        assert_eq!(parse_presence(r#"{"type":"list-workspaces"}"#), None);
+        assert_eq!(parse_presence("not json"), None);
+    }
 }

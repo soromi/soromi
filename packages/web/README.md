@@ -24,11 +24,20 @@ The transport is chosen from the URL query string:
 - **`&key=<base64>`:** a base64 32-byte key that end-to-end-encrypts the link (must match the
   daemon's key). Without it, the relay link is plaintext (development only).
 
-These params are a manual override for development; normally the relay URL, room, and key come from
-pairing a device, not the URL.
+Normally those params are not typed by hand: pairing a device in the desktop app produces a QR whose
+link is `<webUrl>/?relay=…&room=…&key=…`. Scanning it with the phone's camera opens this app already
+paired. The connect screen's paste field is the manual fallback for that same link.
 
 ```bash
 pnpm web        # dev server (Vite)
 # standalone (mock):   http://localhost:1430
 # through a relay:     http://localhost:1430/?relay=ws://localhost:8787&room=demo&key=<base64-32-byte>
 ```
+
+## PWA / deploy
+
+The build (`pnpm --filter @soromi/web build`) emits a static bundle in `dist/` plus a service worker
+(`vite-plugin-pwa`, Workbox) that precaches the app shell for offline launch and installability. It
+is a plain static site: host `dist/` anywhere (any static host / CDN), then point the daemon's
+`SOROMI_WEB_URL` at that origin so paired devices' QR links resolve to it. The web app talks only to
+the relay (`SOROMI_RELAY_URL`), never to the daemon directly.

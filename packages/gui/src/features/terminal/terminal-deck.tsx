@@ -15,7 +15,6 @@ import { colors, statusVariant } from '@/config/theme'
 
 //Components
 import { ProviderIcon } from '@/shared/provider-icon'
-import { WorkspaceControls } from '@/features/workspaces/workspace-controls'
 
 //Icons
 import CloseIcon from '@/assets/icons/close.svg?react'
@@ -134,7 +133,6 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
               </Menu.Dropdown>
             </Menu>
           </div>
-          <WorkspaceControls />
         </div>
       )}
       <div className={styles.panes}>
@@ -216,7 +214,7 @@ function Tab({
           onDoubleClick={startEdit}
           title="Double-click to rename"
         >
-          <ProviderIcon provider={session.agent} size={14} />
+          <ProviderIcon provider={session.agent} size={16} />
           <span className={styles.tabLabel}>{label}</span>
           {session.status !== 'idle' && (
             <span className={clsx(styles.tabDot, styles[statusVariant(session.status)])} />

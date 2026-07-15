@@ -96,6 +96,7 @@ fn client_update_space_carries_account_bindings() {
     assert_client(
         ClientMessage::UpdateSpace {
             workspace: "kazomi".into(),
+            name: None,
             accounts: vec![AgentAccount {
                 id: "work".into(),
                 agent: "claude".into(),

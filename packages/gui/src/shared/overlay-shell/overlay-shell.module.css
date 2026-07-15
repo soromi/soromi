@@ -1,7 +1,10 @@
 .overlay {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  /* Above the status bar: a full-page overlay covers the whole window, bar included, so its footer
+     never hides behind the bar. Content-scope overlays sit inside the shell (below the bar)
+     regardless, so this does not change them. */
+  z-index: var(--z-overlay);
   background: var(--soromi-bg-app);
   display: flex;
   flex-direction: column;

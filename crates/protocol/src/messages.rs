@@ -143,6 +143,9 @@ pub struct DeviceSummary {
     #[cfg_attr(feature = "ts", ts(rename = "pairingUrl"))]
     #[serde(rename = "pairingUrl")]
     pub pairing_url: String,
+    /// Whether this device's phone is currently connected through the relay (live). A paired device
+    /// with no phone attached, or an unreachable relay, is `false`.
+    pub connected: bool,
 }
 
 /// One usage window for an agent (e.g. the 5-hour session or the weekly cap). `percent` is 0-100;
@@ -179,6 +182,23 @@ pub struct AgentUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub note: Option<String>,
+}
+
+/// The relay + web-viewport URLs used when pairing devices. Runtime-configurable (self-host) so the
+/// bundled app never needs a rebuild to point at a different relay or hosted web app. Empty values
+/// fall back to the daemon's env vars, then its compiled defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct RemoteConfig {
+    /// The relay WebSocket URL the daemon and paired phones dial (e.g. `wss://relay.example.com`).
+    pub relay_url: String,
+    /// The base URL the pairing QR points at, where the web viewport is hosted.
+    pub web_url: String,
 }
 
 /// Viewport -> daemon. A discriminated union on `type`.
@@ -273,6 +293,11 @@ pub enum ClientMessage {
     },
     UpdateSpace {
         workspace: String,
+        /// A new name for the workspace. Absent/empty keeps the current one; renaming fails if
+        /// another workspace already has that name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        name: Option<String>,
         accounts: Vec<AgentAccount>,
         /// The workspace's work folders (relative to its root). Changing them relaunches every tab
         /// so agents pick up the new `--add-dir` paths.
@@ -308,6 +333,13 @@ pub enum ClientMessage {
     /// Revoke a paired device: forget it and stop dialing its relay room. Replies with `DeviceList`.
     RevokeDevice {
         id: String,
+    },
+    /// Ask for the current relay + web URLs (for the settings screen). Replies with `RemoteConfig`.
+    GetRemoteConfig,
+    /// Set the relay + web URLs (self-host). Persisted and applied to pairing live. Replies with the
+    /// resolved `RemoteConfig`. Empty fields clear the override (fall back to env / default).
+    SetRemoteConfig {
+        config: RemoteConfig,
     },
 }
 
@@ -414,5 +446,9 @@ pub enum ServerMessage {
     Usage {
         workspace: String,
         agents: Vec<AgentUsage>,
+    },
+    /// The resolved relay + web URLs (reply to `GetRemoteConfig` / `SetRemoteConfig`).
+    RemoteConfig {
+        config: RemoteConfig,
     },
 }

@@ -628,11 +628,23 @@ impl WorkspaceService {
     pub fn update_space(
         &self,
         name: &str,
+        new_name: Option<String>,
         accounts: Vec<AgentAccount>,
         folders: Vec<String>,
         root: Option<String>,
         instructions: Option<String>,
     ) -> anyhow::Result<OpenResult> {
+        // Resolve (and validate) a rename up front, so we don't touch anything on a name clash.
+        let rename = new_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty() && n != name);
+        if let Some(target) = &rename {
+            let metadata = self.metadata.lock().unwrap();
+            if metadata.iter().any(|(n, _)| n == target) {
+                anyhow::bail!("a workspace named \"{target}\" already exists");
+            }
+        }
+
         let folders = if folders.is_empty() {
             vec![".".to_string()]
         } else {
@@ -686,10 +698,31 @@ impl WorkspaceService {
                 let _ = self.reset_tx.send(session.id.clone());
             }
         }
+
+        // Rename last, once everything else applied. Sessions keep their ids and their agents
+        // resolve the workspace name fresh from metadata, so no relaunch is needed; just re-key the
+        // entry and drop the old name's directory watches (new ones re-register on the next list).
+        let final_name = match rename {
+            Some(target) => {
+                if let Some(entry) = self
+                    .metadata
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|(n, _)| n == name)
+                {
+                    entry.0 = target.clone();
+                }
+                self.watcher.unwatch_workspace(name);
+                target
+            }
+            None => name.to_string(),
+        };
+
         self.persist();
         self.emit_change();
         Ok(OpenResult {
-            workspace: name.to_string(),
+            workspace: final_name,
             warning,
         })
     }
@@ -742,6 +775,7 @@ impl WorkspaceService {
         let (cwd, extra_dirs) = session_dirs(root, folders);
         let command = basename(&parsed.command);
         let provider = crate::providers::provider(command);
+        let account = account_for(accounts, &session.agent);
         let mut args = parsed.args;
         if let Some(provider) = provider {
             // Name each extra folder, append the workspace instructions to the system prompt, and
@@ -758,12 +792,20 @@ impl WorkspaceService {
                 args.push(flag.to_string());
                 args.push(text.to_string());
             }
-            if let Some(resume_id) = &session.resume_id {
+            // Only resume when the prior conversation still exists (skip a stale id: an unused tab
+            // whose conversation was never saved, a pruned one, or one from a since-changed cwd), so
+            // the agent starts fresh instead of erroring with "No conversation found".
+            if let Some(resume_id) = &session.resume_id
+                && provider.resume_available(
+                    &provider_config_dir(&account, provider),
+                    &cwd,
+                    resume_id,
+                )
+            {
                 provider.apply_resume(&mut args, resume_id);
             }
         }
 
-        let account = account_for(accounts, &session.agent);
         let mut base_env: Vec<(String, String)> = std::env::vars().collect();
         // Use the shell-resolved PATH when set, so a GUI-launched app's agents find their
         // binaries, without mutating this process's global environment.
@@ -1176,10 +1218,48 @@ mod tests {
 
         let accounts = service.summaries()[0].accounts.clone();
         service
-            .update_space("kazomi", accounts, vec!["api".into()], None, None)
+            .update_space("kazomi", None, accounts, vec!["api".into()], None, None)
             .unwrap();
 
         assert_eq!(service.summaries()[0].folders, vec!["api".to_string()]);
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn update_space_can_rename_a_workspace() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+
+        let root = tempfile::tempdir().unwrap();
+        let service = service();
+        service
+            .create_space(CreateSpaceInput {
+                name: "before".into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "bash".into(),
+                account: "personal".into(),
+                folders: Some(vec![".".into()]),
+            })
+            .unwrap();
+
+        let accounts = service.summaries()[0].accounts.clone();
+        let result = service
+            .update_space(
+                "before",
+                Some("after".into()),
+                accounts,
+                vec![".".into()],
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(result.workspace, "after");
+        let names: Vec<String> = service.summaries().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["after".to_string()]);
 
         service.dispose();
         crate::home::set_soromi_home(None);

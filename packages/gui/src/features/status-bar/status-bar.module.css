@@ -7,7 +7,7 @@
   padding: 0 8px;
   border-top: 1px solid var(--soromi-border-subtle);
   background: var(--soromi-bg-app);
-  z-index: 10;
+  z-index: var(--z-status-bar);
 }
 
 .side {
@@ -74,13 +74,13 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-popover-backdrop);
 }
 
 .popup {
   position: absolute;
   bottom: 40px;
-  z-index: 70;
+  z-index: var(--z-popover);
   width: 320px;
   background: var(--soromi-bg-rail);
   border: 1px solid var(--soromi-border);
@@ -298,8 +298,28 @@
 }
 
 .deviceName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   color: var(--soromi-text);
+}
+
+.deviceDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--soromi-text-faint);
+  flex: none;
+}
+
+.deviceDotOn {
+  background: var(--soromi-accent);
+}
+
+.deviceState {
+  font-size: 11.5px;
+  color: var(--soromi-text-faint);
 }
 
 .revoke {

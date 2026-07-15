@@ -47,6 +47,22 @@ impl Provider for Claude {
         args.push(resume_id.to_string());
     }
 
+    fn resume_available(&self, config_dir: &Path, cwd: &str, resume_id: &str) -> bool {
+        // Claude saves each conversation to `<config>/projects/<cwd>/<id>.jsonl`, encoding the cwd
+        // by replacing every non-alphanumeric char with `-`. If that file is absent the conversation
+        // was never persisted (or is under a different cwd), so resuming it would fail.
+        let encoded: String = cwd
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+
+        config_dir
+            .join("projects")
+            .join(encoded)
+            .join(format!("{resume_id}.jsonl"))
+            .exists()
+    }
+
     fn skill_dirs(&self) -> Option<(&'static str, &'static str)> {
         Some((".claude", "commands"))
     }
@@ -68,6 +84,26 @@ impl Provider for Claude {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn resume_available_only_when_the_conversation_file_exists() {
+        let dir = tempdir().unwrap();
+        let cwd = "/Users/me/work/bookr/front_library";
+        let id = "fab3dde6-38a9-4af8-b20d-d25814b8cf2c";
+
+        // No file yet (an unused / never-saved conversation): not resumable.
+        assert!(!Claude.resume_available(dir.path(), cwd, id));
+
+        // Claude encodes the cwd by replacing every non-alphanumeric char with `-`.
+        let project = dir
+            .path()
+            .join("projects")
+            .join("-Users-me-work-bookr-front-library");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{id}.jsonl")), "{}").unwrap();
+
+        assert!(Claude.resume_available(dir.path(), cwd, id));
+    }
 
     #[test]
     fn is_logged_in_checks_the_account_key() {

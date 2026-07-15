@@ -86,6 +86,13 @@ pub trait Provider: Send + Sync {
     /// means the provider cannot resume, so its tabs always start fresh.
     fn apply_resume(&self, _args: &mut Vec<String>, _resume_id: &str) {}
 
+    /// Whether a prior conversation still exists to resume (given the account config dir + the tab's
+    /// working dir). Guards against a stale id (an unused tab, a pruned conversation, a changed cwd)
+    /// that would make the agent error on launch. The default assumes yes.
+    fn resume_available(&self, _config_dir: &Path, _cwd: &str, _resume_id: &str) -> bool {
+        true
+    }
+
     /// Where this provider keeps skills/slash-commands: the per-project config folder (e.g.
     /// `.claude`) and the slash-command subfolder (e.g. `commands`). `None` means no skills.
     fn skill_dirs(&self) -> Option<(&'static str, &'static str)> {

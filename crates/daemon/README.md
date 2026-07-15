@@ -34,3 +34,23 @@ development; the room and key are otherwise generated per device when pairing a 
 | `SOROMI_RELAY_KEY` | Base64 32-byte key that end-to-end-encrypts the link. If unset, the relay link is plaintext (development only). An invalid key is refused rather than downgraded. |
 
 The relay itself is a separate, content-blind process; see [`@soromi/relay`](../../packages/relay).
+
+### Pairing endpoints (self-host, no rebuild)
+
+The relay and hosted web-viewport URLs used when **pairing a phone** are runtime config, so a bundled
+app never needs a rebuild to point at your own infrastructure. They resolve **config file →
+environment variable → default**, and the desktop app edits the file from its Settings ("Remote").
+
+| Key (`~/.soromi/config.json`) | Env var | Default | Purpose |
+| --- | --- | --- | --- |
+| `relayUrl` | `SOROMI_RELAY_URL` | `ws://localhost:8787` | Relay both the daemon and paired phones dial. |
+| `webUrl` | `SOROMI_WEB_URL` | `http://localhost:1430` | Base URL the pairing QR opens (where the web viewport is hosted). |
+
+Example `~/.soromi/config.json`:
+
+```json
+{ "relayUrl": "wss://relay.example.com", "webUrl": "https://app.example.com" }
+```
+
+An empty value falls back to the env var, then the default. Changes made from Settings apply live
+(existing device links re-dial the new relay); editing the file directly takes effect on restart.

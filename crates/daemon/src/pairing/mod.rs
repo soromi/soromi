@@ -3,18 +3,12 @@ pub mod service;
 
 pub use service::PairingService;
 
-/// The relay to dial for devices, overridable via `SOROMI_RELAY_URL`.
+/// The relay to dial for devices. Resolved from the runtime config (file > env > default).
 pub fn relay_url() -> String {
-    std::env::var("SOROMI_RELAY_URL")
-        .ok()
-        .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| "ws://localhost:8787".to_string())
+    crate::config::relay_url()
 }
 
-/// The web viewport base the pairing QR points at, overridable via `SOROMI_WEB_URL`.
+/// The web viewport base the pairing QR points at. Resolved from the runtime config.
 pub fn web_url() -> String {
-    std::env::var("SOROMI_WEB_URL")
-        .ok()
-        .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| "http://localhost:1430".to_string())
+    crate::config::web_url()
 }
