@@ -25,3 +25,28 @@ pnpm --filter @soromi/relay build && pnpm --filter @soromi/relay start
 ```
 
 `PORT` sets the listen port (default `8787`).
+
+## Self-host (Docker)
+
+The relay is a single stateless process, so any container host works. Build from the repo root
+(the image is standalone, no monorepo tooling at runtime):
+
+```bash
+docker build -f packages/relay/Dockerfile -t soromi-relay .
+docker run -d --restart unless-stopped -p 8787:8787 soromi-relay
+# PORT overrides the listen port:
+docker run -d -e PORT=9000 -p 9000:9000 soromi-relay
+```
+
+`GET /health` returns `ok` (used by the image's `HEALTHCHECK`).
+
+**TLS.** The image itself serves plain `ws://`. In production put it behind a TLS-terminating
+reverse proxy (Caddy, nginx, a cloud load balancer) that upgrades to `wss://` and forwards
+WebSocket traffic, so both peers can dial `wss://relay.example.com`. The relay is stateless and
+holds no data, so it scales horizontally as long as **both peers of a room land on the same
+instance** (pin by the `room` query param, or run a single instance).
+
+**Wiring it up.** Point the daemon and the hosted web app at your relay: set the daemon's
+`SOROMI_RELAY_URL` (or Settings -> Remote) to `wss://relay.example.com` and `SOROMI_WEB_URL` to
+where you host the web viewport. Paired devices' QR links then carry your relay + web URLs. See the
+[daemon README](../../crates/daemon/README.md#pairing-endpoints-self-host-no-rebuild).

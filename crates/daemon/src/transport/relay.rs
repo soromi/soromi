@@ -57,11 +57,13 @@ pub fn spawn(
         endpoint(&url, &room),
         key,
         None,
+        "Remote device".to_string(),
     ));
 }
 
 /// Spawns a reconnecting relay client for one paired device, returning a handle so revoking the
-/// device can stop it. The key is always present (the device minted it).
+/// device can stop it. The key is always present (the device minted it). `name` labels it in the
+/// desktop's takeover screen when it holds control.
 pub fn spawn_device(
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
@@ -69,6 +71,7 @@ pub fn spawn_device(
     room: String,
     key: String,
     on_presence: PresenceSink,
+    name: String,
 ) -> tokio::task::AbortHandle {
     tokio::spawn(connect_loop(
         hub,
@@ -76,6 +79,7 @@ pub fn spawn_device(
         endpoint(&url, &room),
         Some(key),
         Some(on_presence),
+        name,
     ))
     .abort_handle()
 }
@@ -88,6 +92,7 @@ async fn connect_loop(
     endpoint: String,
     key: Option<String>,
     on_presence: Option<PresenceSink>,
+    viewer_name: String,
 ) {
     let mut backoff = INITIAL_BACKOFF;
     loop {
@@ -106,6 +111,7 @@ async fn connect_loop(
                 codec,
                 None,
                 on_presence.clone(),
+                viewer_name.clone(),
             )
             .await;
         }

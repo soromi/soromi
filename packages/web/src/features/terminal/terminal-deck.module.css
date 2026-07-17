@@ -1,4 +1,7 @@
 .deck {
+  position: relative;
+  /* Contain the takeover overlay's stacking to the terminal area (keeps it off the top / key bars). */
+  isolation: isolate;
   flex: 1;
   min-width: 0;
   min-height: 0;

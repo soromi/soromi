@@ -1,0 +1,6 @@
+# Keep the Docker build context small: everything is installed / built in-container.
+**/node_modules
+**/dist
+target
+.git
+*.log

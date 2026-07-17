@@ -85,6 +85,9 @@ export function App() {
         case 'up-to-date':
           ui.setNotice("You're on the latest version.")
           break
+        case 'control':
+          client.setControlHolder(message.holder ?? null)
+          break
         case 'error':
           ui.setError(message.message)
           break

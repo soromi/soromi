@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 //Packages
-import { TerminalSurface, useClientStore, useTransport } from '@soromi/client'
+import { TakeoverScreen, TerminalSurface, useClientStore, useTransport } from '@soromi/client'
 
 //Constants
 import { colors } from '@/config/theme'
@@ -47,8 +47,11 @@ export function TerminalDeck({ active }: { active?: string }) {
           active={id === active}
           background={colors.bgTerminal}
           foreground={colors.text}
+          fontSize={12}
+          renderer="dom"
         />
       ))}
+      <TakeoverScreen />
     </div>
   )
 }

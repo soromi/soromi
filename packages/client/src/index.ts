@@ -5,6 +5,7 @@ export { TransportProvider, useTransport } from './transport/transport-context'
 
 // Terminal
 export { TerminalSurface } from './terminal/terminal-surface'
+export { TakeoverScreen } from './terminal/takeover'
 
 // Store (daemon-mirrored state)
 export { useClientStore } from './store/client-store'

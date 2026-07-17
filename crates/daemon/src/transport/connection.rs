@@ -21,6 +21,8 @@ pub struct Connection {
     pairing: Option<Arc<PairingService>>,
     out: Outbound,
     attached: HashMap<String, JoinHandle<()>>,
+    /// This viewport's id, used to gate input/resize to the controller and to claim control.
+    viewer_id: u64,
 }
 
 impl Connection {
@@ -29,6 +31,7 @@ impl Connection {
         accounts: Arc<FileAccountManager>,
         pairing: Option<Arc<PairingService>>,
         out: Outbound,
+        viewer_id: u64,
     ) -> Self {
         Self {
             hub,
@@ -36,12 +39,19 @@ impl Connection {
             pairing,
             out,
             attached: HashMap::new(),
+            viewer_id,
         }
     }
 
     pub fn handle(&mut self, message: ClientMessage) {
         match message {
-            ClientMessage::ListWorkspaces => send_state(&self.hub, &self.out),
+            ClientMessage::ListWorkspaces => {
+                // A viewport (re)connecting always asks for the workspace list; reply with the
+                // current control state too, so a fresh page (e.g. a phone that refreshed) knows
+                // whether it drives or shows the takeover, even if it missed the control broadcast.
+                send_state(&self.hub, &self.out);
+                self.send_control();
+            }
             ClientMessage::OpenWorkspace { dir } => match self.hub.open_workspace(&dir) {
                 Ok(result) => self.send(ServerMessage::WorkspaceOpened {
                     workspace: result.workspace,
@@ -225,9 +235,13 @@ impl Connection {
                     let _ = out.send(ServerMessage::Usage { workspace, agents });
                 });
             }
+            ClientMessage::TakeControl => self.hub.take_control(self.viewer_id),
             ClientMessage::Attach { session } => self.attach(&session),
             ClientMessage::Input { session, data } => {
-                if let Some(session) = self.hub.get(&session) {
+                // Only the controlling viewport drives the terminal.
+                if self.hub.is_controller(self.viewer_id)
+                    && let Some(session) = self.hub.get(&session)
+                {
                     session.write(&data);
                     // Submitting (Enter) starts a new turn: the agent is working again.
                     if data.contains('\r') {
@@ -240,7 +254,10 @@ impl Connection {
                 cols,
                 rows,
             } => {
-                if let Some(session) = self.hub.get(&session) {
+                // Only the controller owns the size; others render the takeover, not the terminal.
+                if self.hub.is_controller(self.viewer_id)
+                    && let Some(session) = self.hub.get(&session)
+                {
                     session.resize(cols, rows);
                 }
             }
@@ -255,6 +272,17 @@ impl Connection {
 
     fn send(&self, message: ServerMessage) {
         let _ = self.out.send(message);
+    }
+
+    /// Sends this viewport its control state: `None` holder when it drives, else the controller's
+    /// name (so it shows the takeover).
+    fn send_control(&self) {
+        let holder = if self.hub.is_controller(self.viewer_id) {
+            None
+        } else {
+            self.hub.controller_name()
+        };
+        self.send(ServerMessage::Control { holder });
     }
 
     fn send_accounts(&self) {

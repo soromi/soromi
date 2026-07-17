@@ -53,6 +53,9 @@ export function App() {
         case 'skill-list':
           client.setSkills(message.session, message.skills)
           break
+        case 'control':
+          client.setControlHolder(message.holder ?? null)
+          break
       }
     })
     const offOpen = transport.onOpen(() => {

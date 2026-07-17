@@ -6,6 +6,9 @@ import '@xterm/xterm/css/xterm.css'
 import clsx from 'clsx'
 import { useEffect, useRef } from 'react'
 
+//Store
+import { useClientStore } from '../store/client-store'
+
 //Styles
 import styles from './terminal-surface.module.css'
 
@@ -19,6 +22,12 @@ interface TerminalSurfaceProps {
   /** Terminal colors, supplied by the host so the engine stays theme-agnostic. */
   background: string
   foreground: string
+  /** Font size in px. Hosts can shrink it on small screens to fit more columns. Defaults to 13. */
+  fontSize?: number
+  /** Renderer: `canvas` (GPU-composited; right for the desktop webview, where DPR is stable) or
+   * `dom` (real text nodes; right for mobile browsers, immune to canvas DPR mis-scaling that
+   * draws cells wider than the fit and clips columns). Defaults to `canvas`. */
+  renderer?: 'canvas' | 'dom'
 }
 
 /**
@@ -32,10 +41,15 @@ export function TerminalSurface({
   active,
   background,
   foreground,
+  fontSize = 13,
+  renderer = 'canvas',
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  // Whether this viewport controls the terminals: when it gains control it must re-fit and claim
+  // the size (the pane was already mounted behind the takeover, so nothing else triggers a resize).
+  const inControl = useClientStore((s) => s.controlHolder === null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -43,7 +57,7 @@ export function TerminalSurface({
 
     const term = new Terminal({
       fontFamily: '"SF Mono", Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       allowProposedApi: true,
       // Cap scrollback per terminal; parked tabs each keep their own buffer, so this bounds memory.
@@ -61,12 +75,15 @@ export function TerminalSurface({
     fitRef.current = fit
 
     // Canvas renderer: GPU-composited, reliable in WKWebView, and free of WebGL's per-page
-    // context limit (which the parked-buffer model, one live terminal per tab, can hit). The DOM
-    // renderer stays as a fallback if canvas fails.
-    try {
-      term.loadAddon(new CanvasAddon())
-    } catch {
-      // DOM renderer stays.
+    // context limit (which the parked-buffer model, one live terminal per tab, can hit). Hosts on
+    // mobile browsers pass `dom` instead (see the prop); the DOM renderer also stays as the
+    // fallback if canvas fails.
+    if (renderer === 'canvas') {
+      try {
+        term.loadAddon(new CanvasAddon())
+      } catch {
+        // DOM renderer stays.
+      }
     }
 
     const offMessage = transport.onMessage((message) => {
@@ -123,11 +140,12 @@ export function TerminalSurface({
       termRef.current = null
       fitRef.current = null
     }
-  }, [transport, session, background, foreground])
+  }, [transport, session, background, foreground, fontSize, renderer])
 
-  // Refit and focus when this pane becomes the visible one (a hidden pane can't be fitted).
+  // Refit and focus when this pane becomes the visible one, or when this viewport gains control (a
+  // hidden pane can't be fitted; gaining control needs the size re-sent to claim the PTY).
   useEffect(() => {
-    if (!active) return
+    if (!active || !inControl) return
     const term = termRef.current
     const fit = fitRef.current
     const container = containerRef.current
@@ -141,7 +159,7 @@ export function TerminalSurface({
       }
     }
     term.focus()
-  }, [active, transport, session])
+  }, [active, inControl, transport, session])
 
   return (
     <div className={clsx(styles.pane, !active && styles.hidden)}>

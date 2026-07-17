@@ -1,9 +1,11 @@
 .pane {
+  /* Sizing context for the terminal below. The terminal is positioned absolutely, so its fixed
+     grid never props this open: the pane's size is decided purely by the responsive layout (the
+     viewport), and the terminal fills whatever that is. This is the robust way to embed a
+     fixed-grid xterm in a flexible layout, no min-width / overflow patches needed. */
+  position: relative;
   flex: 1;
   min-height: 0;
-  box-sizing: border-box;
-  display: flex;
-  padding: 6px 8px;
 }
 
 .hidden {
@@ -11,9 +13,8 @@
 }
 
 .terminal {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
+  position: absolute;
+  inset: 6px 8px;
 }
 
 /* Subtle, theme-matched scrollbar for the xterm viewport. Vars come from the host app's globals. */

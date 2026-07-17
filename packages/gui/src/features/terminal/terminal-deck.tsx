@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
-import { TerminalSurface, useClientStore } from '@soromi/client'
+import { TakeoverScreen, TerminalSurface, useClientStore } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -146,6 +146,7 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
             foreground={colors.text}
           />
         ))}
+        <TakeoverScreen />
       </div>
     </div>
   )

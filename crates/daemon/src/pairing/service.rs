@@ -135,6 +135,7 @@ impl PairingService {
             device.room.clone(),
             device.key.clone(),
             on_presence,
+            device.name.clone(),
         );
         self.connections
             .lock()

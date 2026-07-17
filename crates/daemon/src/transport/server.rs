@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -19,6 +20,42 @@ use crate::workspaces::service::WorkspaceService;
 /// drops). Set only for relay device links; local links pass `None`.
 pub(crate) type PresenceSink = Arc<dyn Fn(bool) + Send + Sync>;
 
+/// How often the connection sends a keepalive ping. Shorter than the relay's heartbeat, so an idle
+/// link stays alive and any queued pong is flushed before the relay would drop it.
+const KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Hands each connection a distinct viewer id, so terminal control (input / size) can be pinned to
+/// one viewport at a time.
+static NEXT_VIEWER: AtomicU64 = AtomicU64::new(1);
+
+/// This machine's display name, shown to remote devices when the desktop is in control. On macOS
+/// it is the friendly Computer Name (System Settings > Sharing); otherwise the hostname. Falls back
+/// to a generic label.
+fn local_device_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(name) = command_output("scutil", &["--get", "ComputerName"]) {
+        return name;
+    }
+
+    command_output("hostname", &[])
+        .map(|host| host.trim_end_matches(".local").to_string())
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "This computer".to_string())
+}
+
+/// Runs a command and returns its trimmed stdout, or `None` if it failed or produced nothing.
+fn command_output(command: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(command).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// Accepts local viewport connections forever. Each connection runs independently and, being
 /// local (trusted), carries the pairing service so the desktop can manage devices.
 pub async fn serve(
@@ -27,6 +64,8 @@ pub async fn serve(
     accounts: Arc<FileAccountManager>,
     pairing: Arc<PairingService>,
 ) {
+    // Resolved once: the machine's name, shown to remote devices when this computer is in control.
+    let device_name = local_device_name();
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             continue;
@@ -34,10 +73,20 @@ pub async fn serve(
         let hub = hub.clone();
         let accounts = accounts.clone();
         let pairing = pairing.clone();
+        let name = device_name.clone();
         tokio::spawn(async move {
             if let Ok(ws) = accept_async(stream).await {
                 // Local links are trusted, so they run plaintext and can manage devices.
-                handle_connection(ws, hub, accounts, Codec::Plain, Some(pairing), None).await;
+                handle_connection(
+                    ws,
+                    hub,
+                    accounts,
+                    Codec::Plain,
+                    Some(pairing),
+                    None,
+                    name,
+                )
+                .await;
             }
         });
     }
@@ -54,22 +103,44 @@ pub(crate) async fn handle_connection<S>(
     codec: Codec,
     pairing: Option<Arc<PairingService>>,
     on_presence: Option<PresenceSink>,
+    viewer_name: String,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let viewer_id = NEXT_VIEWER.fetch_add(1, Ordering::Relaxed);
+    // The first viewport to attach controls the terminals; a later one sees a takeover until it
+    // takes control.
+    let mut control_changes = hub.subscribe_control();
+    hub.register_viewer(viewer_id, viewer_name);
+
     let codec = Arc::new(codec);
     let (mut sink, mut source) = ws.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ServerMessage>();
 
-    // Writer task: encode outbound messages (plaintext or encrypted) and send them, in order.
+    // Writer task: encode outbound messages (plaintext or encrypted) and send them, in order. A
+    // keepalive ping on an idle link keeps the relay from dropping it and flushes queued pongs.
     let writer_codec = codec.clone();
     let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
-            let Some(frame) = writer_codec.encode(&message) else {
-                continue;
-            };
-            if sink.send(frame).await.is_err() {
-                break;
+        let mut keepalive = tokio::time::interval(KEEPALIVE);
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                message = out_rx.recv() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    let Some(frame) = writer_codec.encode(&message) else {
+                        continue;
+                    };
+                    if sink.send(frame).await.is_err() {
+                        break;
+                    }
+                }
+                _ = keepalive.tick() => {
+                    if sink.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
@@ -147,7 +218,27 @@ pub(crate) async fn handle_connection<S>(
         })
     });
 
-    let mut connection = Connection::new(hub, accounts, pairing, out_tx);
+    // Control task: push this viewport's control state now and whenever it changes. `holder` is
+    // `None` when this viewport is the controller (render the terminal), else the controller's name.
+    let control_hub = hub.clone();
+    let control_out = out_tx.clone();
+    let control_task = tokio::spawn(async move {
+        loop {
+            let holder = if control_hub.is_controller(viewer_id) {
+                None
+            } else {
+                control_hub.controller_name()
+            };
+            let _ = control_out.send(ServerMessage::Control { holder });
+            match control_changes.recv().await {
+                Ok(()) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    let mut connection = Connection::new(hub.clone(), accounts, pairing, out_tx, viewer_id);
     while let Some(Ok(message)) = source.next().await {
         if matches!(message, Message::Close(_)) {
             break;
@@ -166,9 +257,12 @@ pub(crate) async fn handle_connection<S>(
     }
 
     connection.dispose();
+    // Drop this viewport; if it held control, it passes to another attached viewport.
+    hub.unregister_viewer(viewer_id);
     change_task.abort();
     dir_task.abort();
     reset_task.abort();
+    control_task.abort();
     if let Some(task) = devices_task {
         task.abort();
     }

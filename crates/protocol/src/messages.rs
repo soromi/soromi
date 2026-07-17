@@ -341,6 +341,9 @@ pub enum ClientMessage {
     SetRemoteConfig {
         config: RemoteConfig,
     },
+    /// This viewport claims sole control of the terminals: it drives input and owns the size, and
+    /// every other viewport shows a takeover screen. Triggers a `Control` broadcast.
+    TakeControl,
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -450,5 +453,13 @@ pub enum ServerMessage {
     /// The resolved relay + web URLs (reply to `GetRemoteConfig` / `SetRemoteConfig`).
     RemoteConfig {
         config: RemoteConfig,
+    },
+    /// Who controls the terminals right now, from this viewport's perspective. `holder` is `None`
+    /// when this viewport is the controller (render the terminal); otherwise it names the device in
+    /// control (show a takeover screen). Pushed whenever control changes.
+    Control {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        holder: Option<String>,
     },
 }

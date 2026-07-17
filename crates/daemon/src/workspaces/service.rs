@@ -83,6 +83,13 @@ pub struct WorkspaceService {
     /// Cached usage per account config dir (`expiry`, resolved entry). `None` = nothing to show.
     /// Avoids hitting the provider APIs on every popup open; a manual refresh skips it.
     usage_cache: Mutex<HashMap<String, (Instant, Option<soromi_protocol::AgentUsage>)>>,
+    /// The viewport that currently controls the terminals (`None` = none attached). Only its input
+    /// and resizes apply; others see a takeover. Auto-passed to a remaining viewer when it leaves.
+    controller: Mutex<Option<u64>>,
+    /// Attached viewports `(id, display name)`, in join order, for control transfer + the takeover label.
+    viewers: Mutex<Vec<(u64, String)>>,
+    /// Fires when control changes, so each viewport re-derives its own control state.
+    control_tx: broadcast::Sender<()>,
 }
 
 /// How long a stable usage result (fetched, scope-denied, or not signed in) stays cached.
@@ -117,6 +124,9 @@ impl WorkspaceService {
             dir_change_tx,
             reset_tx,
             usage_cache: Mutex::new(HashMap::new()),
+            controller: Mutex::new(None),
+            viewers: Mutex::new(Vec::new()),
+            control_tx: broadcast::channel(64).0,
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -151,6 +161,58 @@ impl WorkspaceService {
     /// Subscribes to session ids whose agent was relaunched, so viewports can re-attach.
     pub fn subscribe_resets(&self) -> broadcast::Receiver<String> {
         self.reset_tx.subscribe()
+    }
+
+    /// Subscribes to terminal-control changes, so each viewport re-derives whether it is in control.
+    pub fn subscribe_control(&self) -> broadcast::Receiver<()> {
+        self.control_tx.subscribe()
+    }
+
+    /// Registers a viewport `(id, display name)`. The first to attach becomes the controller.
+    pub fn register_viewer(&self, id: u64, name: String) {
+        {
+            let mut viewers = self.viewers.lock().unwrap();
+            viewers.push((id, name));
+            let mut controller = self.controller.lock().unwrap();
+            if controller.is_none() {
+                *controller = Some(id);
+            }
+        }
+        let _ = self.control_tx.send(());
+    }
+
+    /// Unregisters a viewport. If it held control, control passes to another remaining viewport.
+    pub fn unregister_viewer(&self, id: u64) {
+        {
+            let mut viewers = self.viewers.lock().unwrap();
+            viewers.retain(|(viewer, _)| *viewer != id);
+            let mut controller = self.controller.lock().unwrap();
+            if *controller == Some(id) {
+                *controller = viewers.first().map(|(viewer, _)| *viewer);
+            }
+        }
+        let _ = self.control_tx.send(());
+    }
+
+    /// Hands sole terminal control to a viewport (its "Take control" action).
+    pub fn take_control(&self, id: u64) {
+        *self.controller.lock().unwrap() = Some(id);
+        let _ = self.control_tx.send(());
+    }
+
+    /// Whether a viewport currently controls the terminals (drives input / owns the size).
+    pub fn is_controller(&self, id: u64) -> bool {
+        *self.controller.lock().unwrap() == Some(id)
+    }
+
+    /// The controlling viewport's display name (for a viewport that is not itself the controller).
+    pub fn controller_name(&self) -> Option<String> {
+        let controller = (*self.controller.lock().unwrap())?;
+        let viewers = self.viewers.lock().unwrap();
+        viewers
+            .iter()
+            .find(|(viewer, _)| *viewer == controller)
+            .map(|(_, name)| name.clone())
     }
 
     /// Sets whether the app window is focused. While focused, agent-event sounds and banners are
@@ -718,6 +780,12 @@ impl WorkspaceService {
             }
             None => name.to_string(),
         };
+
+        // The workspace root is a synthetic listing of its folders, so no filesystem watcher fires
+        // when they change. Push a fresh root listing so the file tree shows the new folder set.
+        if folders_changed {
+            let _ = self.dir_change_tx.send((final_name.clone(), String::new()));
+        }
 
         self.persist();
         self.emit_change();

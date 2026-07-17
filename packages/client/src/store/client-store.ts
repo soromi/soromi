@@ -61,6 +61,10 @@ interface ClientState {
   update: AppUpdate | null
   /** The update version the user dismissed; the banner stays hidden while it matches. */
   dismissedUpdate: string | null
+  /** Who controls the terminals: `null` = this viewport does (render it); otherwise the name of the
+   * device in control (show a takeover). */
+  controlHolder: string | null
+  setControlHolder: (holder: string | null) => void
   setConnected: (connected: boolean) => void
   setKeepAwake: (keepAwake: boolean) => void
   setKeepAwakeMode: (mode: KeepAwakeMode) => void
@@ -87,6 +91,8 @@ export const useClientStore = create<ClientState>()((set) => ({
   skills: {},
   update: null,
   dismissedUpdate: readDismissedUpdate(),
+  controlHolder: null,
+  setControlHolder: (controlHolder) => set({ controlHolder }),
   setConnected: (connected) => set({ connected }),
   setKeepAwake: (keepAwake) => set({ keepAwake }),
   setKeepAwakeMode: (keepAwakeMode) => set({ keepAwakeMode }),

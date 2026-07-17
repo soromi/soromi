@@ -43,6 +43,15 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   /* Mobile feel: no pull-to-refresh bounce or text-size adjust, no tap highlight. */
   overscroll-behavior: none;
+  text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Touch UX: no classic scrollbar strip on the terminal (you swipe to scroll on a phone), so the
+   full width goes to terminal columns. Overrides the desktop-oriented 12px scrollbar styling in
+   the shared terminal surface. */
+.xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
 }

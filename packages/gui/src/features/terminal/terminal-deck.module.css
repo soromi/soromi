@@ -6,6 +6,10 @@
 }
 
 .panes {
+  position: relative;
+  /* Own stacking context, so the takeover overlay's z-index stays contained to the terminal area
+     and can't paint over the status bar or its popups (usage / devices). */
+  isolation: isolate;
   flex: 1;
   min-height: 0;
   display: flex;

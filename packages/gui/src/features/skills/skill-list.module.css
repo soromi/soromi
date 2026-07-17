@@ -1,17 +1,17 @@
 .skills {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 10px;
+  padding: 0 4px;
 }
 
 .filter {
-  margin: 0 4px 8px;
-  padding: 5px 8px;
+  padding: 8px 11px;
   background: var(--soromi-bg-terminal);
   border: 1px solid var(--soromi-border);
-  border-radius: 5px;
+  border-radius: 9px;
   color: var(--soromi-text);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .filter:focus {
@@ -19,53 +19,78 @@
   border-color: var(--soromi-accent);
 }
 
+/* Card per skill: title + command chip on top, description below. */
 .skill {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  background: none;
-  border: none;
-  border-radius: 5px;
-  color: var(--soromi-text-dim);
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--soromi-bg-tab);
+  border: 1px solid var(--soromi-border);
+  border-radius: 13px;
   cursor: pointer;
   text-align: left;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
 
 .skill:hover {
   background: var(--soromi-bg-hover);
-}
-
-.head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  border-color: var(--soromi-accent-border);
 }
 
 .name {
   color: var(--soromi-text);
-  font-family: var(--mantine-font-family-monospace);
-  font-size: 12px;
+  font-size: 15px;
+  font-weight: 700;
 }
 
-.scope {
-  color: var(--soromi-text-faint);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+/* Command chip sits below the name, sized to its text. */
+.command {
+  align-self: flex-start;
+  margin-top: -2px;
+  padding: 3px 8px;
+  border: 1px solid var(--soromi-accent-border);
+  border-radius: 7px;
+  background: var(--soromi-accent-dim);
+  color: var(--soromi-accent);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .desc {
   color: var(--soromi-text-faint);
-  font-size: 11px;
+  font-size: 13px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* Kind (command / skill) + scope (user / project) tags. */
+.meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.tag {
+  padding: 2px 7px;
+  border: 1px solid var(--soromi-border);
+  border-radius: 6px;
+  color: var(--soromi-text-faint);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .empty {
-  padding: 8px;
+  padding: 12px;
   color: var(--soromi-text-faint);
-  font-size: 12px;
+  font-size: 12.5px;
 }

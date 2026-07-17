@@ -160,6 +160,8 @@ impl Session {
         }
     }
 
+    /// Resizes the PTY. Only the controlling viewport resizes (gated by the caller), so the terminal
+    /// tracks whoever is driving, not a war between differently sized viewers.
     pub fn resize(&self, cols: u16, rows: u16) {
         if let Ok(master) = self.master.lock() {
             let _ = master.resize(PtySize {

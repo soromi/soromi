@@ -10,6 +10,14 @@ import { useAppStore } from '@/stores/app-store'
 //Styles
 import styles from './skill-list.module.css'
 
+/** A human title from a command name: `code-review` -> `Code review`. */
+function humanize(name: string): string {
+  const spaced = name.replace(/[-_]/g, ' ').trim()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
+
 /**
  * The active session's slash commands and skills. Clicking one types `/name ` into the terminal
  * (it does not run), so you can add arguments and press Enter yourself.
@@ -29,15 +37,25 @@ export function SkillList() {
     if (session) transport.send({ type: 'list-skills', session })
   }, [session, transport])
 
-  const filtered = useMemo(() => {
+  // Prepare each card's view data once (title, command, description), so the JSX only renders.
+  const rows = useMemo(() => {
     const query = filter.trim().toLowerCase()
-    const items = list ?? []
-    if (!query) return items
-    return items.filter(
+    const items = (list ?? []).filter(
       (skill) =>
+        !query ||
         skill.name.toLowerCase().includes(query) ||
         (skill.description ?? '').toLowerCase().includes(query),
     )
+
+    return items.map((skill) => ({
+      key: `${skill.kind}:${skill.scope}:${skill.name}`,
+      name: skill.name,
+      title: humanize(skill.name),
+      command: `/${skill.name}`,
+      description: skill.description ?? null,
+      kind: capitalize(skill.kind),
+      scope: capitalize(skill.scope),
+    }))
   }, [list, filter])
 
   if (!session) return null
@@ -56,22 +74,24 @@ export function SkillList() {
       />
       {list === undefined ? (
         <div className={styles.empty}>Loading…</div>
-      ) : filtered.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className={styles.empty}>No skills</div>
       ) : (
-        filtered.map((skill) => (
+        rows.map((row) => (
           <button
-            key={`${skill.kind}:${skill.scope}:${skill.name}`}
+            key={row.key}
             type="button"
             className={styles.skill}
-            onClick={() => insert(skill.name)}
-            title={`Insert /${skill.name}`}
+            onClick={() => insert(row.name)}
+            title={`Insert ${row.command}`}
           >
-            <span className={styles.head}>
-              <span className={styles.name}>/{skill.name}</span>
-              <span className={styles.scope}>{skill.scope}</span>
+            <span className={styles.name}>{row.title}</span>
+            <span className={styles.command}>{row.command}</span>
+            {row.description && <span className={styles.desc}>{row.description}</span>}
+            <span className={styles.meta}>
+              <span className={styles.tag}>{row.kind}</span>
+              <span className={styles.tag}>{row.scope}</span>
             </span>
-            {skill.description && <span className={styles.desc}>{skill.description}</span>}
           </button>
         ))
       )}
