@@ -1,8 +1,5 @@
 import { useState } from 'react'
 
-//Store
-import { useUiStore } from '@/stores/ui-store'
-
 //Utils
 import { pairingUrl, parsePairingLink } from '@/config/transport'
 
@@ -12,10 +9,9 @@ import styles from './connect-screen.module.css'
 /**
  * Pairing screen: shown when the app is opened without relay config in the URL. Scanning the QR in
  * the desktop app opens the app already paired (its link carries `?relay&room&key`); this screen is
- * the fallback for pasting that link by hand. "Preview the demo" runs the standalone mock UI.
+ * the fallback for pasting that link by hand.
  */
 export function ConnectScreen() {
-  const setPaired = useUiStore((s) => s.setPaired)
   const [link, setLink] = useState('')
   const [error, setError] = useState(false)
 
@@ -33,7 +29,13 @@ export function ConnectScreen() {
   return (
     <div className={styles.screen}>
       <div className={styles.brand}>
-        <div className={styles.logo}>S</div>
+        <div className={styles.logo}>
+          <svg width="34" height="33" viewBox="0 0 57 56" fill="#2fae6a" aria-hidden="true">
+            <path d="M44.796,6.605c0,3.645 -2.959,6.605 -6.605,6.605l-31.587,0c-3.645,0 -6.605,-2.959 -6.605,-6.605c0,-3.645 2.959,-6.605 6.605,-6.605l31.587,0c3.645,0 6.605,2.959 6.605,6.605Z" />
+            <path d="M30.582,27.854c0,3.645 -2.959,6.605 -6.605,6.605l-17.373,0c-3.645,0 -6.605,-2.959 -6.605,-6.605c0,-3.645 2.959,-6.605 6.605,-6.605l17.373,0c3.645,0 6.605,2.959 6.605,6.605Z" />
+            <path d="M57,49.103c0,3.645 -2.959,6.605 -6.605,6.605l-43.791,0c-3.645,0 -6.605,-2.959 -6.605,-6.605c0,-3.645 2.959,-6.605 6.605,-6.605l43.791,0c3.645,0 6.605,2.959 6.605,6.605Z" />
+          </svg>
+        </div>
         <div className={styles.title}>Soromi</div>
         <div className={styles.subtitle}>Remote control for your coding agents</div>
       </div>
@@ -69,10 +71,6 @@ export function ConnectScreen() {
           Connect
         </button>
       </div>
-
-      <button type="button" className={styles.hint} onClick={() => setPaired(true)}>
-        Preview the demo
-      </button>
     </div>
   )
 }

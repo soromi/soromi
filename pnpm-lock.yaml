@@ -63,57 +63,6 @@ importers:
 
   packages/gui:
     dependencies:
-      '@codemirror/lang-cpp':
-        specifier: ^6.0.2
-        version: 6.0.3
-      '@codemirror/lang-css':
-        specifier: ^6.3.1
-        version: 6.3.1
-      '@codemirror/lang-go':
-        specifier: ^6.0.1
-        version: 6.0.1
-      '@codemirror/lang-html':
-        specifier: ^6.4.9
-        version: 6.4.11
-      '@codemirror/lang-java':
-        specifier: ^6.0.1
-        version: 6.0.2
-      '@codemirror/lang-javascript':
-        specifier: ^6.2.2
-        version: 6.2.5
-      '@codemirror/lang-json':
-        specifier: ^6.0.1
-        version: 6.0.2
-      '@codemirror/lang-markdown':
-        specifier: ^6.3.1
-        version: 6.5.0
-      '@codemirror/lang-python':
-        specifier: ^6.1.6
-        version: 6.2.1
-      '@codemirror/lang-rust':
-        specifier: ^6.0.1
-        version: 6.0.2
-      '@codemirror/lang-sql':
-        specifier: ^6.8.0
-        version: 6.10.0
-      '@codemirror/lang-yaml':
-        specifier: ^6.1.1
-        version: 6.1.3
-      '@codemirror/language':
-        specifier: ^6.10.8
-        version: 6.12.4
-      '@codemirror/legacy-modes':
-        specifier: ^6.4.2
-        version: 6.5.3
-      '@codemirror/state':
-        specifier: ^6.5.0
-        version: 6.7.0
-      '@codemirror/view':
-        specifier: ^6.36.1
-        version: 6.43.5
-      '@lezer/highlight':
-        specifier: ^1.2.1
-        version: 1.2.3
       '@mantine/core':
         specifier: ^7.15.0
         version: 7.17.8(@mantine/hooks@7.17.8(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -132,6 +81,9 @@ importers:
       '@soromi/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@soromi/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -197,6 +149,76 @@ importers:
         specifier: ^4.19.2
         version: 4.23.0
 
+  packages/ui:
+    dependencies:
+      '@codemirror/lang-cpp':
+        specifier: ^6.0.2
+        version: 6.0.3
+      '@codemirror/lang-css':
+        specifier: ^6.3.1
+        version: 6.3.1
+      '@codemirror/lang-go':
+        specifier: ^6.0.1
+        version: 6.0.1
+      '@codemirror/lang-html':
+        specifier: ^6.4.9
+        version: 6.4.11
+      '@codemirror/lang-java':
+        specifier: ^6.0.1
+        version: 6.0.2
+      '@codemirror/lang-javascript':
+        specifier: ^6.2.2
+        version: 6.2.5
+      '@codemirror/lang-json':
+        specifier: ^6.0.1
+        version: 6.0.2
+      '@codemirror/lang-markdown':
+        specifier: ^6.3.1
+        version: 6.5.0
+      '@codemirror/lang-python':
+        specifier: ^6.1.6
+        version: 6.2.1
+      '@codemirror/lang-rust':
+        specifier: ^6.0.1
+        version: 6.0.2
+      '@codemirror/lang-sql':
+        specifier: ^6.8.0
+        version: 6.10.0
+      '@codemirror/lang-yaml':
+        specifier: ^6.1.1
+        version: 6.1.3
+      '@codemirror/language':
+        specifier: ^6.10.8
+        version: 6.12.4
+      '@codemirror/legacy-modes':
+        specifier: ^6.4.2
+        version: 6.5.3
+      '@codemirror/state':
+        specifier: ^6.5.0
+        version: 6.7.0
+      '@codemirror/view':
+        specifier: ^6.36.1
+        version: 6.43.5
+      '@lezer/highlight':
+        specifier: ^1.2.1
+        version: 1.2.3
+      '@mantine/core':
+        specifier: ^7.15.0
+        version: 7.17.8(@mantine/hooks@7.17.8(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@soromi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.18
+        version: 18.3.31
+
   packages/web:
     dependencies:
       '@mantine/core':
@@ -211,6 +233,9 @@ importers:
       '@soromi/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@soromi/ui':
+        specifier: workspace:*
+        version: link:../ui
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

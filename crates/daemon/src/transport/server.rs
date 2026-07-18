@@ -238,6 +238,19 @@ pub(crate) async fn handle_connection<S>(
         }
     });
 
+    // All this connection's background tasks. The guard aborts them and releases control on scope
+    // exit, and crucially also on cancellation: revoking a device aborts this connection's task, so
+    // the cleanup must run from `Drop`, not from code after the loop (which cancellation skips).
+    let mut tasks = vec![writer, change_task, dir_task, reset_task, control_task];
+    if let Some(task) = devices_task {
+        tasks.push(task);
+    }
+    let _guard = ConnectionGuard {
+        hub: hub.clone(),
+        viewer_id,
+        tasks,
+    };
+
     let mut connection = Connection::new(hub.clone(), accounts, pairing, out_tx, viewer_id);
     while let Some(Ok(message)) = source.next().await {
         if matches!(message, Message::Close(_)) {
@@ -255,18 +268,26 @@ pub(crate) async fn handle_connection<S>(
             connection.handle(client);
         }
     }
+}
 
-    connection.dispose();
-    // Drop this viewport; if it held control, it passes to another attached viewport.
-    hub.unregister_viewer(viewer_id);
-    change_task.abort();
-    dir_task.abort();
-    reset_task.abort();
-    control_task.abort();
-    if let Some(task) = devices_task {
-        task.abort();
+/// Aborts a connection's background tasks and releases its control claim when the connection ends,
+/// whether it returns normally or its task is cancelled (a revoked device's relay task is aborted).
+/// Cancellation drops this in scope, so the cleanup always runs: aborting the writer drops the
+/// socket (closing the relay link, so a remote viewport learns it went away), and unregistering the
+/// viewport transfers control to a remaining one (so the desktop stops showing the takeover).
+struct ConnectionGuard {
+    hub: Arc<WorkspaceService>,
+    viewer_id: u64,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+        self.hub.unregister_viewer(self.viewer_id);
     }
-    writer.abort();
 }
 
 /// Parses a relay presence control frame (`{"__relay":"presence","peers":n}`), returning whether

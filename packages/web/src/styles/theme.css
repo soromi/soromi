@@ -1,26 +1,6 @@
+/* The color palette is shared via `@soromi/ui/theme.css` (imported first in main.tsx). This holds
+   the web-only tokens and mobile base styles. */
 :root {
-  /* Warm-neutral dark palette (mirrors the desktop app). */
-  --soromi-bg-app: #0a0a0b;
-  --soromi-bg-rail: #0b0b0c;
-  --soromi-bg-sidebar: #0f0f11;
-  --soromi-bg-tab: #0d0d0f;
-  --soromi-bg-terminal: #0a0a0b;
-  --soromi-bg-hover: #19191c;
-  --soromi-bg-active: #242427;
-  --soromi-border: #242427;
-  --soromi-border-subtle: #1a1a1d;
-  --soromi-text: #f0f0f0;
-  --soromi-text-dim: #c9c9cc;
-  --soromi-text-faint: #6a6a6e;
-
-  /* Emerald accent. */
-  --soromi-accent: #3ecf8e;
-  --soromi-accent-dim: #143024;
-  --soromi-accent-border: #24523c;
-  --soromi-accent-on: #08321f;
-  --soromi-warn: #d9a53f;
-  --soromi-ok: #3ecf8e;
-
   /* Safe-area insets (notch / home indicator). */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

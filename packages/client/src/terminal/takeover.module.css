@@ -1,0 +1,122 @@
+.cover {
+  position: absolute;
+  inset: 0;
+  /* Above the terminal, contained to its stacking context by the deck's `isolation`. */
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 40px;
+  text-align: center;
+  background: var(--soromi-bg-terminal, #0a0a0b);
+}
+
+/* Two overlapping devices: a laptop with a phone in front, the phone lit amber (it holds control). */
+.icon {
+  position: relative;
+  width: 88px;
+  height: 66px;
+  flex: none;
+}
+
+.laptopScreen {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 60px;
+  height: 40px;
+  border-radius: 7px;
+  background: #141416;
+  border: 1.5px solid #2c2c31;
+}
+
+.laptopBase {
+  position: absolute;
+  left: 6px;
+  top: 42px;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2c2c31;
+}
+
+.phone {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 34px;
+  height: 52px;
+  border-radius: 8px;
+  background: #161618;
+  border: 1.5px solid #37373d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: -6px 0 16px rgb(0 0 0 / 50%);
+}
+
+.phoneDot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #e0b341;
+  box-shadow: 0 0 0 4px rgb(224 179 65 / 15%);
+  animation: takeover-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes takeover-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgb(224 179 65 / 15%);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgb(224 179 65 / 0%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phoneDot {
+    animation: none;
+  }
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--soromi-text, #ededf0);
+}
+
+.desc {
+  margin-top: 6px;
+  max-width: 340px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #8a8a8e;
+}
+
+.device {
+  color: var(--soromi-text, #e6e6e6);
+  font-weight: 600;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border: none;
+  border-radius: 10px;
+  background: #e0b341;
+  color: #2a1e02;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.button:hover {
+  background: #ecc456;
+}

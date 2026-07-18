@@ -15,6 +15,7 @@ export abstract class WebSocketTransport implements Transport {
   private readonly messageListeners = new Set<(message: ServerMessage) => void>()
   private readonly openListeners = new Set<() => void>()
   private readonly closeListeners = new Set<() => void>()
+  private readonly presenceListeners = new Set<(present: boolean) => void>()
   private queued: ClientMessage[] = []
   private closedByUser = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -39,6 +40,17 @@ export abstract class WebSocketTransport implements Transport {
 
   connect(): void {
     this.closedByUser = false
+    // Drop any existing socket first (e.g. a manual "Reconnect" tapped while one is still open),
+    // detaching its handlers so it neither fires our close listeners nor schedules a reconnect.
+    // Otherwise two sockets share the relay room and the peer count reads as a phantom daemon.
+    const previous = this.socket
+    if (previous) {
+      previous.onopen = null
+      previous.onmessage = null
+      previous.onclose = null
+      previous.close()
+    }
+
     const socket = new WebSocket(this.url)
     socket.binaryType = 'arraybuffer'
     socket.onopen = () => {
@@ -48,6 +60,15 @@ export abstract class WebSocketTransport implements Transport {
       for (const listener of this.openListeners) listener()
     }
     socket.onmessage = (event) => {
+      // Relay presence control frames arrive as plaintext text, even on an encrypted link; they are
+      // not daemon messages. On a relay link they report whether the daemon peer is attached.
+      if (typeof event.data === 'string') {
+        const present = parsePresence(event.data)
+        if (present !== null) {
+          for (const listener of this.presenceListeners) listener(present)
+          return
+        }
+      }
       const message = this.decode(event.data)
       if (message === null) return
       for (const listener of this.messageListeners) listener(message)
@@ -89,6 +110,13 @@ export abstract class WebSocketTransport implements Transport {
     }
   }
 
+  onPresence(listener: (present: boolean) => void): () => void {
+    this.presenceListeners.add(listener)
+    return () => {
+      this.presenceListeners.delete(listener)
+    }
+  }
+
   isOpen(): boolean {
     return this.socket?.readyState === WebSocket.OPEN
   }
@@ -104,6 +132,7 @@ export abstract class WebSocketTransport implements Transport {
     this.messageListeners.clear()
     this.openListeners.clear()
     this.closeListeners.clear()
+    this.presenceListeners.clear()
     this.queued = []
   }
 
@@ -114,5 +143,21 @@ export abstract class WebSocketTransport implements Transport {
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_DELAY)
       this.connect()
     }, this.reconnectDelay)
+  }
+}
+
+/**
+ * Parses a relay presence control frame (`{"__relay":"presence","peers":n}`), returning whether the
+ * other peer (the daemon) is present (`peers > 1`). Returns `null` for any other frame.
+ */
+function parsePresence(text: string): boolean | null {
+  if (!text.includes('"__relay"')) return null
+  try {
+    const value = JSON.parse(text) as { __relay?: string; peers?: number }
+    if (value.__relay !== 'presence') return null
+
+    return (value.peers ?? 0) > 1
+  } catch {
+    return null
   }
 }

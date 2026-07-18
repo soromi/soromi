@@ -1,0 +1,74 @@
+.rail {
+  width: 64px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  background: var(--soromi-bg-rail);
+  border-right: 1px solid var(--soromi-border);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: #efece1;
+  margin-bottom: 12px;
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.section {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: var(--soromi-text-faint);
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+
+.section:hover:not(:disabled):not(.active) {
+  background: var(--soromi-bg-hover);
+  color: var(--soromi-text-dim);
+}
+
+.section:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.active {
+  background: var(--soromi-accent-dim);
+  color: var(--soromi-accent);
+  box-shadow: inset 0 0 0 1px var(--soromi-accent-border);
+}
+
+/* Green active-section indicator at the rail's left edge. */
+.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--soromi-accent);
+}

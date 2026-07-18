@@ -1,0 +1,84 @@
+.cover {
+  position: fixed;
+  inset: 0;
+  /* Covers the whole app (over the shell and any Mantine portal): with no daemon there is nothing
+     usable to show, so the disconnected view replaces everything. */
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  padding-top: calc(40px + var(--safe-top));
+  background: var(--soromi-bg-app);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.glyph {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 66px;
+  height: 66px;
+  border-radius: 18px;
+  background: var(--soromi-bg-hover);
+  border: 1px solid var(--soromi-border);
+  color: var(--soromi-text-faint);
+}
+
+/* Small status badge in the bottom-right corner: a bordered circle holding a faint dot. */
+.badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #161618;
+  border: 1px solid #2f2f33;
+}
+
+.badgeDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--soromi-text-faint);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--soromi-text);
+}
+
+.desc {
+  margin-top: 5px;
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--soromi-text-faint);
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}

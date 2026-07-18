@@ -1,0 +1,55 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: var(--soromi-bg-app);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--soromi-border);
+  background: var(--soromi-bg-app);
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--soromi-text);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--soromi-text-faint);
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    background 0.12s;
+}
+
+.close:hover {
+  color: var(--soromi-text);
+  background: var(--soromi-bg-hover);
+}

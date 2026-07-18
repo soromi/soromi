@@ -1,0 +1,37 @@
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 8px;
+  background: var(--soromi-bg-app);
+  border-top: 1px solid var(--soromi-border-subtle);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 8px;
+  font-size: 12px;
+  color: var(--soromi-text-dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ok {
+  background: var(--soromi-ok);
+}
+
+.busy {
+  background: var(--soromi-warn);
+}
+
+.off {
+  background: var(--soromi-text-faint);
+}

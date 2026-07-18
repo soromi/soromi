@@ -1,0 +1,18 @@
+/* The new-session button after the tabs (the tab strip itself lives in @soromi/ui). */
+.newTab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 38px;
+  background: none;
+  border: none;
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.newTab:hover {
+  background: var(--soromi-bg-hover);
+  color: var(--soromi-text);
+}

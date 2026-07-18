@@ -1,23 +1,22 @@
 import { Menu } from '@mantine/core'
-import clsx from 'clsx'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { TakeoverScreen, TerminalSurface, useClientStore } from '@soromi/client'
+import { SessionTabs } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
 import { PROVIDERS } from '@/config/providers'
-import { colors, statusVariant } from '@/config/theme'
+import { colors } from '@/config/theme'
 
 //Components
 import { ProviderIcon } from '@/shared/provider-icon'
 
 //Icons
-import CloseIcon from '@/assets/icons/close.svg?react'
 import PlusIcon from '@/assets/icons/plus.svg?react'
 
 //Styles
@@ -25,6 +24,7 @@ import styles from './terminal-deck.module.css'
 
 //Types
 import type { Transport } from '@soromi/client'
+import type { SessionTab } from '@soromi/ui'
 import type { SessionSummary } from '@soromi/protocol'
 
 /**
@@ -89,51 +89,60 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
       account: bound ? undefined : account,
     })
   }
-  const closeTab = (id: string) => transport.send({ type: 'close-session', session: id })
+
+  // Prepare the tab view data once (label, close-ability), so the strip only renders.
+  const tabs = useMemo<SessionTab[]>(
+    () =>
+      sessions.map((session) => ({
+        id: session.id,
+        label: displayLabel(session, sessions),
+        status: session.status,
+        agent: session.agent,
+        title: session.title ?? null,
+        account: session.account,
+        canClose: sessions.length > 1,
+      })),
+    [sessions],
+  )
+
+  const newSession = (
+    <Menu position="bottom-start" width={160}>
+      <Menu.Target>
+        <button type="button" className={styles.newTab} title="New session">
+          <PlusIcon width={16} height={16} />
+        </button>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>New session</Menu.Label>
+        {availableProviders.length === 0 ? (
+          <Menu.Item disabled>No accounts configured</Menu.Item>
+        ) : (
+          availableProviders.map((provider) => (
+            <Menu.Item
+              key={provider.value}
+              leftSection={<ProviderIcon provider={provider.value} size={14} />}
+              onClick={() => openTab(provider.value)}
+            >
+              {provider.label}
+            </Menu.Item>
+          ))
+        )}
+      </Menu.Dropdown>
+    </Menu>
+  )
 
   return (
     <div className={styles.deck}>
       {workspace && (
-        <div className={styles.tabBar}>
-          <div className={styles.tabs}>
-            {sessions.map((session) => (
-              <Tab
-                key={session.id}
-                session={session}
-                label={displayLabel(session, sessions)}
-                active={session.id === currentSession}
-                onSelect={() => active && selectSession(active, session.id)}
-                onRename={(title) =>
-                  transport.send({ type: 'rename-session', session: session.id, title })
-                }
-                onClose={sessions.length > 1 ? () => closeTab(session.id) : undefined}
-              />
-            ))}
-            <Menu position="bottom-start" width={160}>
-              <Menu.Target>
-                <button type="button" className={styles.newTab} title="New session">
-                  <PlusIcon width={16} height={16} />
-                </button>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>New session</Menu.Label>
-                {availableProviders.length === 0 ? (
-                  <Menu.Item disabled>No accounts configured</Menu.Item>
-                ) : (
-                  availableProviders.map((provider) => (
-                    <Menu.Item
-                      key={provider.value}
-                      leftSection={<ProviderIcon provider={provider.value} size={14} />}
-                      onClick={() => openTab(provider.value)}
-                    >
-                      {provider.label}
-                    </Menu.Item>
-                  ))
-                )}
-              </Menu.Dropdown>
-            </Menu>
-          </div>
-        </div>
+        <SessionTabs
+          tabs={tabs}
+          activeId={currentSession}
+          onSelect={(id) => active && selectSession(active, id)}
+          onRename={(id, title) => transport.send({ type: 'rename-session', session: id, title })}
+          onClose={(id) => transport.send({ type: 'close-session', session: id })}
+          renderIcon={(agent) => <ProviderIcon provider={agent} size={16} />}
+          trailing={newSession}
+        />
       )}
       <div className={styles.panes}>
         {visited.map((id) => (
@@ -158,75 +167,4 @@ function displayLabel(session: SessionSummary, sessions: SessionSummary[]): stri
   const peers = sessions.filter((s) => !s.title && s.account === session.account)
   const index = peers.findIndex((s) => s.id === session.id)
   return index <= 0 ? session.account : `${session.account} ${index}`
-}
-
-function Tab({
-  session,
-  label,
-  active,
-  onSelect,
-  onRename,
-  onClose,
-}: {
-  session: SessionSummary
-  label: string
-  active: boolean
-  onSelect: () => void
-  onRename: (title: string) => void
-  onClose?: () => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  const startEdit = () => {
-    setDraft(session.title ?? '')
-    setEditing(true)
-  }
-  const commit = () => {
-    setEditing(false)
-    onRename(draft.trim())
-  }
-
-  return (
-    <div className={clsx(styles.tab, active && styles.tabActive)}>
-      {editing ? (
-        <input
-          // biome-ignore lint/a11y/noAutofocus: focus the field the user just opened to rename.
-          autoFocus
-          className={styles.tabInput}
-          value={draft}
-          placeholder={session.account}
-          onChange={(event) => setDraft(event.currentTarget.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              commit()
-            } else if (event.key === 'Escape') {
-              setEditing(false)
-            }
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className={styles.tabMain}
-          onClick={onSelect}
-          onDoubleClick={startEdit}
-          title="Double-click to rename"
-        >
-          <ProviderIcon provider={session.agent} size={16} />
-          <span className={styles.tabLabel}>{label}</span>
-          {session.status !== 'idle' && (
-            <span className={clsx(styles.tabDot, styles[statusVariant(session.status)])} />
-          )}
-        </button>
-      )}
-      {onClose && !editing && (
-        <button type="button" className={styles.tabClose} title="Close session" onClick={onClose}>
-          <CloseIcon width={13} height={13} />
-        </button>
-      )}
-    </div>
-  )
 }

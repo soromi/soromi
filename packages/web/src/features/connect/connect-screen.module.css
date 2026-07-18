@@ -22,10 +22,7 @@
   width: 64px;
   height: 64px;
   border-radius: 18px;
-  background: var(--soromi-accent);
-  color: var(--soromi-accent-on);
-  font-size: 30px;
-  font-weight: 800;
+  background: #efece1;
 }
 
 .title {
@@ -110,18 +107,4 @@
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-}
-
-.hint {
-  border: none;
-  background: none;
-  font-size: 12px;
-  color: var(--soromi-text-faint);
-  text-align: center;
-  cursor: pointer;
-}
-
-.hint:hover {
-  color: var(--soromi-text-dim);
-  text-decoration: underline;
 }

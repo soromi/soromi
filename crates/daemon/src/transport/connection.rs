@@ -264,12 +264,6 @@ impl Connection {
         }
     }
 
-    pub fn dispose(&mut self) {
-        for (_, handle) in self.attached.drain() {
-            handle.abort();
-        }
-    }
-
     fn send(&self, message: ServerMessage) {
         let _ = self.out.send(message);
     }
@@ -337,6 +331,17 @@ impl Connection {
             }
         });
         self.attached.insert(session_id.to_string(), handle);
+    }
+}
+
+impl Drop for Connection {
+    /// Stops the per-session output/status forwarders when the connection ends, whether it exits
+    /// normally or its task is cancelled (e.g. the device was revoked). Without this the forwarders
+    /// leak and keep the relay socket's writer alive.
+    fn drop(&mut self) {
+        for (_, handle) in self.attached.drain() {
+            handle.abort();
+        }
     }
 }
 

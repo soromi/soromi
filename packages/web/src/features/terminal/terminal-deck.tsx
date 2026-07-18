@@ -13,8 +13,9 @@ import styles from './terminal-deck.module.css'
  * Keeps a live terminal for every visited session (parked when hidden), so switching tabs or
  * workspaces is instant and preserves scrollback. The daemon owns the PTYs, so a hidden pane
  * keeps running; switching only toggles which one is visible. Never unmounts on navigation.
+ * The takeover and disconnected screens cover it when this viewport can't drive.
  */
-export function TerminalDeck({ active }: { active?: string }) {
+export function TerminalDeck({ active, fontSize }: { active?: string; fontSize: number }) {
   const transport = useTransport()
   const workspaces = useClientStore((s) => s.workspaces)
   const [visited, setVisited] = useState<string[]>([])
@@ -33,12 +34,9 @@ export function TerminalDeck({ active }: { active?: string }) {
     })
   }, [workspaces])
 
-  if (visited.length === 0) {
-    return <div className={styles.empty}>No open tabs</div>
-  }
-
   return (
     <div className={styles.deck}>
+      {visited.length === 0 && <div className={styles.empty}>No open tabs</div>}
       {visited.map((id) => (
         <TerminalSurface
           key={id}
@@ -47,7 +45,7 @@ export function TerminalDeck({ active }: { active?: string }) {
           active={id === active}
           background={colors.bgTerminal}
           foreground={colors.text}
-          fontSize={12}
+          fontSize={fontSize}
           renderer="dom"
         />
       ))}

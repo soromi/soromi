@@ -8,7 +8,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@soromi/client": ["../client/src/index.ts"]
+      "@soromi/client": ["../client/src/index.ts"],
+      "@soromi/ui/code-viewer": ["../ui/src/files/code-viewer.tsx"],
+      "@soromi/ui": ["../ui/src/index.ts"]
     }
   },
   "include": ["src"]

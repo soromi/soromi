@@ -11,9 +11,9 @@ import type { Overlay } from '@/stores/app-store'
 
 type FileOverlay = Extract<Overlay, { type: 'file' }>
 
-// The editor pulls in CodeMirror, so keep it out of the initial bundle.
+// The editor pulls in CodeMirror, so keep it out of the initial bundle. Shared with the web app.
 const CodeViewer = lazy(() =>
-  import('./code-viewer').then((module) => ({ default: module.CodeViewer })),
+  import('@soromi/ui/code-viewer').then((module) => ({ default: module.CodeViewer })),
 )
 
 /** Read-only preview of a file, overlaid on the terminal. */

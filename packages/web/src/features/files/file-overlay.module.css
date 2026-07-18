@@ -1,0 +1,23 @@
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.readonly {
+  font-size: 11px;
+  color: var(--soromi-text-faint);
+}
+
+.note {
+  padding: 16px;
+  color: var(--soromi-text-faint);
+  font-size: 13px;
+}
+
+.truncated {
+  padding: 8px 16px;
+  color: var(--soromi-text-faint);
+  font-size: 12px;
+}

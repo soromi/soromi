@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 
 //Styles
 import '@mantine/core/styles.css'
+import '@soromi/ui/theme.css'
 import '@/styles/theme.css'
 
 //Main

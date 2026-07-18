@@ -4,30 +4,20 @@ import { useShallow } from 'zustand/react/shallow'
 //Store
 import { useUiStore } from '@/stores/ui-store'
 
-//Utils
-import { assertNever } from '@/lib/assert-never'
-
 //Components
-import { SidebarDrawer } from '@/features/drawers/sidebar-drawer'
-import { WorkspacesDrawer } from '@/features/drawers/workspaces-drawer'
+import { FileOverlay } from '@/features/files/file-overlay'
 
 //Types
 import type { Overlay } from '@/stores/ui-store'
 
 /**
- * Renders the overlay stack over the persistent terminal base (mirrors the desktop's OverlayHost).
- * Escape pops the top overlay; the terminal underneath is never unmounted.
+ * Renders the full-page overlay stack over the persistent terminal base (mirrors the desktop's
+ * OverlayHost). Escape pops the top overlay; the terminal underneath is never unmounted.
  */
 export function OverlayHost() {
-  const { overlays, popOverlay, active, activeSession } = useUiStore(
-    useShallow((s) => ({
-      overlays: s.overlays,
-      popOverlay: s.popOverlay,
-      active: s.active,
-      activeSession: s.activeSession,
-    })),
+  const { overlays, popOverlay } = useUiStore(
+    useShallow((s) => ({ overlays: s.overlays, popOverlay: s.popOverlay })),
   )
-  const session = active ? activeSession[active] : undefined
 
   useEffect(() => {
     if (overlays.length === 0) return
@@ -41,27 +31,15 @@ export function OverlayHost() {
   return (
     <>
       {overlays.map((overlay) => (
-        <OverlayScreen key={overlay.id} overlay={overlay} workspace={active} session={session} />
+        <OverlayScreen key={overlay.id} overlay={overlay} />
       ))}
     </>
   )
 }
 
-function OverlayScreen({
-  overlay,
-  workspace,
-  session,
-}: {
-  overlay: Overlay
-  workspace: string | null
-  session?: string
-}) {
-  switch (overlay.type) {
-    case 'workspaces':
-      return <WorkspacesDrawer />
-    case 'sidebar':
-      return <SidebarDrawer workspace={workspace ?? undefined} session={session} />
-    default:
-      return assertNever(overlay)
-  }
+// A new overlay kind = add its `type` to the union and a branch here.
+function OverlayScreen({ overlay }: { overlay: Overlay }) {
+  if (overlay.type === 'file') return <FileOverlay overlay={overlay} />
+
+  return null
 }

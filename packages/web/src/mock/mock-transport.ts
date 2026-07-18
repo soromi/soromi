@@ -137,6 +137,11 @@ export class MockTransport implements Transport {
     }
   }
 
+  // The mock speaks directly (no relay), so daemon presence never changes.
+  onPresence(): () => void {
+    return () => {}
+  }
+
   isOpen(): boolean {
     return this.open
   }

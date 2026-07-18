@@ -1,0 +1,75 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 10px;
+  border: none;
+  border-radius: 11px;
+  background: none;
+  color: var(--soromi-text);
+  cursor: pointer;
+}
+
+.activeRow {
+  background: var(--soromi-bg-active);
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.thinking {
+  background: var(--soromi-accent);
+}
+
+.waiting {
+  background: var(--soromi-warn);
+}
+
+.blocked {
+  background: #f87171;
+}
+
+.done {
+  background: var(--soromi-ok);
+}
+
+.idle {
+  background: var(--soromi-text-faint);
+}

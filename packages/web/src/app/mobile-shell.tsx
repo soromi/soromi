@@ -1,3 +1,4 @@
+import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
@@ -7,37 +8,59 @@ import { useClientStore } from '@soromi/client'
 import { useUiStore } from '@/stores/ui-store'
 
 //Components
+import { FilesPanel } from '@/features/files/files-panel'
 import { KeyBar } from '@/features/keybar/key-bar'
-import { TabStrip } from '@/features/tabs/tab-strip'
+import { TabBar } from '@/features/nav/tab-bar'
+import { SessionMenu } from '@/features/session-menu/session-menu'
+import { SkillsPanel } from '@/features/skills/skills-panel'
 import { TerminalDeck } from '@/features/terminal/terminal-deck'
-import { TopBar } from '@/features/top-bar/top-bar'
+import { WorkspaceBar } from '@/features/workspace-bar/workspace-bar'
+import { WorkspaceSheet } from '@/features/workspaces/workspace-sheet'
 import { OverlayHost } from './overlay-host'
 
 //Styles
 import styles from './mobile-shell.module.css'
 
 /**
- * The phone shell: a persistent full-screen terminal base with a top bar and tab strip above it
- * and a key bar below. Navigation (workspaces, files/skills) is an overlay stack layered on top
- * via OverlayHost, never a swap that unmounts the terminal, the same concept as the desktop app.
+ * The phone shell: a persistent terminal base with the Files / Skills panels layered over it, a
+ * bottom tab bar to switch between them, and the workspace bar + key bar as docked chrome. The
+ * terminal deck stays mounted across tab and workspace switches, so its parked terminals survive.
  */
 export function MobileShell() {
-  const { active, activeSession } = useUiStore(
-    useShallow((s) => ({ active: s.active, activeSession: s.activeSession })),
+  const { active, activeSession, tab, keyboardVisible, fontSize } = useUiStore(
+    useShallow((s) => ({
+      active: s.active,
+      activeSession: s.activeSession,
+      tab: s.tab,
+      keyboardVisible: s.keyboardVisible,
+      fontSize: s.fontSize,
+    })),
   )
   const workspace = useClientStore((s) => s.workspaces.find((w) => w.name === active))
+  const connected = useClientStore((s) => s.connected)
   const session = active ? activeSession[active] : undefined
+
+  const showKeys = tab === 'terminal' && connected && keyboardVisible
 
   return (
     <div className={styles.shell}>
-      <TopBar />
-      {workspace && <TabStrip workspace={workspace} />}
-      {/* The deck stays mounted across workspace switches, so its parked terminals survive. */}
-      <main className={styles.terminal}>
-        <TerminalDeck active={session} />
+      <main className={styles.body}>
+        {/* The deck never unmounts; it is only hidden when another tab is on top. */}
+        <div className={clsx(styles.pane, tab !== 'terminal' && styles.hidden)}>
+          <TerminalDeck active={session} fontSize={fontSize} />
+        </div>
+        {tab === 'files' && <FilesPanel workspace={workspace?.name} />}
+        {tab === 'skills' && <SkillsPanel session={session} />}
+        {/* Full-page overlays (file view, …) cover the body, over the terminal / panels. */}
+        <OverlayHost />
       </main>
-      <KeyBar session={session} />
-      <OverlayHost />
+
+      {showKeys && <KeyBar session={session} />}
+      <WorkspaceBar />
+      <TabBar />
+
+      <WorkspaceSheet />
+      <SessionMenu />
     </div>
   )
 }

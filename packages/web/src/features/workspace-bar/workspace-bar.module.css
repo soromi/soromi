@@ -1,0 +1,96 @@
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--soromi-bg-sidebar);
+  border-top: 1px solid var(--soromi-border-subtle);
+}
+
+.switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px;
+  border: none;
+  background: none;
+  color: var(--soromi-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--soromi-accent);
+  color: var(--soromi-accent-on);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  flex: none;
+  color: var(--soromi-text-faint);
+}
+
+.meta {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.toneOk {
+  color: var(--soromi-ok);
+}
+
+.toneBusy {
+  color: var(--soromi-warn);
+}
+
+.toneOff {
+  color: var(--soromi-text-faint);
+}
+
+.menu {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: var(--soromi-text-dim);
+  cursor: pointer;
+}

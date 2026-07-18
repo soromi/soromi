@@ -28,8 +28,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      // Resolve the engine package to its source, so Vite transforms it as first-party code.
+      // Resolve the workspace packages to their source, so Vite transforms them as first-party code.
       '@soromi/client': fileURLToPath(new URL('../client/src/index.ts', import.meta.url)),
+      // Shared subpaths (specific paths listed before the package root so they win the match).
+      '@soromi/ui/theme.css': fileURLToPath(new URL('../ui/src/theme.css', import.meta.url)),
+      '@soromi/ui/code-viewer': fileURLToPath(
+        new URL('../ui/src/files/code-viewer.tsx', import.meta.url),
+      ),
+      '@soromi/ui': fileURLToPath(new URL('../ui/src/index.ts', import.meta.url)),
     },
   },
 })

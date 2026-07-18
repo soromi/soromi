@@ -1,0 +1,131 @@
+.tabBar {
+  display: flex;
+  align-items: stretch;
+  min-height: 38px;
+  background: var(--soromi-bg-tab);
+  border-bottom: 1px solid var(--soromi-border);
+}
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--soromi-border);
+  background: transparent;
+  color: var(--soromi-text-dim);
+}
+
+.tab:hover {
+  background: var(--soromi-bg-hover);
+}
+
+.tabActive,
+.tabActive:hover {
+  background: var(--soromi-bg-terminal);
+  color: var(--soromi-text);
+  /* The accent bar along the top of the active tab. */
+  box-shadow: inset 0 2px 0 var(--soromi-accent);
+}
+
+.tabMain {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 10px 0 16px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13.5px;
+  min-width: 128px;
+  max-width: 230px;
+}
+
+.tabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabInput {
+  width: 120px;
+  margin: 4px 6px;
+  padding: 2px 4px;
+  background: var(--soromi-bg-terminal);
+  border: 1px solid var(--soromi-border);
+  border-radius: 4px;
+  color: var(--soromi-text);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.tabInput:focus {
+  outline: none;
+  border-color: var(--soromi-accent);
+}
+
+.tabDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--soromi-text-faint);
+  flex: none;
+  /* Sit at the tab's right edge (label left, dot right). */
+  margin-left: auto;
+}
+
+.tabClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--soromi-text-faint);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* Keep the close target invisible until the tab is active or hovered (editor-style). */
+.tab .tabClose {
+  opacity: 0;
+}
+
+.tab:hover .tabClose,
+.tabActive .tabClose {
+  opacity: 1;
+}
+
+.tabClose:hover {
+  color: var(--soromi-text);
+  background: var(--soromi-bg-hover);
+}
+
+.thinking {
+  background: var(--soromi-accent);
+}
+
+.waiting {
+  background: var(--soromi-warn);
+}
+
+.blocked {
+  background: #f87171;
+}
+
+.done {
+  background: var(--soromi-ok);
+}

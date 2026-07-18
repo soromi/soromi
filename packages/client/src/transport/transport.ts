@@ -13,6 +13,12 @@ export interface Transport {
   onOpen(listener: () => void): () => void
   /** Fires each time the connection drops. */
   onClose(listener: () => void): () => void
+  /**
+   * Fires when the daemon peer attaches (`true`) or drops (`false`) on a relay link. A relay client
+   * stays socket-connected to the relay even after the daemon quits, so this is how a remote
+   * viewport learns the daemon went away. Never fires on a direct/local transport.
+   */
+  onPresence(listener: (present: boolean) => void): () => void
   isOpen(): boolean
   close(): void
 }

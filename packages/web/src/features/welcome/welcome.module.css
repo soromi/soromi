@@ -1,0 +1,45 @@
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  padding-top: calc(40px + var(--safe-top));
+  background: var(--soromi-bg-app);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.glyph {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 66px;
+  height: 66px;
+  border-radius: 18px;
+  background: var(--soromi-accent-dim);
+  border: 1px solid var(--soromi-accent-border);
+  color: var(--soromi-accent);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--soromi-text);
+}
+
+.desc {
+  margin-top: 5px;
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--soromi-text-faint);
+}

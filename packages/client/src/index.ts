@@ -10,6 +10,9 @@ export { TakeoverScreen } from './terminal/takeover'
 // Store (daemon-mirrored state)
 export { useClientStore } from './store/client-store'
 
+// Hooks
+export { useUsage } from './hooks/use-usage'
+
 export type { Transport } from './transport/transport'
 export type { RelayConfig } from './transport/relay-transport'
 export type { AppUpdate, WorkspaceInfo } from './store/client-store'

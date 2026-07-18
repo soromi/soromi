@@ -1,9 +1,10 @@
 import clsx from 'clsx'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
+import { FileTree as FileTreeView, flattenTree } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -14,13 +15,11 @@ import { copyText, revealInFinder } from '@/lib/host'
 //Constants
 import { isTauri } from '@/config'
 
-//Icons
-import ChevronSvg from '@/assets/icons/chevron.svg?react'
-
 //Styles
 import styles from './file-tree.module.css'
 
 //Types
+import type { FileNode } from '@soromi/ui'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
 interface MenuTarget {
@@ -31,55 +30,80 @@ interface MenuTarget {
   type: 'file' | 'dir'
 }
 
-type OpenMenu = (event: ReactMouseEvent, path: string, name: string, type: 'file' | 'dir') => void
-
-// Passed down the recursive tree so any node can open the shared context menu.
-const OpenMenuContext = createContext<OpenMenu>(() => {})
-
 /** Read-only project tree for the active workspace, lazy-loaded per folder from the daemon. */
 export function FileTree() {
   const transport = useTransport()
-  const { active, roots } = useAppStore(
-    useShallow((s) => ({
-      active: s.active,
-      roots: s.active ? s.treeListings[s.active]?.[''] : undefined,
-    })),
+  const { active, listings, expanded, selectedFile } = useAppStore(
+    useShallow((s) => {
+      const top = s.overlays.at(-1)
+      return {
+        active: s.active,
+        listings: s.active ? s.treeListings[s.active] : undefined,
+        expanded: s.active ? s.treeExpanded[s.active] : undefined,
+        selectedFile: top?.type === 'file' ? top.path : undefined,
+      }
+    }),
+  )
+  const { toggleTreeNode, openFile } = useAppStore(
+    useShallow((s) => ({ toggleTreeNode: s.toggleTreeNode, openFile: s.openFile })),
   )
   const [menu, setMenu] = useState<MenuTarget | null>(null)
 
-  const openMenu: OpenMenu = (event, path, name, type) => {
-    event.preventDefault()
-    setMenu({ x: event.clientX, y: event.clientY, path, name, type })
-  }
-
   // Fetch the root listing whenever it is missing: on first show, and again after the cache is
-  // cleared (e.g. its folders changed). Cached listings persist per workspace, so switching back
-  // is instant and never re-fetches.
+  // cleared. Cached listings persist per workspace, so switching back is instant.
   useEffect(() => {
-    if (active && roots === undefined) {
+    if (active && listings?.[''] === undefined) {
       transport.send({ type: 'list-dir', workspace: active, path: '' })
     }
-  }, [active, roots, transport])
+  }, [active, listings, transport])
+
+  // Fetch children for any directory that is expanded but not yet listed (first expand, or after
+  // the cache was cleared while it stayed open).
+  useEffect(() => {
+    if (!active || !expanded) return
+    for (const [path, isOpen] of Object.entries(expanded)) {
+      if (isOpen && listings?.[path] === undefined) {
+        transport.send({ type: 'list-dir', workspace: active, path })
+      }
+    }
+  }, [active, expanded, listings, transport])
 
   if (!active) {
     return <div className={styles.empty}>Open a workspace to see its folders.</div>
   }
 
+  const nodes = flattenTree({
+    listings: listings ?? {},
+    expanded: expanded ?? {},
+    selected: selectedFile,
+  })
+
+  const onOpenFile = (path: string) => {
+    openFile(active, path)
+    transport.send({ type: 'read-file', workspace: active, path })
+  }
+  const onContextMenu = (event: ReactMouseEvent, node: FileNode) => {
+    event.preventDefault()
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      path: node.path,
+      name: node.name,
+      type: node.type,
+    })
+  }
+
   return (
-    <OpenMenuContext.Provider value={openMenu}>
-      {roots?.map((entry) => (
-        <TreeNode
-          key={entry.name}
-          workspace={active}
-          path={entry.name}
-          name={entry.name}
-          type={entry.type}
-          ignored={entry.ignored}
-          depth={0}
-        />
-      ))}
+    <>
+      <FileTreeView
+        nodes={nodes}
+        onToggleDir={(path) => toggleTreeNode(active, path)}
+        onOpenFile={onOpenFile}
+        onContextMenu={onContextMenu}
+        emptyLabel="No folders."
+      />
       {menu && <ContextMenu workspace={active} menu={menu} onClose={() => setMenu(null)} />}
-    </OpenMenuContext.Provider>
+    </>
   )
 }
 
@@ -164,102 +188,3 @@ function ContextMenu({
     </div>
   )
 }
-
-interface TreeNodeProps {
-  workspace: string
-  path: string
-  name: string
-  type: 'file' | 'dir'
-  ignored: boolean
-  depth: number
-}
-
-function TreeNode({ workspace, path, name, type, ignored, depth }: TreeNodeProps) {
-  const transport = useTransport()
-  const openMenu = useContext(OpenMenuContext)
-  const { expanded, children, selected, toggle, openFile } = useAppStore(
-    useShallow((s) => {
-      const top = s.overlays.at(-1)
-      return {
-        expanded: s.treeExpanded[workspace]?.[path] ?? false,
-        children: s.treeListings[workspace]?.[path],
-        selected: top?.type === 'file' && top.path === path,
-        toggle: s.toggleTreeNode,
-        openFile: s.openFile,
-      }
-    }),
-  )
-
-  const indent = { paddingLeft: 8 + depth * 14 }
-
-  // Fetch children whenever this folder is open but its listing is missing: on first expand, and
-  // again if the cache was cleared (e.g. folders changed) while it stayed expanded. Without this,
-  // an expanded folder can sit empty because a plain toggle only fetches on the collapse->expand
-  // edge. (No-op for files.)
-  useEffect(() => {
-    if (type === 'dir' && expanded && children === undefined) {
-      transport.send({ type: 'list-dir', workspace, path })
-    }
-  }, [type, expanded, children, workspace, path, transport])
-
-  if (type === 'file') {
-    const open = () => {
-      openFile(workspace, path)
-      transport.send({ type: 'read-file', workspace, path })
-    }
-    return (
-      <button
-        type="button"
-        className={clsx(
-          styles.row,
-          styles.file,
-          selected && styles.selected,
-          ignored && styles.ignored,
-        )}
-        style={indent}
-        onClick={open}
-        onContextMenu={(event) => openMenu(event, path, name, type)}
-        title={name}
-      >
-        <span className={styles.gap} />
-        <span className={styles.label}>{name}</span>
-      </button>
-    )
-  }
-
-  const onToggle = () => toggle(workspace, path)
-
-  return (
-    <>
-      <button
-        type="button"
-        className={clsx(styles.row, ignored && styles.ignored)}
-        style={indent}
-        onClick={onToggle}
-        onContextMenu={(event) => openMenu(event, path, name, type)}
-        title={name}
-      >
-        <ChevronSvg
-          width={12}
-          height={12}
-          className={clsx(styles.chevron, expanded && styles.chevronOpen)}
-        />
-        <span className={styles.label}>{name}</span>
-      </button>
-      {expanded &&
-        children?.map((child) => (
-          <TreeNode
-            key={child.name}
-            workspace={workspace}
-            path={`${path}/${child.name}`}
-            name={child.name}
-            type={child.type}
-            ignored={child.ignored}
-            depth={depth + 1}
-          />
-        ))}
-    </>
-  )
-}
-
-/** Disclosure chevron: points right when collapsed, rotates down when open. */

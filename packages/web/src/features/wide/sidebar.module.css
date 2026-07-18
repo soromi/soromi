@@ -1,0 +1,65 @@
+.sidebar {
+  position: relative;
+  flex: none;
+  /* Width comes from an inline style (draggable); this is the fallback. */
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  background: var(--soromi-bg-sidebar);
+  border-right: 1px solid var(--soromi-border);
+  overflow: hidden;
+}
+
+/* Drag handle on the right edge: a wide invisible grab zone with a thin visible line on hover. */
+.resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.resizer:hover::after,
+.resizer:active::after {
+  background: var(--soromi-accent);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  height: 54px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--soromi-border);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Uppercase section label above the panel (matches the desktop sidebar). */
+.sectionLabel {
+  flex-shrink: 0;
+  padding: 14px 16px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--soromi-text-faint);
+}
