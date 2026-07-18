@@ -45,7 +45,10 @@ fn local_device_name() -> String {
 
 /// Runs a command and returns its trimmed stdout, or `None` if it failed or produced nothing.
 fn command_output(command: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(command).args(args).output().ok()?;
+    let output = std::process::Command::new(command)
+        .args(args)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -77,16 +80,7 @@ pub async fn serve(
         tokio::spawn(async move {
             if let Ok(ws) = accept_async(stream).await {
                 // Local links are trusted, so they run plaintext and can manage devices.
-                handle_connection(
-                    ws,
-                    hub,
-                    accounts,
-                    Codec::Plain,
-                    Some(pairing),
-                    None,
-                    name,
-                )
-                .await;
+                handle_connection(ws, hub, accounts, Codec::Plain, Some(pairing), None, name).await;
             }
         });
     }

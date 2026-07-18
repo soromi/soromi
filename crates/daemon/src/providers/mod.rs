@@ -5,6 +5,7 @@ use soromi_protocol::AgentUsage;
 
 pub mod claude;
 pub mod codex;
+pub mod grok;
 pub mod usage;
 
 /// What a provider needs to fetch its plan usage: the endpoint, the bearer token, and any extra
@@ -118,7 +119,7 @@ pub trait Provider: Send + Sync {
 }
 
 /// The provider registry. Add a provider by adding it here.
-const PROVIDERS: &[&dyn Provider] = &[&claude::Claude, &codex::Codex];
+const PROVIDERS: &[&dyn Provider] = &[&claude::Claude, &codex::Codex, &grok::Grok];
 
 /// The provider for a key or command basename, if known.
 pub fn provider(key: &str) -> Option<&'static dyn Provider> {

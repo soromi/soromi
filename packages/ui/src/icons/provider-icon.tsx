@@ -1,6 +1,7 @@
 //Icons
 import ClaudeIcon from './claude.svg?react'
 import CodexIcon from './codex.svg?react'
+import GrokIcon from './grok.svg?react'
 
 /** Brand marks for the AI providers, used in agent pickers and tabs. Unknown providers render nothing. */
 export function ProviderIcon({ provider, size = 16 }: { provider: string; size?: number }) {
@@ -9,6 +10,8 @@ export function ProviderIcon({ provider, size = 16 }: { provider: string; size?:
       return <ClaudeIcon width={size} height={size} />
     case 'codex':
       return <CodexIcon width={size} height={size} />
+    case 'grok':
+      return <GrokIcon width={size} height={size} />
     default:
       return null
   }
