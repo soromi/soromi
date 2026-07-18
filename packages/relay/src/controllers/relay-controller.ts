@@ -16,6 +16,12 @@ export function relayController(registry: RoomRegistry, heartbeat: Heartbeat): F
         socket.close(4000, 'missing room')
         return
       }
+      // Creating a room (being its first peer) requires the access key; joining an existing room
+      // does not. So only an authenticated daemon opens a room, and a phone joins it by id.
+      if (registry.size(room) === 0 && !authorized(request.headers[config.accessHeader])) {
+        socket.close(4003, 'unauthorized')
+        return
+      }
       if (registry.join(room, socket) === 'full') {
         socket.close(4001, 'room full')
         return
@@ -44,4 +50,10 @@ export function relayController(registry: RoomRegistry, heartbeat: Heartbeat): F
 function roomId(room: string | undefined): string | null {
   if (!room || room.length > config.maxRoomIdLength) return null
   return room
+}
+
+/** Whether a request may create a room. An empty configured key disables the gate. */
+function authorized(provided: string | string[] | undefined): boolean {
+  if (!config.accessKey) return true
+  return provided === config.accessKey
 }

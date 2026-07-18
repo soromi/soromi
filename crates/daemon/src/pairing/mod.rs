@@ -12,3 +12,8 @@ pub fn relay_url() -> String {
 pub fn web_url() -> String {
     crate::config::web_url()
 }
+
+/// The relay access key the daemon presents to create a room. Resolved from the runtime config.
+pub fn access_key() -> String {
+    crate::config::access_key()
+}

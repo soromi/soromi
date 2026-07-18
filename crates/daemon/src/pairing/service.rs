@@ -15,9 +15,11 @@ use crate::workspaces::service::WorkspaceService;
 pub struct PairingService {
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
-    /// The relay + web URLs; behind a lock so a self-host settings change applies live.
+    /// The relay + web URLs and relay access key; behind locks so a self-host settings change
+    /// applies live. The access key is presented (as a header) when dialing the relay.
     relay_url: Mutex<String>,
     web_url: Mutex<String>,
+    access_key: Mutex<String>,
     devices: Mutex<Vec<Device>>,
     /// device id -> its relay dial task, so revoking can stop it.
     connections: Mutex<HashMap<String, AbortHandle>>,
@@ -35,6 +37,7 @@ impl PairingService {
         accounts: Arc<FileAccountManager>,
         relay_url: String,
         web_url: String,
+        access_key: String,
     ) -> Arc<Self> {
         let (changed_tx, _) = broadcast::channel(16);
         let service = Arc::new(Self {
@@ -42,6 +45,7 @@ impl PairingService {
             accounts,
             relay_url: Mutex::new(relay_url),
             web_url: Mutex::new(web_url),
+            access_key: Mutex::new(access_key),
             devices: Mutex::new(load_devices()),
             connections: Mutex::new(HashMap::new()),
             connected: Arc::new(Mutex::new(HashMap::new())),
@@ -92,9 +96,9 @@ impl PairingService {
         devices.iter().map(|device| self.summary(device)).collect()
     }
 
-    /// Updates the relay + web URLs (self-host settings change). Re-dials every device onto the new
-    /// relay so the change is live, not restart-gated.
-    pub fn set_urls(&self, relay_url: String, web_url: String) {
+    /// Updates the relay + web URLs and relay access key (self-host settings change). Re-dials every
+    /// device when the relay URL or access key changed, so the change is live, not restart-gated.
+    pub fn set_remote(&self, relay_url: String, web_url: String, access_key: String) {
         *self.web_url.lock().unwrap() = web_url;
 
         let relay_changed = {
@@ -103,7 +107,13 @@ impl PairingService {
             *current = relay_url;
             changed
         };
-        if !relay_changed {
+        let key_changed = {
+            let mut current = self.access_key.lock().unwrap();
+            let changed = *current != access_key;
+            *current = access_key;
+            changed
+        };
+        if !relay_changed && !key_changed {
             return;
         }
 
@@ -134,6 +144,7 @@ impl PairingService {
             self.relay_url.lock().unwrap().clone(),
             device.room.clone(),
             device.key.clone(),
+            self.access_key.lock().unwrap().clone(),
             on_presence,
             device.name.clone(),
         );

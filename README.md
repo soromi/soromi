@@ -14,7 +14,7 @@
   <a href="#download">Download</a> &nbsp;&middot;&nbsp;
   <a href="#features">Features</a> &nbsp;&middot;&nbsp;
   <a href="#remote-access">Remote access</a> &nbsp;&middot;&nbsp;
-  <a href="#how-it-works">How it works</a> &nbsp;&middot;&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="#development">Development</a>
 </p>
 
@@ -117,6 +117,34 @@ the web client and it asks to take control again, so two devices never fight ove
 The web viewport is responsive: a full sidebar-and-tabs layout on desktop, and a bottom-tab layout
 tuned for touch on mobile.
 
+### Secure by design
+
+Remote access is off until you pair a device, and even then the link is built so nothing in the
+middle can read your session:
+
+- **🔒 End-to-end encrypted.** Frames on the relay link are sealed with XChaCha20-Poly1305. The
+  relay is a content-blind pipe that only ever forwards ciphertext, so it never sees your terminal,
+  keystrokes, or output.
+- **🚪 No open ports.** The daemon *dials out* to the relay; it never listens for inbound
+  connections. Nothing on your machine is exposed to the internet, so there's no port to scan or
+  firewall to open.
+- **🎟️ Relay access key never leaves the daemon.** The relay is gated by an access key so randoms
+  can't abuse it, but that key lives only in the daemon (config / `SOROMI_RELAY_ACCESS_KEY` /
+  Settings) and is sent as a WebSocket header when dialing, never in a URL. Only the daemon can
+  *create* a room; the web viewport only ever *joins* an existing one with the room id. So the key
+  never rides along in the pairing link, browser history, or logs, and a URL leak can't expose it.
+- **📱 Per-device keys, revocable.** Pairing a phone (via QR) mints that device its own relay room
+  and end-to-end key. Each paired device shows a live connection indicator, and you can revoke any
+  of them at any time from the paired-devices list. Rooms are strictly two-peer: even if a room id
+  leaked, an attacker would grab a slot at worst (a revocable nuisance) and still see nothing,
+  because the session is end-to-end encrypted.
+- **🔑 No downgrade.** An invalid or missing key is refused rather than silently falling back to
+  plaintext. Plaintext relay exists only for local development.
+- **🏠 Self-hostable.** Point the relay and web-viewport URLs at your own infrastructure from
+  Settings (or `~/.soromi/config.json`), no rebuild required. The relay is a small, separate,
+  content-blind service you can run yourself; public builds create rooms on the public relay with
+  zero config, while self-hosters set their own access key on the relay and in Settings.
+
 ## Why?
 
 I built Soromi because I was tired of juggling a separate editor window for every project and
@@ -181,6 +209,51 @@ Notes:
   robust across CLI versions. Sounds play with no OS permission; native notifications may prompt
   for permission once.
 
+## Architecture
+
+Soromi is one idea repeated everywhere: **the daemon is the product, and every UI is just a
+viewport onto it.** The daemon owns all state (PTYs, workspaces, accounts, the file tree,
+notifications); viewports are stateless and interchangeable. The same protocol runs over a trusted
+local socket or an end-to-end-encrypted relay, so your phone's browser and the desktop app are the
+exact same client, just a different transport.
+
+```
+            VIEWPORTS (stateless)                        
+   ╭──────────────╮   ╭────────────╮            
+   │ Desktop GUI │   │  Web PWA  │   React + Zustand + xterm.js
+   │  (Tauri)    │   │ (phone)   │   render from messages; send input
+   ╰─────┬─────╯   ╰────┬────╯            
+         │ local WS      │ relay WS (E2EE)     
+         │ (localhost)   │ XChaCha20-Poly1305  
+         │          ╭───┴───╮                
+         │          │ Relay │ content-blind pipe  
+         │          ╰───┬───╯ (forwards ciphertext)
+         │              │ dial-out, no open ports
+   ╭────┴──────────────┴──────╮         
+   │            DAEMON (Rust)          │  sole state authority
+   │  PTYs · workspaces · accounts     │  one WebSocket protocol
+   │  file tree · status · hooks       │  (single source of truth)
+   ╰──────────────┬─────────────╯         
+                   │ spawn + isolate + listen 
+   ╭──────────────┴─────────────╮         
+   │   PROVIDERS (agent CLIs)         │  one folder + one registry
+   │   Claude Code · Codex · …         │  entry per provider
+   ╰─────────────────────────╯         
+```
+
+**Principles that hold the design together:**
+
+- **The daemon is the sole state authority.** Viewports never hold authoritative state; they render
+  what the daemon sends and forward input and resize. Any viewport can drop and reattach, and
+  terminals replay their scrollback.
+- **Local and remote are the same client.** The transport is swappable (local WS vs. E2EE relay);
+  everything above it is identical, so a feature works everywhere the moment it works once.
+- **The protocol is defined once.** The wire types live in Rust (`crates/protocol`) and the
+  TypeScript types are generated from them, so the two sides can never drift.
+- **Providers are pluggable.** All provider-specific logic (launch flags, login checks, event
+  hooks, resume, skills, usage) sits behind a single `Provider` trait, so adding an agent is a new
+  folder plus one registry entry.
+
 ## How it works
 
 - The **daemon** (Rust) owns every PTY, resolves accounts into launch environments, watches
@@ -201,7 +274,10 @@ crates/
   daemon/     Rust: PTY sessions, account resolution, status, agent hooks, WS server
 packages/
   protocol/   TypeScript types generated from crates/protocol (do not edit by hand)
+  client/     Shared viewport engine + transports (local WS, E2EE relay)
+  relay/      Content-blind WebSocket relay that pairs a daemon with a remote viewport
   gui/        React + Zustand + xterm.js viewport (runs in the desktop app's webview)
+  web/        Touch-first PWA viewport for the phone/browser, on the shared engine
 apps/
   desktop/    Tauri 2 app that runs the daemon in-process
 ```

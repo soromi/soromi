@@ -199,6 +199,9 @@ pub struct RemoteConfig {
     pub relay_url: String,
     /// The base URL the pairing QR points at, where the web viewport is hosted.
     pub web_url: String,
+    /// Shared secret the daemon presents to the relay to create a room (self-host gate). Held only
+    /// on the daemon (never in a pairing link); paired phones join by room id without it.
+    pub access_key: String,
 }
 
 /// Viewport -> daemon. A discriminated union on `type`.

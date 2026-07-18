@@ -13,4 +13,9 @@ relayUrl: string,
 /**
  * The base URL the pairing QR points at, where the web viewport is hosted.
  */
-webUrl: string, };
+webUrl: string, 
+/**
+ * Shared secret the daemon presents to the relay to create a room (self-host gate). Held only
+ * on the daemon (never in a pairing link); paired phones join by room id without it.
+ */
+accessKey: string, };

@@ -80,6 +80,7 @@ async fn main() {
         accounts.clone(),
         soromi_daemon::pairing::relay_url(),
         soromi_daemon::pairing::web_url(),
+        soromi_daemon::pairing::access_key(),
     );
 
     tokio::select! {

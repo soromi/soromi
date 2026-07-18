@@ -202,8 +202,12 @@ impl Connection {
                 if let Some(pairing) = &self.pairing {
                     match crate::config::set_remote_config(&config) {
                         Ok(resolved) => {
-                            // Apply live so new pairings + existing dials use the new relay.
-                            pairing.set_urls(resolved.relay_url.clone(), resolved.web_url.clone());
+                            // Apply live so new pairings + existing dials use the new relay + key.
+                            pairing.set_remote(
+                                resolved.relay_url.clone(),
+                                resolved.web_url.clone(),
+                                resolved.access_key.clone(),
+                            );
                             self.send(ServerMessage::RemoteConfig { config: resolved });
                         }
                         Err(error) => self.send(ServerMessage::Error {

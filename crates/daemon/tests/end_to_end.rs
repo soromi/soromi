@@ -87,6 +87,7 @@ async fn resize_reaches_the_pty() {
         accounts.clone(),
         "ws://localhost:8787".to_string(),
         "http://localhost:1430".to_string(),
+        "soromi".to_string(),
     );
     tokio::spawn(serve(listener, hub, accounts, pairing));
 
@@ -168,6 +169,7 @@ async fn gui_can_create_list_attach_and_exchange_io() {
         accounts.clone(),
         "ws://localhost:8787".to_string(),
         "http://localhost:1430".to_string(),
+        "soromi".to_string(),
     );
     tokio::spawn(serve(listener, hub, accounts, pairing));
 

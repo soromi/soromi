@@ -24,16 +24,32 @@ pnpm --filter @soromi/relay dev      # watch mode (tsx)
 pnpm --filter @soromi/relay build && pnpm --filter @soromi/relay start
 ```
 
-`PORT` sets the listen port (default `8787`).
+Environment:
+
+- `PORT` sets the listen port (default `8787`).
+- `RELAY_ACCESS_KEY` is the shared secret a daemon must present (in the `x-soromi-access` header) to
+  **create** a room. The default `soromi` lets public builds reach the public relay; set your own to
+  make a self-hosted relay private. Only the daemon holds it, a paired phone joins an existing room
+  by id without it, so the key never rides in a pairing link. Empty (`RELAY_ACCESS_KEY=`) disables
+  the gate.
 
 ## Self-host (Docker)
 
-The relay is a single stateless process, so any container host works. Build from the repo root
-(the image is standalone, no monorepo tooling at runtime):
+The relay is a single stateless process, so any container host works.
+
+Every release publishes a pre-built image to GitHub Container Registry:
+
+```bash
+docker run -d --restart unless-stopped -p 8787:8787 \
+  -e RELAY_ACCESS_KEY=your-secret \
+  ghcr.io/soromi/soromi-relay:latest
+```
+
+Or build it yourself from the repo root (the image is standalone, no monorepo tooling at runtime):
 
 ```bash
 docker build -f packages/relay/Dockerfile -t soromi-relay .
-docker run -d --restart unless-stopped -p 8787:8787 soromi-relay
+docker run -d --restart unless-stopped -p 8787:8787 -e RELAY_ACCESS_KEY=your-secret soromi-relay
 # PORT overrides the listen port:
 docker run -d -e PORT=9000 -p 9000:9000 soromi-relay
 ```
@@ -48,5 +64,7 @@ instance** (pin by the `room` query param, or run a single instance).
 
 **Wiring it up.** Point the daemon and the hosted web app at your relay: set the daemon's
 `SOROMI_RELAY_URL` (or Settings -> Remote) to `wss://relay.example.com` and `SOROMI_WEB_URL` to
-where you host the web viewport. Paired devices' QR links then carry your relay + web URLs. See the
+where you host the web viewport. If you set a private `RELAY_ACCESS_KEY`, give the daemon the same
+value in Settings -> Remote -> "Relay access key" (or `SOROMI_RELAY_ACCESS_KEY`). Paired devices' QR
+links then carry your relay + web URLs (never the access key). See the
 [daemon README](../../crates/daemon/README.md#pairing-endpoints-self-host-no-rebuild).

@@ -2,6 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 
 use super::codec::Codec;
 use super::server::{PresenceSink, handle_connection};
@@ -10,6 +13,9 @@ use crate::workspaces::service::WorkspaceService;
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// The header the daemon carries its relay access key in, so the relay lets it create the room.
+const ACCESS_HEADER: &str = "x-soromi-access";
 
 /// Dials the relay (if configured via env) and runs a viewport connection over it, so a phone in
 /// the same room can drive this daemon. `SOROMI_RELAY_URL` (e.g. `ws://localhost:8787`) plus
@@ -31,17 +37,19 @@ pub fn spawn_from_env(hub: Arc<WorkspaceService>, accounts: Arc<FileAccountManag
         .ok()
         .filter(|k| !k.is_empty());
 
-    spawn(hub, accounts, url, room, key);
+    spawn(hub, accounts, url, room, key, crate::config::access_key());
 }
 
 /// Spawns the reconnecting relay client for a specific relay URL, room, and optional E2EE key
 /// (the raw env override). A missing key means plaintext (dev only); an invalid one is refused.
+/// `access_key` is presented to the relay so it lets this daemon create the room.
 pub fn spawn(
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
     url: String,
     room: String,
     key: Option<String>,
+    access_key: String,
 ) {
     // Validate the key up front, so a bad one fails loudly instead of silently sending plaintext.
     if let Some(k) = &key
@@ -56,20 +64,23 @@ pub fn spawn(
         accounts,
         endpoint(&url, &room),
         key,
+        access_key,
         None,
         "Remote device".to_string(),
     ));
 }
 
 /// Spawns a reconnecting relay client for one paired device, returning a handle so revoking the
-/// device can stop it. The key is always present (the device minted it). `name` labels it in the
-/// desktop's takeover screen when it holds control.
+/// device can stop it. The key is always present (the device minted it). `access_key` is presented
+/// to the relay to create the room; `name` labels it in the desktop's takeover screen.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_device(
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
     url: String,
     room: String,
     key: String,
+    access_key: String,
     on_presence: PresenceSink,
     name: String,
 ) -> tokio::task::AbortHandle {
@@ -78,6 +89,7 @@ pub fn spawn_device(
         accounts,
         endpoint(&url, &room),
         Some(key),
+        access_key,
         Some(on_presence),
         name,
     ))
@@ -85,18 +97,22 @@ pub fn spawn_device(
 }
 
 /// Dials `endpoint`, runs one viewport connection over it, and reconnects with backoff forever.
-/// The relay link is a plain viewport, so it never carries the pairing service (`None`).
+/// The relay link is a plain viewport, so it never carries the pairing service (`None`). The access
+/// key rides in a header, never in the URL, so it stays out of logs and pairing links.
 async fn connect_loop(
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
     endpoint: String,
     key: Option<String>,
+    access_key: String,
     on_presence: Option<PresenceSink>,
     viewer_name: String,
 ) {
     let mut backoff = INITIAL_BACKOFF;
     loop {
-        if let Ok((ws, _)) = connect_async(&endpoint).await {
+        if let Some(request) = build_request(&endpoint, &access_key)
+            && let Ok((ws, _)) = connect_async(request).await
+        {
             backoff = INITIAL_BACKOFF;
             // Encrypt when a key is set; otherwise plaintext (dev).
             let codec = match &key {
@@ -124,6 +140,17 @@ async fn connect_loop(
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
+}
+
+/// Builds the relay handshake request for `endpoint`, carrying the access key in the
+/// `x-soromi-access` header (kept out of the URL). `None` if the endpoint is not a valid URL.
+fn build_request(endpoint: &str, access_key: &str) -> Option<Request> {
+    let mut request = endpoint.into_client_request().ok()?;
+    if let Ok(value) = HeaderValue::from_str(access_key) {
+        request.headers_mut().insert(ACCESS_HEADER, value);
+    }
+
+    Some(request)
 }
 
 /// Builds the room endpoint URL: `<url>/?room=<room>`.

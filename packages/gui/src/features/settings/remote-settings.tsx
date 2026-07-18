@@ -16,6 +16,7 @@ export function RemoteSettings() {
   const transport = useTransport()
   const [relayUrl, setRelayUrl] = useState('')
   const [webUrl, setWebUrl] = useState('')
+  const [accessKey, setAccessKey] = useState('')
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -23,6 +24,7 @@ export function RemoteSettings() {
       if (message.type === 'remote-config') {
         setRelayUrl(message.config.relayUrl)
         setWebUrl(message.config.webUrl)
+        setAccessKey(message.config.accessKey)
       }
     })
     transport.send({ type: 'get-remote-config' })
@@ -33,7 +35,7 @@ export function RemoteSettings() {
   const save = () => {
     transport.send({
       type: 'set-remote-config',
-      config: { relayUrl: relayUrl.trim(), webUrl: webUrl.trim() },
+      config: { relayUrl: relayUrl.trim(), webUrl: webUrl.trim(), accessKey: accessKey.trim() },
     })
     setSaved(true)
   }
@@ -68,6 +70,13 @@ export function RemoteSettings() {
               placeholder="http://localhost:1430"
               value={webUrl}
               onChange={(event) => edit(setWebUrl)(event.currentTarget.value)}
+            />
+            <TextInput
+              label="Relay access key"
+              description="Must match the relay's RELAY_ACCESS_KEY. Only your daemon presents it; paired phones never see it."
+              placeholder="soromi"
+              value={accessKey}
+              onChange={(event) => edit(setAccessKey)(event.currentTarget.value)}
             />
             <div className={styles.remoteActions}>
               <Button onClick={save}>Save</Button>
