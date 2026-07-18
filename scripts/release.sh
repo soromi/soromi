@@ -20,6 +20,8 @@ JSON_FILES=(
   packages/client/package.json
   packages/gui/package.json
   packages/protocol/package.json
+  packages/relay/package.json
+  packages/ui/package.json
   packages/web/package.json
   apps/desktop/package.json
   "$CONF"
