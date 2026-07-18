@@ -15,10 +15,10 @@ pub fn port() -> u16 {
         .unwrap_or(DAEMON_PORT)
 }
 
-/// The relay to dial when a config value / env var is unset.
-const DEFAULT_RELAY_URL: &str = "ws://localhost:8787";
-/// The web viewport base to point pairing QRs at when unset.
-const DEFAULT_WEB_URL: &str = "http://localhost:1430";
+/// The relay to dial when a config value / env var is unset (Soromi's hosted relay).
+const DEFAULT_RELAY_URL: &str = "wss://relay.soromi.dev";
+/// The web viewport base to point pairing QRs at when unset (Soromi's hosted web app).
+const DEFAULT_WEB_URL: &str = "https://remote.soromi.dev";
 /// The relay access key when unset. Public builds share this default so they reach the public
 /// relay with no setup; self-hosters set their own so only their daemons can create rooms.
 const DEFAULT_ACCESS_KEY: &str = "soromi";

@@ -61,13 +61,13 @@ export function RemoteSettings() {
           <Stack gap="sm">
             <TextInput
               label="Relay URL"
-              placeholder="ws://localhost:8787"
+              placeholder="wss://relay.soromi.dev"
               value={relayUrl}
               onChange={(event) => edit(setRelayUrl)(event.currentTarget.value)}
             />
             <TextInput
               label="Web app URL"
-              placeholder="http://localhost:1430"
+              placeholder="https://remote.soromi.dev"
               value={webUrl}
               onChange={(event) => edit(setWebUrl)(event.currentTarget.value)}
             />
