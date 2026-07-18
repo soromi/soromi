@@ -218,27 +218,29 @@ local socket or an end-to-end-encrypted relay, so your phone's browser and the d
 exact same client, just a different transport.
 
 ```
-            VIEWPORTS (stateless)                        
-   ╭──────────────╮   ╭────────────╮            
-   │ Desktop GUI │   │  Web PWA  │   React + Zustand + xterm.js
-   │  (Tauri)    │   │ (phone)   │   render from messages; send input
-   ╰─────┬─────╯   ╰────┬────╯            
-         │ local WS      │ relay WS (E2EE)     
-         │ (localhost)   │ XChaCha20-Poly1305  
-         │          ╭───┴───╮                
-         │          │ Relay │ content-blind pipe  
-         │          ╰───┬───╯ (forwards ciphertext)
-         │              │ dial-out, no open ports
-   ╭────┴──────────────┴──────╮         
-   │            DAEMON (Rust)          │  sole state authority
-   │  PTYs · workspaces · accounts     │  one WebSocket protocol
-   │  file tree · status · hooks       │  (single source of truth)
-   ╰──────────────┬─────────────╯         
-                   │ spawn + isolate + listen 
-   ╭──────────────┴─────────────╮         
-   │   PROVIDERS (agent CLIs)         │  one folder + one registry
-   │   Claude Code · Codex · …         │  entry per provider
-   ╰─────────────────────────╯         
+          VIEWPORTS (stateless)
+    ┌───────────────┐     ┌───────────────┐
+    │  Desktop GUI  │     │    Web PWA    │     React + Zustand + xterm.js
+    │    (Tauri)    │     │    (phone)    │     render from messages, send input
+    └───────┬───────┘     └───────┬───────┘
+            │ local WS            │ relay WS (E2EE)
+            │ (localhost)         │ XChaCha20-Poly1305
+            │                     │
+            │             ┌───────┴───────┐
+            │             │     Relay     │     content-blind pipe
+            │             │               │     (forwards ciphertext)
+            │             └───────┬───────┘
+            │                     │ dial-out, no open ports
+    ┌───────┴─────────────────────┴─────────┐
+    │             DAEMON (Rust)             │   sole state authority
+    │   PTYs · workspaces · accounts        │   one WebSocket protocol
+    │   file tree · status · hooks          │   (single source of truth)
+    └───────────────────┬───────────────────┘
+                        │ spawn + isolate + listen
+    ┌───────────────────┴───────────────────┐
+    │        PROVIDERS (agent CLIs)         │   one folder + one registry
+    │    Claude Code · Codex · Grok · …     │   entry per provider
+    └───────────────────────────────────────┘
 ```
 
 **Principles that hold the design together:**

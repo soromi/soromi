@@ -780,21 +780,6 @@ section {
   font-size: 16px;
   margin-bottom: 22px;
 }
-.soon {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--warn);
-  border: 1px solid rgba(224, 179, 65, 0.35);
-  background: rgba(224, 179, 65, 0.08);
-  padding: 3px 10px;
-  border-radius: 999px;
-  vertical-align: middle;
-  margin-left: 10px;
-  white-space: nowrap;
-}
 .remote-points {
   list-style: none;
   display: flex;
