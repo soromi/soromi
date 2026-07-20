@@ -262,6 +262,11 @@ pub enum ClientMessage {
     RemoveSpace {
         workspace: String,
     },
+    /// Reorders the workspaces to match `order` (the full list of workspace names, top to bottom).
+    /// Persisted and broadcast, so the new order shows on every viewport.
+    ReorderSpaces {
+        order: Vec<String>,
+    },
     MuteWorkspace {
         workspace: String,
         muted: bool,

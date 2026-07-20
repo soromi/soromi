@@ -163,6 +163,13 @@ function ContextMenu({
         >
           Copy path
         </button>
+        <button
+          type="button"
+          className={styles.menuItem}
+          onClick={() => run(() => copyText(menu.path))}
+        >
+          Copy relative path
+        </button>
         {isTauri && (
           <button
             type="button"

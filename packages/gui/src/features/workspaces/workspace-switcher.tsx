@@ -4,7 +4,8 @@ import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
-import { useClientStore } from '@soromi/client'
+import { useClientStore, useTransport } from '@soromi/client'
+import { DragHandle, useReorder } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -29,6 +30,7 @@ const abbreviate = (name: string) => name.slice(0, 2).replace(/^./, (c) => c.toU
  * needs review", "Active now"). Finished-but-unseen workspaces surface a "View" affordance.
  */
 export function WorkspaceSwitcher() {
+  const transport = useTransport()
   const workspaces = useClientStore((s) => s.workspaces)
   const { active, needsReview, select, applyStatuses, openCreateSpace, openWorkspaceSettings } =
     useAppStore(
@@ -60,10 +62,17 @@ export function WorkspaceSwitcher() {
     return { count: others.length, tone: urgent ? 'attention' : 'finished' }
   }, [workspaces, active, needsReview])
 
+  // Drag-to-reorder: the daemon persists the new order and broadcasts it back to every viewport.
+  const { ordered, dragging, dragHandle, rowAttrs } = useReorder(
+    workspaces,
+    (w) => w.name,
+    (order) => transport.send({ type: 'reorder-spaces', order }),
+  )
+
   // Prepare each row's view data once, so the map below only renders (no per-item logic).
   const rows = useMemo(
     () =>
-      workspaces.map((workspace, index) => {
+      ordered.map((workspace, index) => {
         const isActive = workspace.name === active
         const review = Boolean(needsReview[workspace.name])
         const rawTone = statusTone(workspace.status)
@@ -81,7 +90,7 @@ export function WorkspaceSwitcher() {
           shortcut: index < 9 ? `${modLabel}${index + 1}` : undefined,
         }
       }),
-    [workspaces, active, needsReview],
+    [ordered, active, needsReview],
   )
 
   return (
@@ -121,8 +130,18 @@ export function WorkspaceSwitcher() {
         {rows.map((row) => (
           <Menu.Item
             key={row.name}
-            className={clsx(styles.row, row.isActive && styles.rowActive)}
-            leftSection={<span className={styles.rowAvatar}>{row.avatar}</span>}
+            {...rowAttrs(row.name)}
+            className={clsx(
+              styles.row,
+              row.isActive && styles.rowActive,
+              dragging === row.name && styles.dragging,
+            )}
+            leftSection={
+              <span className={styles.rowLead}>
+                <DragHandle {...dragHandle(row.name)} />
+                <span className={styles.rowAvatar}>{row.avatar}</span>
+              </span>
+            }
             rightSection={
               row.isActive ? (
                 <CheckSvg width={15} height={15} className={styles.check} />

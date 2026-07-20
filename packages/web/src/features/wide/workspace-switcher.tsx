@@ -4,7 +4,8 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
-import { useClientStore } from '@soromi/client'
+import { useClientStore, useTransport } from '@soromi/client'
+import { DragHandle, useReorder } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
@@ -19,15 +20,22 @@ const abbreviate = (name: string) => name.slice(0, 2).replace(/^./, (c) => c.toU
 
 /** The sidebar header's workspace switcher: current workspace + a dropdown to jump between them. */
 export function WorkspaceSwitcher() {
+  const transport = useTransport()
   const workspaces = useClientStore((s) => s.workspaces)
   const { active, select } = useUiStore(useShallow((s) => ({ active: s.active, select: s.select })))
 
   const current = workspaces.find((w) => w.name === active)
   const currentTone = current ? statusTone(current.status) : 'idle'
 
+  const { ordered, dragging, dragHandle, rowAttrs } = useReorder(
+    workspaces,
+    (w) => w.name,
+    (order) => transport.send({ type: 'reorder-spaces', order }),
+  )
+
   const rows = useMemo(
     () =>
-      workspaces.map((workspace) => {
+      ordered.map((workspace) => {
         const isActive = workspace.name === active
         const tone = statusTone(workspace.status)
 
@@ -40,7 +48,7 @@ export function WorkspaceSwitcher() {
           label: statusLabel(workspace.status, isActive),
         }
       }),
-    [workspaces, active],
+    [ordered, active],
   )
 
   return (
@@ -79,7 +87,14 @@ export function WorkspaceSwitcher() {
         {rows.map((row) => (
           <Menu.Item
             key={row.name}
-            leftSection={<span className={styles.rowAvatar}>{row.avatar}</span>}
+            {...rowAttrs(row.name)}
+            className={clsx(dragging === row.name && styles.dragging)}
+            leftSection={
+              <span className={styles.rowLead}>
+                <DragHandle {...dragHandle(row.name)} />
+                <span className={styles.rowAvatar}>{row.avatar}</span>
+              </span>
+            }
             rightSection={
               row.isActive ? (
                 <svg

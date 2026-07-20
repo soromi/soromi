@@ -1,5 +1,8 @@
 import clsx from 'clsx'
 
+//Components
+import { FileIcon, FolderIcon } from './file-icon'
+
 //Styles
 import styles from './file-tree.module.css'
 
@@ -84,6 +87,7 @@ export function FileTree({
           ) : (
             <span className={styles.gap} />
           )}
+          {node.type === 'dir' ? <FolderIcon /> : <FileIcon name={node.name} />}
           <span className={styles.label}>{node.name}</span>
         </button>
       ))}

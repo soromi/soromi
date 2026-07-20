@@ -1,0 +1,18 @@
+.handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  color: var(--soromi-text-faint);
+  cursor: grab;
+  transition: color 0.12s;
+}
+
+.handle:hover {
+  color: var(--soromi-text-dim);
+}
+
+.handle:active {
+  cursor: grabbing;
+}

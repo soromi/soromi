@@ -8,18 +8,31 @@
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  padding: 12px 10px;
-  border: none;
+  padding: 8px 10px;
   border-radius: 11px;
-  background: none;
   color: var(--soromi-text);
+}
+
+/* The tap-to-select area (everything but the drag handle). */
+.tap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
   cursor: pointer;
 }
 
 .activeRow {
   background: var(--soromi-bg-active);
+}
+
+.dragging {
+  opacity: 0.6;
+  background: var(--soromi-bg-hover);
 }
 
 .avatar {

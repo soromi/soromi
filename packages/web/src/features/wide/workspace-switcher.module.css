@@ -77,6 +77,12 @@
 }
 
 /* Rows. */
+.rowLead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .rowAvatar {
   display: flex;
   align-items: center;
@@ -88,6 +94,11 @@
   color: var(--soromi-accent-on);
   font-size: 12px;
   font-weight: 700;
+}
+
+.dragging {
+  opacity: 0.6;
+  background: var(--soromi-bg-hover);
 }
 
 .rowText {

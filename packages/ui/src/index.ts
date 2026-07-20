@@ -16,6 +16,9 @@ export type { SessionTab, SessionTabsProps } from './sessions/session-tabs'
 
 export { ProviderIcon } from './icons/provider-icon'
 
+export { useReorder } from './hooks/use-reorder'
+export { DragHandle } from './drag-handle'
+
 export { theme } from './mantine-theme'
 
 export { UsageWidget } from './usage/usage-widget'

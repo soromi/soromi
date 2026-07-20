@@ -83,6 +83,7 @@ impl Connection {
                 }),
             },
             ClientMessage::RemoveSpace { workspace } => self.hub.remove_space(&workspace),
+            ClientMessage::ReorderSpaces { order } => self.hub.reorder_spaces(&order),
             ClientMessage::UpdateSpace {
                 workspace,
                 name,

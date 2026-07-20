@@ -448,6 +448,23 @@ impl WorkspaceService {
         self.emit_change();
     }
 
+    /// Reorders the spaces to match `order` (workspace names, top to bottom). Names not in `order`
+    /// keep their relative position at the end, so a stale/partial list never drops a workspace.
+    pub fn reorder_spaces(&self, order: &[String]) {
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            let rank: std::collections::HashMap<&str, usize> = order
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.as_str(), i))
+                .collect();
+            // A stable sort by rank (unlisted names get `len`, so they trail in their current order).
+            metadata.sort_by_key(|(name, _)| *rank.get(name.as_str()).unwrap_or(&order.len()));
+        }
+        self.persist();
+        self.emit_change();
+    }
+
     /// Returns a live session by its id.
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
         self.manager.get(id)
@@ -1330,6 +1347,43 @@ mod tests {
         assert_eq!(names, vec!["after".to_string()]);
 
         service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn reorder_spaces_reorders_and_persists() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let hub = service();
+        for name in ["a", "b", "c"] {
+            hub.create_space(CreateSpaceInput {
+                name: name.into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "bash".into(),
+                account: "personal".into(),
+                folders: Some(vec![".".into()]),
+            })
+            .unwrap();
+        }
+
+        let names = |s: &WorkspaceService| -> Vec<String> {
+            s.summaries().into_iter().map(|x| x.name).collect()
+        };
+        assert_eq!(names(&hub), ["a", "b", "c"]);
+
+        // Move "c" to the front; the rest keep their relative order.
+        hub.reorder_spaces(&["c".into(), "a".into(), "b".into()]);
+        assert_eq!(names(&hub), ["c", "a", "b"]);
+        hub.dispose();
+
+        // Persisted: a fresh service restores the new order.
+        let restored = service();
+        assert_eq!(names(&restored), ["c", "a", "b"]);
+
+        restored.dispose();
         crate::home::set_soromi_home(None);
     }
 

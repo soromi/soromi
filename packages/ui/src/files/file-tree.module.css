@@ -1,7 +1,7 @@
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
   box-sizing: border-box;
   padding: 4px 8px;

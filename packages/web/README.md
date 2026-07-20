@@ -41,3 +41,19 @@ The build (`pnpm --filter @soromi/web build`) emits a static bundle in `dist/` p
 is a plain static site: host `dist/` anywhere (any static host / CDN), then point the daemon's
 `SOROMI_WEB_URL` at that origin so paired devices' QR links resolve to it. The web app talks only to
 the relay (`SOROMI_RELAY_URL`), never to the daemon directly.
+
+To serve it yourself, `pnpm --filter @soromi/web serve` runs a small Express static server (`server.mjs`,
+SPA fallback + PWA-aware cache headers) on `PORT` (default `8080`).
+
+## Docker image
+
+Each release publishes an image to GHCR (`.github/workflows/web-image.yml`). Pull and run it, or
+build it locally from the repo root:
+
+```bash
+docker run -p 8080:8080 ghcr.io/soromi/soromi-web:latest
+# or build it: docker build -f packages/web/Dockerfile -t soromi-web .
+```
+
+The image is fully static and host-agnostic (the relay lives in each pairing link), so there is
+nothing to configure; override the listen port with `-e PORT=…`.
