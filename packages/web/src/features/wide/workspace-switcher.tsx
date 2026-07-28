@@ -1,11 +1,16 @@
-import { Menu } from '@mantine/core'
-import clsx from 'clsx'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
-import { DragHandle, useReorder } from '@soromi/ui'
+import {
+  DragHandle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  cn,
+  useReorder,
+} from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
@@ -13,16 +18,37 @@ import { useUiStore } from '@/stores/ui-store'
 //Utils
 import { statusLabel, statusTone } from '@/lib/status'
 
-//Styles
-import styles from './workspace-switcher.module.css'
-
 const abbreviate = (name: string) => name.slice(0, 2).replace(/^./, (c) => c.toUpperCase())
+
+/** A status dot: base shape plus a tone background. */
+const DOT = 'h-[7px] w-[7px] flex-none rounded-full'
+const DOT_TONE: Record<string, string> = {
+  running: 'bg-[var(--soromi-warn)]',
+  attention: 'bg-[var(--soromi-warn)]',
+  finished: 'bg-[var(--soromi-ok)]',
+  idle: 'bg-[var(--soromi-text-faint)]',
+  active: 'bg-[var(--soromi-text-faint)]',
+}
+
+/** Tone text color for a row's status line (base is faint; running / finished recolor it). */
+const ROW_STATUS_TONE: Record<string, string> = {
+  running: 'text-[var(--soromi-warn)]',
+  attention: 'text-[var(--soromi-warn)]',
+  finished: 'text-[var(--soromi-ok)]',
+  idle: '',
+  active: '',
+}
+
+/** A small square avatar tile (workspace initials). */
+const AVATAR =
+  'flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-[var(--soromi-accent)] font-bold text-[var(--soromi-accent-on)] text-xs'
 
 /** The sidebar header's workspace switcher: current workspace + a dropdown to jump between them. */
 export function WorkspaceSwitcher() {
   const transport = useTransport()
   const workspaces = useClientStore((s) => s.workspaces)
   const { active, select } = useUiStore(useShallow((s) => ({ active: s.active, select: s.select })))
+  const [open, setOpen] = useState(false)
 
   const current = workspaces.find((w) => w.name === active)
   const currentTone = current ? statusTone(current.status) : 'idle'
@@ -43,25 +69,40 @@ export function WorkspaceSwitcher() {
           name: workspace.name,
           avatar: abbreviate(workspace.name),
           isActive,
-          tone: isActive ? 'active' : tone,
-          showStatus: isActive || tone !== 'idle',
-          label: statusLabel(workspace.status, isActive),
+          tone,
+          showStatus: tone !== 'idle',
+          label: statusLabel(workspace.status),
         }
       }),
     [ordered, active],
   )
 
+  // `appearance-none` resets WebKit's native button chrome; the transparent border keeps rows the
+  // same height whether or not the active one colors its border.
+  const rowClass =
+    'flex w-full appearance-none items-center gap-2.5 rounded-md border border-transparent bg-transparent px-2.5 py-2 text-left text-foreground hover:bg-muted'
+
   return (
-    <Menu position="bottom-start" width={272} disabled={!active}>
-      <Menu.Target>
-        <button type="button" className={styles.switcher}>
-          <span className={styles.avatarWrap}>
-            <span className={styles.avatar}>{active ? abbreviate(active) : 'So'}</span>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild disabled={!active}>
+        <button
+          type="button"
+          className="flex w-full min-w-0 cursor-pointer appearance-none items-center gap-[9px] rounded-[10px] border-none bg-transparent px-2 py-1.5 text-[var(--soromi-text)] hover:bg-[var(--soromi-bg-hover)]"
+        >
+          <span className="relative flex-none">
+            <span className={AVATAR}>{active ? abbreviate(active) : 'So'}</span>
             {currentTone !== 'idle' && (
-              <span className={clsx(styles.avatarDot, styles[currentTone])} />
+              <span
+                className={cn(
+                  'absolute top-[-3px] right-[-3px] h-[11px] w-[11px] rounded-full border-2 border-[var(--soromi-bg-sidebar)]',
+                  DOT_TONE[currentTone],
+                )}
+              />
             )}
           </span>
-          <span className={styles.name}>{active ?? 'Soromi'}</span>
+          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left font-semibold text-[15px]">
+            {active ?? 'Soromi'}
+          </span>
           <svg
             width="14"
             height="14"
@@ -71,62 +112,75 @@ export function WorkspaceSwitcher() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className={styles.caret}
+            className="flex-shrink-0 text-[var(--soromi-text-faint)]"
             aria-hidden="true"
           >
             <path d="M5 8l5 5 5-5" />
           </svg>
         </button>
-      </Menu.Target>
+      </DropdownMenuTrigger>
 
-      <Menu.Dropdown>
-        <div className={styles.head}>
-          <span className={styles.headLabel}>Workspaces</span>
+      <DropdownMenuContent align="start" className="w-[272px] space-y-0.5 p-1.5">
+        <div className="flex items-center justify-between px-3 pt-1.5 pb-2">
+          <span className="font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.08em]">
+            Workspaces
+          </span>
         </div>
 
         {rows.map((row) => (
-          <Menu.Item
+          <button
             key={row.name}
+            type="button"
             {...rowAttrs(row.name)}
-            className={clsx(dragging === row.name && styles.dragging)}
-            leftSection={
-              <span className={styles.rowLead}>
-                <DragHandle {...dragHandle(row.name)} />
-                <span className={styles.rowAvatar}>{row.avatar}</span>
-              </span>
-            }
-            rightSection={
-              row.isActive ? (
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={styles.check}
-                  aria-hidden="true"
-                >
-                  <path d="M5 12l5 5L20 7" />
-                </svg>
-              ) : undefined
-            }
-            onClick={() => select(row.name)}
+            className={cn(
+              rowClass,
+              dragging === row.name && 'bg-[var(--soromi-bg-hover)] opacity-60',
+              row.isActive && 'border-[var(--soromi-border)] bg-[var(--soromi-bg-active)]',
+            )}
+            onClick={() => {
+              select(row.name)
+              setOpen(false)
+            }}
           >
-            <span className={styles.rowText}>
-              <span className={styles.rowName}>{row.name}</span>
+            <span className="flex items-center gap-1">
+              <DragHandle {...dragHandle(row.name)} />
+              <span className={AVATAR}>{row.avatar}</span>
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium text-[var(--soromi-text)] text-sm">
+                {row.name}
+              </span>
               {row.showStatus && (
-                <span className={clsx(styles.rowStatus, styles[row.tone])}>
-                  <span className={clsx(styles.dot, styles[row.tone])} />
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1.5 text-[var(--soromi-text-faint)] text-xs',
+                    ROW_STATUS_TONE[row.tone],
+                  )}
+                >
+                  <span className={cn(DOT, DOT_TONE[row.tone])} />
                   {row.label}
                 </span>
               )}
             </span>
-          </Menu.Item>
+            {row.isActive && (
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-[var(--soromi-accent)]"
+                aria-hidden="true"
+              >
+                <path d="M5 12l5 5L20 7" />
+              </svg>
+            )}
+          </button>
         ))}
-      </Menu.Dropdown>
-    </Menu>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

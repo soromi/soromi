@@ -31,4 +31,7 @@
   --soromi-badge-personal-bg: #223345;
   --soromi-badge-work-fg: #8b7ec8;
   --soromi-badge-work-bg: #2e2a45;
+
+  /* Monospace stack for code / terminal-adjacent surfaces (replaces Mantine's font var). */
+  --soromi-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }

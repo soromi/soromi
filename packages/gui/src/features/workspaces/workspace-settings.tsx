@@ -1,11 +1,21 @@
-import { Button, Select, Switch, Textarea, TextInput } from '@mantine/core'
-import { modals } from '@mantine/modals'
-import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
+import {
+  Button,
+  ConfirmDialog,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  cn,
+} from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -22,11 +32,28 @@ import { OverlayShell } from '@/shared/overlay-shell'
 import { ProviderIcon } from '@/shared/provider-icon'
 import { FolderIcon, InstructionsIcon, UsersIcon, WarningIcon } from './settings-icons'
 
-//Styles
-import styles from './workspace-settings.module.css'
-
 //Types
 import type { AgentAccount } from '@soromi/protocol'
+
+/** A section title (small uppercase label). */
+const H2 =
+  'm-0 font-semibold text-[13px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]'
+/** The section header row. */
+const SECTION_HEAD = 'mt-9 mb-3 flex items-baseline justify-between'
+/** A bordered content card. */
+const CARD =
+  'overflow-hidden rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)]'
+/** A row inside a card (folder / notification). */
+const FOLDER_ROW =
+  'flex items-center justify-between gap-3 border-[var(--soromi-border-subtle)] border-b px-4 py-[13px]'
+/** Truncating monospace text (folder names, the export filename). */
+const MONO =
+  'overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-[var(--soromi-text-dim)] [font-family:var(--soromi-font-mono)]'
+/** The secondary caption under a row / section. */
+const FOLDER_PATH =
+  'overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-[var(--soromi-text-faint)]'
+/** The muted help paragraph. */
+const HELP = 'mt-[11px] mb-0 text-[12.5px] text-[var(--soromi-text-faint)] leading-[1.55]'
 
 const NAV = [
   { id: 'folders', label: 'Folders', icon: <FolderIcon /> },
@@ -144,18 +171,9 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     })
   }
 
+  const [removeOpen, setRemoveOpen] = useState(false)
   const exportSpace = () => transport.send({ type: 'export-space', workspace })
-  const removeSpace = () =>
-    modals.openConfirmModal({
-      title: 'Remove workspace',
-      children: <span>Remove "{workspace}"? This stops its agents.</span>,
-      labels: { confirm: 'Remove', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => {
-        transport.send({ type: 'remove-space', workspace })
-        popOverlay()
-      },
-    })
+  const removeSpace = () => setRemoveOpen(true)
 
   // Highlight the nav item for the section currently near the top of the scroll area.
   const contentRef = useRef<HTMLDivElement>(null)
@@ -188,35 +206,50 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
 
   return (
     <OverlayShell title="Workspace settings">
-      <div className={styles.body}>
+      <div className="flex min-h-0 flex-1">
         {SHOW_NAV && (
-          <nav className={styles.nav}>
-            <div className={styles.navLabel}>Settings</div>
-            {NAV.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={clsx(
-                  styles.navItem,
-                  active === item.id && styles.navActive,
-                  item.danger && styles.navDanger,
-                )}
-                onClick={() => goTo(item.id)}
-              >
-                <span className={styles.navIcon}>{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
+          <nav className="flex w-[212px] flex-none flex-col gap-[3px] border-[var(--soromi-border-subtle)] border-r px-3.5 py-6">
+            <div className="px-3 pb-2.5 font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.1em]">
+              Settings
+            </div>
+            {NAV.map((item) => {
+              const isActive = active === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={cn(
+                    'flex cursor-pointer appearance-none items-center gap-[11px] rounded-[9px] border-none bg-transparent px-3 py-[9px] text-left font-medium text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:bg-[var(--soromi-bg-hover)]',
+                    isActive && 'bg-[var(--soromi-bg-active)] text-[var(--soromi-text)]',
+                    item.danger && isActive && 'text-[#e08585]',
+                  )}
+                  onClick={() => goTo(item.id)}
+                >
+                  <span
+                    className={cn(
+                      'flex h-[18px] w-[18px] flex-none items-center justify-center text-[var(--soromi-text-faint)]',
+                      isActive && 'text-[var(--soromi-accent)]',
+                      item.danger && isActive && 'text-[#e08585]',
+                    )}
+                  >
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </button>
+              )
+            })}
           </nav>
         )}
 
-        <div ref={contentRef} className={styles.content}>
-          <div className={styles.inner}>
-            <header className={styles.wsHead}>
-              <span className={styles.avatar}>{workspace.charAt(0).toUpperCase()}</span>
+        <div ref={contentRef} className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[720px] px-7 pt-10 pb-14">
+            <header className="flex items-center gap-3.5">
+              <span className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-[var(--soromi-accent)] font-bold text-[var(--soromi-accent-on)] text-base">
+                {workspace.charAt(0).toUpperCase()}
+              </span>
               <div>
-                <div className={styles.wsName}>{workspace}</div>
-                <div className={styles.wsMeta}>
+                <div className="font-semibold text-[var(--soromi-text)] text-lg">{workspace}</div>
+                <div className="mt-[3px] text-[13px] text-[var(--soromi-text-faint)]">
                   {folderPaths.length} {folderPaths.length === 1 ? 'folder' : 'folders'} ·{' '}
                   {agents.length} {agents.length === 1 ? 'agent' : 'agents'}
                 </div>
@@ -224,40 +257,33 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
             </header>
 
             <section data-sec="name">
-              <div className={styles.sectionHead}>
-                <h2 className={styles.h2}>Name</h2>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Name</h2>
               </div>
-              <TextInput
+              <Input
+                className="rounded-[10px] bg-[var(--soromi-bg-tab)]"
                 value={name}
                 placeholder="Workspace name"
-                onChange={(event) => setName(event.currentTarget.value)}
-                styles={{
-                  input: {
-                    background: 'var(--soromi-bg-tab)',
-                    borderColor: 'var(--soromi-border)',
-                    borderRadius: 10,
-                    color: 'var(--soromi-text)',
-                  },
-                }}
+                onChange={(event) => setName(event.target.value)}
               />
             </section>
 
             <section data-sec="folders">
-              <div className={styles.sectionHead}>
-                <h2 className={styles.h2}>Folders</h2>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Folders</h2>
               </div>
-              <div className={styles.card}>
+              <div className={CARD}>
                 {folderPaths.map((path) => (
-                  <div key={path} className={styles.folderRow}>
-                    <div className={styles.folderText}>
-                      <span className={styles.mono}>{basename(path)}</span>
-                      <span className={styles.folderPath} title={path}>
+                  <div key={path} className={FOLDER_ROW}>
+                    <div className="flex min-w-0 flex-col gap-[3px]">
+                      <span className={MONO}>{basename(path)}</span>
+                      <span className={FOLDER_PATH} title={path}>
                         {path}
                       </span>
                     </div>
                     <button
                       type="button"
-                      className={clsx(styles.rowAction, styles.danger)}
+                      className="flex-none cursor-pointer appearance-none rounded-lg border-none bg-transparent px-2.5 py-[5px] font-medium text-[#e08585] text-[12.5px] transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] disabled:cursor-default disabled:opacity-35"
                       disabled={folderPaths.length <= 1}
                       onClick={() => dropFolder(path)}
                     >
@@ -265,97 +291,100 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                     </button>
                   </div>
                 ))}
-                <button type="button" className={styles.addRow} onClick={addFolder}>
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer appearance-none items-center gap-[9px] border-none bg-transparent px-4 py-[13px] font-semibold text-[13.5px] text-[var(--soromi-accent)] hover:bg-[var(--soromi-bg-hover)]"
+                  onClick={addFolder}
+                >
                   <FolderIcon /> Add folder…
                 </button>
               </div>
-              <p className={styles.help}>
+              <p className={HELP}>
                 Adding or removing folders relaunches this workspace's tabs so agents pick up the
                 new paths.
               </p>
             </section>
 
             <section data-sec="agents">
-              <div className={styles.sectionHead}>
-                <h2 className={styles.h2}>Agent accounts</h2>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Agent accounts</h2>
               </div>
-              <div className={styles.agents}>
+              <div className="flex flex-col gap-3">
                 {agentRows.map((row) => (
-                  <div key={row.agent} className={styles.agentRow}>
-                    <span className={styles.agentName}>
+                  <div
+                    key={row.agent}
+                    className="flex items-center gap-4 rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] px-4 py-3"
+                  >
+                    <span className="flex w-[130px] flex-none items-center gap-[11px] text-[var(--soromi-text)] text-sm">
                       <ProviderIcon provider={row.agent} size={16} />
                       {row.label}
                     </span>
                     <Select
-                      flex={1}
-                      data={row.options}
                       value={row.value}
-                      onChange={(value) =>
+                      onValueChange={(value) =>
                         value && setBindings((prev) => ({ ...prev, [row.agent]: value }))
                       }
-                      allowDeselect={false}
-                      styles={{
-                        input: {
-                          background: 'var(--soromi-bg-tab)',
-                          borderColor: 'var(--soromi-border)',
-                          borderRadius: 10,
-                          color: 'var(--soromi-text)',
-                        },
-                      }}
-                    />
+                    >
+                      <SelectTrigger className="flex-1 rounded-[10px] bg-[var(--soromi-bg-tab)]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {row.options.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 ))}
               </div>
-              <p className={styles.help}>
+              <p className={HELP}>
                 Each agent runs under the chosen account. Changing one relaunches its tabs.
               </p>
             </section>
 
             <section data-sec="instructions">
-              <div className={styles.sectionHead}>
-                <h2 className={styles.h2}>Instructions</h2>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Instructions</h2>
               </div>
-              <p className={styles.help} style={{ marginTop: 0, marginBottom: 11 }}>
+              <p className={HELP} style={{ marginTop: 0, marginBottom: 11 }}>
                 Appended to the agent's system prompt. Applies to new tabs (Claude only, for now).
               </p>
               <Textarea
-                autosize
-                minRows={5}
-                maxRows={14}
+                className="min-h-[120px]"
+                rows={6}
                 placeholder="e.g. This is a monorepo. Prefer pnpm. Never edit generated files."
                 value={instructions}
-                onChange={(event) => setInstructions(event.currentTarget.value)}
+                onChange={(event) => setInstructions(event.target.value)}
               />
             </section>
 
             <section data-sec="notifications">
-              <div className={styles.sectionHead}>
-                <h2 className={styles.h2}>Notifications</h2>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Notifications</h2>
               </div>
-              <div className={styles.card}>
-                <div className={styles.folderRow}>
-                  <div className={styles.folderText}>
+              <div className={CARD}>
+                <div className={FOLDER_ROW}>
+                  <div className="flex min-w-0 flex-col gap-[3px]">
                     <span>Desktop notifications</span>
-                    <span className={styles.folderPath}>
+                    <span className={FOLDER_PATH}>
                       Play a sound and show a banner when this workspace needs you (while the app is
                       in the background).
                     </span>
                   </div>
-                  <Switch
-                    checked={notificationsOn}
-                    onChange={(event) => setNotifications(event.currentTarget.checked)}
-                  />
+                  <Switch checked={notificationsOn} onCheckedChange={setNotifications} />
                 </div>
               </div>
             </section>
 
             <section data-sec="danger">
-              <div className={styles.divider} />
-              <div className={styles.dangerRow}>
-                <Button variant="default" onClick={exportSpace}>
-                  Export <span className={styles.mono}>soromi.space.json</span>
+              <div className="mt-[38px] mb-6 h-px bg-[var(--soromi-border-subtle)]" />
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" onClick={exportSpace}>
+                  Export <span className={MONO}>soromi.space.json</span>
                 </Button>
-                <Button variant="subtle" color="red" onClick={removeSpace}>
+                <Button variant="ghost" className="text-destructive" onClick={removeSpace}>
                   Remove workspace
                 </Button>
               </div>
@@ -365,19 +394,34 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       </div>
 
       {changed && (
-        <div className={styles.saveBar}>
-          <span className={styles.unsaved}>
-            <span className={styles.dot} />
+        <div className="flex flex-none items-center justify-between gap-4 border-[var(--soromi-border)] border-t bg-[var(--soromi-bg-app)] px-[26px] py-3.5">
+          <span className="flex items-center gap-[9px] text-[13px] text-[var(--soromi-text-dim)]">
+            <span className="h-2 w-2 rounded-full bg-[var(--soromi-warn)]" />
             Unsaved changes
           </span>
-          <div className={styles.saveActions}>
-            <Button variant="default" onClick={discard}>
+          <div className="flex items-center gap-2.5">
+            <Button variant="secondary" onClick={discard}>
               Discard
             </Button>
             <Button onClick={save}>Save changes</Button>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={removeOpen}
+        onOpenChange={setRemoveOpen}
+        title="Remove workspace"
+        destructive
+        confirmLabel="Remove"
+        onConfirm={() => {
+          transport.send({ type: 'remove-space', workspace })
+          popOverlay()
+          setRemoveOpen(false)
+        }}
+      >
+        Remove "{workspace}"? This stops its agents.
+      </ConfirmDialog>
     </OverlayShell>
   )
 }

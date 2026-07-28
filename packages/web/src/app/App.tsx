@@ -1,15 +1,13 @@
-import { MantineProvider } from '@mantine/core'
-import { useMediaQuery } from '@mantine/hooks'
 import { useEffect, useMemo } from 'react'
 
 //Packages
 import { TransportProvider, useClientStore } from '@soromi/client'
+import { useMediaQuery } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
 
 //Constants
-import { theme } from '@/config/theme'
 import { selectTransport } from '@/config/transport'
 
 //Components
@@ -68,6 +66,12 @@ export function App() {
         case 'control':
           client.setControlHolder(message.holder ?? null)
           break
+        case 'chat':
+          client.appendChat(message.session, message.events)
+          break
+        case 'chat-reset':
+          client.resetChat(message.session)
+          break
       }
     })
     const offOpen = transport.onOpen(() => {
@@ -93,9 +97,9 @@ export function App() {
     }
   }, [transport, remote])
 
-  // Desktop-style layout on a wide screen (a PC), the bottom-tab layout on a phone. Seeded from the
-  // current width so the right shell paints on the first frame.
-  const wide = useMediaQuery('(min-width: 860px)', window.innerWidth >= 860)
+  // Desktop-style layout on a wide screen (a PC), the bottom-tab layout on a phone. The hook seeds
+  // from the current match so the right shell paints on the first frame.
+  const wide = useMediaQuery('(min-width: 860px)')
 
   // Connected but the machine has no workspaces: show a welcome, not an empty shell. The shell (with
   // any live terminals) stays for the connected-with-workspaces case; `Disconnected` covers it all
@@ -111,12 +115,10 @@ export function App() {
   )
 
   return (
-    <MantineProvider theme={theme} forceColorScheme="dark">
-      <TransportProvider value={transport}>
-        {base}
-        {/* Covers the whole app when the daemon is unreachable, so we never show an empty shell. */}
-        {paired && <Disconnected />}
-      </TransportProvider>
-    </MantineProvider>
+    <TransportProvider value={transport}>
+      {base}
+      {/* Covers the whole app when the daemon is unreachable, so we never show an empty shell. */}
+      {paired && <Disconnected />}
+    </TransportProvider>
   )
 }

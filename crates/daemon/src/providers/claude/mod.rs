@@ -1,11 +1,13 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::AgentUsage;
+use soromi_protocol::{AgentUsage, ChatEvent, Status};
 
 use super::{Provider, UsageAuthState};
 
 mod hooks;
+mod status;
+mod transcript;
 mod usage;
 
 /// Anthropic's Claude Code.
@@ -77,6 +79,14 @@ impl Provider for Claude {
 
     fn parse_usage(&self, body: &[u8]) -> Option<AgentUsage> {
         usage::parse(body)
+    }
+
+    fn parse_status(&self, chunk: &str) -> Option<Status> {
+        status::parse(chunk)
+    }
+
+    fn parse_transcript_line(&self, line: &str) -> Vec<ChatEvent> {
+        transcript::parse_line(line)
     }
 }
 

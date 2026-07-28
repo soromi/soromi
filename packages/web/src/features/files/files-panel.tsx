@@ -8,9 +8,6 @@ import { FileTree, flattenTree } from '@soromi/ui'
 //Store
 import { useUiStore } from '@/stores/ui-store'
 
-//Styles
-import styles from './files-panel.module.css'
-
 /** The Files view: the active workspace's tree, lazy-loaded per folder from the daemon. */
 export function FilesPanel({
   workspace,
@@ -55,11 +52,17 @@ export function FilesPanel({
   }
 
   return (
-    <section className={styles.panel}>
-      {showHeading && <h2 className={styles.heading}>Files</h2>}
-      <div className={styles.list}>
+    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {showHeading && (
+        <h2 className="m-0 px-4 pt-4 pb-2 font-bold text-[13px] text-[var(--soromi-text)]">
+          Files
+        </h2>
+      )}
+      <div className="px-1.5 pb-5 text-[13px]">
         {!workspace ? (
-          <div className={styles.empty}>No workspace</div>
+          <div className="px-4 py-8 text-center text-[var(--soromi-text-faint)] text-sm">
+            No workspace
+          </div>
         ) : (
           <FileTree
             nodes={nodes}

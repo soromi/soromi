@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::AgentUsage;
+use soromi_protocol::{AgentUsage, ChatEvent, Status};
 
 pub mod claude;
 pub mod codex;
@@ -115,6 +115,23 @@ pub trait Provider: Send + Sync {
     /// recognize (an error page, a changed schema), so a bad response is simply omitted.
     fn parse_usage(&self, _body: &[u8]) -> Option<AgentUsage> {
         None
+    }
+
+    /// Derives a coarse working/waiting status from a chunk of raw PTY output. This is a fallback
+    /// for when the provider's authoritative hooks miss or aren't installed; each provider knows its
+    /// own terminal wording (Claude's whimsical spinner, Codex's TUI, ...). `None` when the chunk
+    /// carries no signal. Default: the provider offers no terminal heuristic (status stays idle
+    /// until a hook speaks).
+    fn parse_status(&self, _chunk: &str) -> Option<Status> {
+        None
+    }
+
+    /// Parses one line of this provider's on-disk transcript into chat events (chat text, tool
+    /// calls, sub-agents), which drive the chat view, the per-tab activity line, and the sub-agent
+    /// list. Each provider writes a different format (Claude's JSONL, Codex's rollout, ...). Default:
+    /// the provider has no transcript format Soromi reads, so nothing is surfaced.
+    fn parse_transcript_line(&self, _line: &str) -> Vec<ChatEvent> {
+        Vec::new()
     }
 }
 

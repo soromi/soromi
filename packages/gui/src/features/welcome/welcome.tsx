@@ -1,20 +1,18 @@
-import {
-  ActionIcon,
-  Alert,
-  Anchor,
-  Button,
-  Group,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-} from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
+import {
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -30,9 +28,6 @@ import { PROVIDERS } from '@/config/providers'
 //Components
 import { OverlayShell } from '@/shared/overlay-shell'
 import { ProviderIcon } from '@/shared/provider-icon'
-
-//Styles
-import styles from './welcome.module.css'
 
 /** The create-space form: pick work folders, choose an agent and account. */
 function CreateSpaceForm({ heading }: { heading?: boolean }) {
@@ -54,13 +49,9 @@ function CreateSpaceForm({ heading }: { heading?: boolean }) {
 
   // Only accounts with a login configured for the chosen agent's provider, plus `personal`.
   const accountOptions = useMemo(
-    () =>
-      [
-        ...new Set([
-          'personal',
-          ...accounts.filter((a) => agent in a.providers).map((a) => a.name),
-        ]),
-      ].map((n) => ({ value: n, label: n })),
+    () => [
+      ...new Set(['personal', ...accounts.filter((a) => agent in a.providers).map((a) => a.name)]),
+    ],
     [accounts, agent],
   )
 
@@ -95,113 +86,130 @@ function CreateSpaceForm({ heading }: { heading?: boolean }) {
     transport.send({ type: 'open-workspace', dir: root })
   }
 
+  const agentLabel = PROVIDERS.find((p) => p.value === agent)?.label ?? agent
+
   return (
-    <Stack gap="md" className={styles.form}>
-      {heading && <Title order={2}>New workspace</Title>}
-      <Text c="dimmed">
+    <div className="flex w-[460px] flex-col gap-4 p-6">
+      {heading && <h2 className="text-lg font-semibold text-foreground">New workspace</h2>}
+      <p className="text-sm text-muted-foreground">
         Pick one or more work folders and choose an agent and account. Nothing is written to the
         folder.
-      </Text>
+      </p>
 
-      <TextInput
-        label="Name"
-        placeholder={root ? basename(root) : 'workspace name'}
-        value={name}
-        onChange={(event) => setName(event.currentTarget.value)}
-      />
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="ws-name">Name</Label>
+        <Input
+          id="ws-name"
+          placeholder={root ? basename(root) : 'workspace name'}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
 
       <div>
-        <Text component="label" size="sm" fw={500} mb={4} display="block">
-          Folders
-        </Text>
-        <Stack gap="xs">
+        <Label className="mb-1.5 block">Folders</Label>
+        <div className="flex flex-col gap-2">
           {folderInputs.map((folder, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
-            <Group key={index} gap="xs" wrap="nowrap">
-              <TextInput
-                flex={1}
+            <div key={index} className="flex items-center gap-2">
+              <Input
+                className="flex-1"
                 placeholder="/path/to/folder"
                 value={folder}
-                onChange={(event) => updateFolder(index, event.currentTarget.value)}
+                onChange={(event) => updateFolder(index, event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') create()
                 }}
               />
               {isTauri && (
-                <Button variant="default" size="sm" onClick={() => pickFolderAt(index)}>
+                <Button variant="secondary" size="sm" onClick={() => pickFolderAt(index)}>
                   Pick
                 </Button>
               )}
               {folderInputs.length > 1 && (
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   aria-label="Remove folder"
                   onClick={() => removeFolder(index)}
                 >
                   ✕
-                </ActionIcon>
+                </Button>
               )}
-            </Group>
+            </div>
           ))}
-          <Group>
-            <Button variant="subtle" size="compact-sm" onClick={addFolder}>
+          <div>
+            <Button variant="ghost" size="sm" onClick={addFolder}>
               Add folder
             </Button>
-          </Group>
-        </Stack>
+          </div>
+        </div>
       </div>
 
-      <Group grow align="flex-start">
-        <Select
-          label="Agent"
-          data={PROVIDERS}
-          value={agent}
-          onChange={(value) => value && setAgent(value)}
-          allowDeselect={false}
-          leftSection={<ProviderIcon provider={agent} />}
-          renderOption={({ option }) => (
-            <Group gap="xs" wrap="nowrap">
-              <ProviderIcon provider={option.value} />
-              <span>{option.label}</span>
-            </Group>
-          )}
-        />
-        <Select
-          label={
-            <span className={styles.accountLabel}>
-              Account
-              <Anchor component="button" type="button" size="sm" onClick={openSettings}>
-                New account
-              </Anchor>
-            </span>
-          }
-          labelProps={{ style: { display: 'block' } }}
-          data={accountOptions}
-          value={account}
-          onChange={(value) => value && setAccount(value)}
-          allowDeselect={false}
-        />
-      </Group>
+      <div className="grid grid-cols-2 items-start gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label>Agent</Label>
+          <Select value={agent} onValueChange={(value) => value && setAgent(value)}>
+            <SelectTrigger>
+              <SelectValue>
+                <ProviderIcon provider={agent} />
+                {agentLabel}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PROVIDERS.map((provider) => (
+                <SelectItem key={provider.value} value={provider.value}>
+                  <ProviderIcon provider={provider.value} />
+                  {provider.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex w-full items-baseline justify-between gap-3">
+            <Label>Account</Label>
+            <button
+              type="button"
+              className="appearance-none border-0 bg-transparent text-sm text-primary hover:underline"
+              onClick={openSettings}
+            >
+              New account
+            </button>
+          </div>
+          <Select value={account} onValueChange={(value) => value && setAccount(value)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {accountOptions.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       {error && (
-        <Alert color="red" variant="light">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
-        </Alert>
+        </div>
       )}
       <Button onClick={create} disabled={!root}>
         Create workspace
       </Button>
-      <Button variant="subtle" size="compact-sm" onClick={importFile} disabled={!root}>
+      <Button variant="ghost" size="sm" onClick={importFile} disabled={!root}>
         Import a soromi.space.json from this folder
       </Button>
-    </Stack>
+    </div>
   )
 }
 
 /** Base view shown when there is no active workspace (first run). */
 export function Welcome() {
   return (
-    <div className={styles.center}>
+    <div className="flex flex-1 items-center justify-center">
       <CreateSpaceForm heading />
     </div>
   )
@@ -211,7 +219,7 @@ export function Welcome() {
 export function CreateSpaceOverlay() {
   return (
     <OverlayShell title="New workspace">
-      <div className={styles.center}>
+      <div className="flex flex-1 items-center justify-center">
         <CreateSpaceForm />
       </div>
     </OverlayShell>

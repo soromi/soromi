@@ -14,9 +14,6 @@ import { Sidebar } from './sidebar'
 import { SessionTabs } from './session-tabs'
 import { StatusBar } from './status-bar'
 
-//Styles
-import styles from './wide-shell.module.css'
-
 /**
  * The wide (desktop-style) web layout: a rail + sidebar + terminal, the same three-column shell as
  * the desktop app. Shown on large screens; the phone gets the bottom-tab MobileShell instead. The
@@ -34,20 +31,22 @@ export function WideShell() {
   const session = active ? activeSession[active] : undefined
 
   return (
-    <div className={styles.root}>
-      <div className={styles.shell}>
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--soromi-bg-app)] text-[var(--soromi-text)]">
+      <div className="flex min-h-0 flex-1">
         <Rail />
         <Sidebar workspace={workspace} session={session} />
-        <main className={styles.content}>
+        <main className="relative flex min-w-0 flex-1 flex-col bg-[var(--soromi-bg-terminal)]">
           {workspace ? (
             <>
               <SessionTabs workspace={workspace} />
-              <div className={styles.terminalArea}>
+              <div className="flex min-h-0 flex-1 flex-col">
                 <TerminalDeck active={session} fontSize={fontSize} />
               </div>
             </>
           ) : (
-            <div className={styles.empty}>No workspace selected</div>
+            <div className="flex flex-1 items-center justify-center text-[var(--soromi-text-faint)] text-sm">
+              No workspace selected
+            </div>
           )}
           {/* Full-page overlays (file view, …) cover the content area, over the terminal. */}
           <OverlayHost />

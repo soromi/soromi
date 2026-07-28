@@ -88,6 +88,19 @@ pub struct AgentAccount {
     pub agent: String,
 }
 
+/// A sub-agent the agent spawned this turn (a Claude `Task` call). `name` is its task description;
+/// `status` reuses the agent statuses (`thinking` = running, `done` = finished, `blocked` = errored).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct SubAgent {
+    pub name: String,
+    pub status: Status,
+}
+
 /// One running terminal (tab) within a workspace. `account` is resolved from the workspace's
 /// account bindings by matching `agent`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +118,15 @@ pub struct SessionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub title: Option<String>,
+    /// Sub-agents the agent spawned this turn (Claude `Task` calls), each with its live status.
+    /// Kept for the turn (finished ones stay, marked `done`), cleared on the next user prompt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<SubAgent>,
+    /// What the agent is currently working on — the latest in-progress tool call, e.g. "Editing
+    /// config.ts". Absent when it isn't running a tool. Shown as the tab's live subtitle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub activity: Option<String>,
 }
 
 /// Rail-facing summary of a workspace. `status` is the aggregate of its sessions.
@@ -470,4 +492,53 @@ pub enum ServerMessage {
         #[cfg_attr(feature = "ts", ts(optional))]
         holder: Option<String>,
     },
+    /// Structured transcript events for a session's chat view (the mobile viewport renders these
+    /// instead of the terminal). Sent in a batch on attach (the accumulated log) and one-at-a-time
+    /// as the transcript is tailed. A session with no transcript (no chat) simply never sends these.
+    Chat {
+        session: String,
+        events: Vec<ChatEvent>,
+    },
+    /// The session's transcript restarted (a new or resumed conversation); the chat view clears
+    /// before the fresh events arrive.
+    ChatReset {
+        session: String,
+    },
+}
+
+/// One structured entry from an agent's on-disk transcript, rendered by the mobile "chat" viewport
+/// in place of the raw terminal. The daemon tails the agent's JSONL transcript (Claude first) and
+/// parses each line into these; `id` ties a tool result back to its call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum ChatEvent {
+    /// A prompt the user sent.
+    User { text: String },
+    /// Assistant prose (markdown).
+    Assistant { text: String },
+    /// Assistant reasoning, shown collapsed.
+    Thinking { text: String },
+    /// A tool the assistant invoked. `path` is the file it touched (if any); `body` is a renderable
+    /// summary (a shell command, a diff, or short JSON).
+    Tool {
+        id: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        body: Option<String>,
+    },
+    /// The result of a tool call, tied to it by `id`.
+    ToolResult { id: String, ok: bool, text: String },
 }

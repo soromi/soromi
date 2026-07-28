@@ -1,7 +1,3 @@
-//Packages
-// The Mantine theme is shared with the web app so every Mantine surface matches.
-export { theme } from '@soromi/ui'
-
 //Types
 import type { Status } from '@soromi/protocol'
 

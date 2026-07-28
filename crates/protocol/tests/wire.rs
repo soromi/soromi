@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use soromi_protocol::{
     AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
-    ProviderConfig, ServerMessage, SessionSummary, Status, WorkspaceSummary,
+    ProviderConfig, ServerMessage, SessionSummary, Status, SubAgent, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -133,6 +133,8 @@ fn server_output_and_session_opened() {
                 account: "work".into(),
                 status: Status::Idle,
                 title: None,
+                subagents: Vec::new(),
+                activity: None,
             },
         },
         json!({
@@ -300,6 +302,11 @@ fn server_workspace_list_and_summary() {
                     account: "personal".into(),
                     status: Status::Idle,
                     title: Some("build".into()),
+                    subagents: vec![SubAgent {
+                        name: "Map v1 to v2".into(),
+                        status: Status::Thinking,
+                    }],
+                    activity: Some("Editing config.ts".into()),
                 }],
                 instructions: None,
             }],
@@ -317,7 +324,9 @@ fn server_workspace_list_and_summary() {
                     "agent": "claude",
                     "account": "personal",
                     "status": "idle",
-                    "title": "build"
+                    "title": "build",
+                    "subagents": [{ "name": "Map v1 to v2", "status": "thinking" }],
+                    "activity": "Editing config.ts"
                 }]
             }]
         }),

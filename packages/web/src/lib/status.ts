@@ -37,10 +37,8 @@ export function statusTone(status: Status): Tone {
   }
 }
 
-/** The line shown under a workspace name in the switcher. */
-export function statusLabel(status: Status, active: boolean): string {
-  if (active) return 'Active now'
-
+/** The line shown under a workspace name in the switcher — the agent's real status. */
+export function statusLabel(status: Status): string {
   switch (statusTone(status)) {
     case 'running':
       return 'Running…'

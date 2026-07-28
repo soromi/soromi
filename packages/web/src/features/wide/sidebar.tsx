@@ -12,9 +12,6 @@ import { FilesPanel } from '@/features/files/files-panel'
 import { SkillsPanel } from '@/features/skills/skills-panel'
 import { WorkspaceSwitcher } from './workspace-switcher'
 
-//Styles
-import styles from './sidebar.module.css'
-
 /** The wide layout's second column: the workspace switcher, then the rail-selected panel. */
 export function Sidebar({ workspace, session }: { workspace?: WorkspaceInfo; session?: string }) {
   const { sidebarMode, width, setWidth } = useUiStore(
@@ -46,12 +43,20 @@ export function Sidebar({ workspace, session }: { workspace?: WorkspaceInfo; ses
   }
 
   return (
-    <aside ref={asideRef} className={styles.sidebar} style={{ width }}>
-      <div className={styles.header}>
+    <aside
+      ref={asideRef}
+      className="relative flex w-[250px] flex-none flex-col overflow-hidden border-[var(--soromi-border)] border-r bg-[var(--soromi-bg-sidebar)]"
+      style={{ width }}
+    >
+      <div className="flex h-[54px] flex-shrink-0 items-center border-[var(--soromi-border)] border-b px-2">
         <WorkspaceSwitcher />
       </div>
-      <div className={styles.body}>
-        {workspace && <div className={styles.sectionLabel}>{sidebarMode}</div>}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {workspace && (
+          <div className="flex-shrink-0 px-4 pt-3.5 pb-1.5 font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.08em]">
+            {sidebarMode}
+          </div>
+        )}
         {sidebarMode === 'files' ? (
           <FilesPanel workspace={workspace?.name} showHeading={false} />
         ) : (
@@ -59,7 +64,12 @@ export function Sidebar({ workspace, session }: { workspace?: WorkspaceInfo; ses
         )}
       </div>
 
-      <div className={styles.resizer} onPointerDown={startResize} title="Drag to resize" />
+      {/* Drag handle on the right edge: a thin line that turns accent on hover/drag. */}
+      <div
+        className="absolute inset-y-0 right-[-3px] z-[5] w-[7px] cursor-col-resize after:absolute after:inset-y-0 after:right-[3px] after:w-px after:bg-transparent after:transition-colors after:content-[''] hover:after:bg-[var(--soromi-accent)] active:after:bg-[var(--soromi-accent)]"
+        onPointerDown={startResize}
+        title="Drag to resize"
+      />
     </aside>
   )
 }

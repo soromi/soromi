@@ -1,9 +1,6 @@
 import { encodeQR } from '@paulmillr/qr'
 import { useMemo } from 'react'
 
-//Styles
-import styles from './qr-code.module.css'
-
 /** A quiet zone (in modules) around the code, needed for scanners to lock on. */
 const MARGIN = 3
 
@@ -19,7 +16,7 @@ export function QrCode({ value, size = 240 }: { value: string; size?: number }) 
       width={size}
       height={size}
       viewBox={`0 0 ${total} ${total}`}
-      className={styles.qr}
+      className="block rounded-xl bg-white"
       role="img"
       aria-label="Pairing QR code"
     >

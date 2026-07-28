@@ -5,11 +5,16 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 /// The events Soromi installs Claude hooks for, paired with the cue the bridge is invoked with.
-/// `session-start` is not a sound cue: it reports Claude's own conversation id so the tab can be
-/// resumed later.
+/// `Notification` fires both for prompts that need the user and for plain idle, so its `notify` cue
+/// is resolved (from the hook's message) into `request` / `idle` by the bridge. `session-start` is
+/// not a sound cue: it reports Claude's own conversation id so the tab can be resumed later.
+/// `UserPromptSubmit`/`PreToolUse` are the authoritative "working" signal (`active`): they mark the
+/// tab as running the moment a turn starts or a tool fires, so status never depends on scraping
+/// Claude's whimsical spinner text ("Musing…", "Unravelling…") out of the terminal.
 const HOOKS: &[(&str, &str)] = &[
-    ("PermissionRequest", "request"),
-    ("Notification", "question"),
+    ("UserPromptSubmit", "active"),
+    ("PreToolUse", "active"),
+    ("Notification", "notify"),
     ("Stop", "complete"),
     ("SessionStart", "session-start"),
 ];
@@ -110,9 +115,6 @@ mod tests {
                 .any(|e| e["hooks"][0]["command"] == "user-thing")
         );
         assert!(stop.iter().any(|e| e["hooks"][0]["args"][0] == "hook"));
-        assert_eq!(
-            root["hooks"]["PermissionRequest"].as_array().unwrap().len(),
-            1
-        );
+        assert_eq!(root["hooks"]["Notification"].as_array().unwrap().len(), 1);
     }
 }

@@ -17,8 +17,8 @@ export interface FileContent {
 
 /** The sidebar's resizable width, clamped and remembered across sessions. */
 const SIDEBAR_WIDTH_KEY = 'soromi.sidebarWidth'
-const DEFAULT_SIDEBAR_WIDTH = 230
-const MIN_SIDEBAR_WIDTH = 180
+const DEFAULT_SIDEBAR_WIDTH = 290
+const MIN_SIDEBAR_WIDTH = 240
 const MAX_SIDEBAR_WIDTH = 640
 const clampSidebarWidth = (width: number) =>
   Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(width)))
@@ -29,6 +29,48 @@ const readSidebarWidth = (): number => {
   } catch {
     return DEFAULT_SIDEBAR_WIDTH
   }
+}
+
+/** The right-hand Explorer panel (Files/Skills): its width and open state, both remembered. */
+const EXPLORER_WIDTH_KEY = 'soromi.explorerWidth'
+const DEFAULT_EXPLORER_WIDTH = 260
+const MIN_EXPLORER_WIDTH = 206
+const MAX_EXPLORER_WIDTH = 560
+const clampExplorerWidth = (width: number) =>
+  Math.max(MIN_EXPLORER_WIDTH, Math.min(MAX_EXPLORER_WIDTH, Math.round(width)))
+const readExplorerWidth = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(EXPLORER_WIDTH_KEY))
+    return stored ? clampExplorerWidth(stored) : DEFAULT_EXPLORER_WIDTH
+  } catch {
+    return DEFAULT_EXPLORER_WIDTH
+  }
+}
+
+const EXPLORER_OPEN_KEY = 'soromi.explorerOpen'
+const readExplorerOpen = (): boolean => {
+  try {
+    return localStorage.getItem(EXPLORER_OPEN_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+/** User-chosen avatar-square color per workspace (kept locally; `none` = no fill). */
+const WS_COLORS_KEY = 'soromi.wsColors'
+export const WS_COLOR_PALETTE = ['#35c07a', '#6b93d6', '#d97757', '#c9a13b', '#a882d5', 'none']
+const readWsColors = (): Record<string, string> => {
+  try {
+    const raw = localStorage.getItem(WS_COLORS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+const writeWsColors = (colors: Record<string, string>): void => {
+  try {
+    localStorage.setItem(WS_COLORS_KEY, JSON.stringify(colors))
+  } catch {}
 }
 
 /** The workspace open when the app last closed, restored on launch (falls back to the first). */
@@ -98,8 +140,13 @@ interface UiState {
   treeListings: Record<string, Record<string, DirEntry[]>>
   treeExpanded: Record<string, Record<string, boolean>>
   sidebarMode: SidebarMode
-  /** The Files/Skills sidebar width in px (draggable, persisted). */
+  /** The left (workspaces) sidebar width in px (draggable, persisted). */
   sidebarWidth: number
+  /** The right Explorer panel: whether it's open, and its width in px (both persisted). */
+  explorerOpen: boolean
+  explorerWidth: number
+  /** User-chosen avatar-square color per workspace (persisted locally). */
+  wsColors: Record<string, string>
   /** Workspaces that finished while you weren't looking at them (per-viewer "needs review"). */
   needsReview: Record<string, boolean>
   /** Last-seen aggregate status per workspace, to detect the transition into "finished". */
@@ -126,6 +173,10 @@ interface UiState {
   toggleTreeNode: (workspace: string, path: string) => void
   setSidebarMode: (mode: SidebarMode) => void
   setSidebarWidth: (width: number) => void
+  setExplorerOpen: (open: boolean) => void
+  toggleExplorer: () => void
+  setExplorerWidth: (width: number) => void
+  setWorkspaceColor: (name: string, color: string) => void
   setNotice: (notice: string | null) => void
   setError: (error: string | null) => void
 }
@@ -138,6 +189,9 @@ export const useAppStore = create<UiState>()((set) => ({
   treeExpanded: {},
   sidebarMode: 'files',
   sidebarWidth: readSidebarWidth(),
+  explorerOpen: readExplorerOpen(),
+  explorerWidth: readExplorerWidth(),
+  wsColors: readWsColors(),
   needsReview: {},
   lastStatus: {},
   notice: null,
@@ -161,7 +215,10 @@ export const useAppStore = create<UiState>()((set) => ({
         const became = previous !== undefined && previous !== 'done' && workspace.status === 'done'
 
         if (became && workspace.name !== state.active) needsReview[workspace.name] = true
-        if (workspace.status !== 'done') delete needsReview[workspace.name]
+        // A finished workspace stays "needs review" until you open it (see `select`) or it starts
+        // working again. Going quiet (done -> idle) must not silently clear the flag.
+        if (workspace.status !== 'done' && workspace.status !== 'idle')
+          delete needsReview[workspace.name]
         lastStatus[workspace.name] = workspace.status
       }
 
@@ -227,12 +284,24 @@ export const useAppStore = create<UiState>()((set) => ({
       ),
     })),
   setListing: (workspace, path, entries) =>
-    set((state) => ({
-      treeListings: {
+    set((state) => {
+      const treeListings = {
         ...state.treeListings,
         [workspace]: { ...state.treeListings[workspace], [path]: entries },
-      },
-    })),
+      }
+      // On the first root listing, expand the first folder by default. Skipped once the user has
+      // touched any node (expanded state is non-empty), so a manual collapse sticks.
+      if (path === '' && Object.keys(state.treeExpanded[workspace] ?? {}).length === 0) {
+        const first = entries.find((e) => e.type === 'dir')
+        if (first) {
+          return {
+            treeListings,
+            treeExpanded: { ...state.treeExpanded, [workspace]: { [first.name]: true } },
+          }
+        }
+      }
+      return { treeListings }
+    }),
   resetTree: (workspace) =>
     set((state) => {
       const { [workspace]: _l, ...treeListings } = state.treeListings
@@ -257,6 +326,33 @@ export const useAppStore = create<UiState>()((set) => ({
     } catch {}
     set({ sidebarWidth })
   },
+  setExplorerOpen: (explorerOpen) => {
+    try {
+      localStorage.setItem(EXPLORER_OPEN_KEY, explorerOpen ? '1' : '0')
+    } catch {}
+    set({ explorerOpen })
+  },
+  toggleExplorer: () =>
+    set((state) => {
+      const explorerOpen = !state.explorerOpen
+      try {
+        localStorage.setItem(EXPLORER_OPEN_KEY, explorerOpen ? '1' : '0')
+      } catch {}
+      return { explorerOpen }
+    }),
+  setExplorerWidth: (width) => {
+    const explorerWidth = clampExplorerWidth(width)
+    try {
+      localStorage.setItem(EXPLORER_WIDTH_KEY, String(explorerWidth))
+    } catch {}
+    set({ explorerWidth })
+  },
+  setWorkspaceColor: (name, color) =>
+    set((state) => {
+      const wsColors = { ...state.wsColors, [name]: color }
+      writeWsColors(wsColors)
+      return { wsColors }
+    }),
   setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
 }))

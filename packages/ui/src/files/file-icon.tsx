@@ -1,6 +1,3 @@
-//Styles
-import styles from './file-icon.module.css'
-
 //Types
 import type { ReactNode } from 'react'
 
@@ -150,7 +147,7 @@ export function FileIcon({ name, size = 15 }: { name: string; size?: number }) {
 
   return (
     <svg
-      className={styles.icon}
+      className="block flex-none"
       width={size}
       height={size}
       viewBox="0 0 24 24"
@@ -170,7 +167,7 @@ export function FileIcon({ name, size = 15 }: { name: string; size?: number }) {
 export function FolderIcon({ size = 15 }: { size?: number }) {
   return (
     <svg
-      className={styles.icon}
+      className="block flex-none"
       width={size}
       height={size}
       viewBox="0 0 24 24"

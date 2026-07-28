@@ -1,9 +1,8 @@
 use soromi_protocol::Status;
 
-use super::parser::parse_status;
-
 /// Tracks the current agent status derived from PTY output. Holds the last known status and
-/// only reports a change when a new signal differs from it.
+/// only reports a change when a new signal differs from it. The signal itself is produced by the
+/// session's provider (`Provider::parse_status`); this wrapper is provider-agnostic dedup.
 pub struct StatusState {
     current: Status,
 }
@@ -23,9 +22,10 @@ impl StatusState {
         self.current
     }
 
-    /// Feeds an output chunk; returns the new status if it changed, else `None`.
-    pub fn update(&mut self, chunk: &str) -> Option<Status> {
-        let parsed = parse_status(chunk)?;
+    /// Feeds the provider's parsed signal for a chunk (`None` when the chunk carried none); returns
+    /// the new status only if it changed.
+    pub fn update(&mut self, parsed: Option<Status>) -> Option<Status> {
+        let parsed = parsed?;
         if parsed == self.current {
             return None;
         }
@@ -52,28 +52,28 @@ mod tests {
     #[test]
     fn reports_a_change_when_the_parsed_status_differs() {
         let mut state = StatusState::new();
-        assert_eq!(state.update("Reading the file"), Some(Status::Thinking));
+        assert_eq!(state.update(Some(Status::Thinking)), Some(Status::Thinking));
         assert_eq!(state.get(), Status::Thinking);
     }
 
     #[test]
     fn returns_none_when_the_status_is_unchanged() {
         let mut state = StatusState::new();
-        state.update("Reading the file");
-        assert_eq!(state.update("Editing the file"), None);
+        state.update(Some(Status::Thinking));
+        assert_eq!(state.update(Some(Status::Thinking)), None);
     }
 
     #[test]
-    fn returns_none_for_output_with_no_signal() {
-        assert_eq!(StatusState::new().update("the quick brown fox"), None);
+    fn returns_none_for_a_chunk_with_no_signal() {
+        assert_eq!(StatusState::new().update(None), None);
     }
 
     #[test]
     fn transitions_between_states() {
         let mut state = StatusState::new();
-        assert_eq!(state.update("Reading"), Some(Status::Thinking));
+        assert_eq!(state.update(Some(Status::Thinking)), Some(Status::Thinking));
         assert_eq!(
-            state.update("Allow write? (y/n)"),
+            state.update(Some(Status::WaitingInput)),
             Some(Status::WaitingInput)
         );
     }

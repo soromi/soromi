@@ -10,7 +10,7 @@ export type MobileTab = 'terminal' | 'files' | 'skills'
 /** Which panel the wide layout's sidebar shows (the phone uses `tab` instead). */
 export type SidebarMode = 'files' | 'skills'
 
-/** A bottom sheet (Mantine Drawer) raised over the shell. Only one is open at a time. */
+/** A bottom sheet raised over the shell. Only one is open at a time. */
 export type Sheet = 'workspaces' | 'session-menu'
 
 /**
@@ -120,12 +120,24 @@ export const useUiStore = create<UiState>()((set) => ({
   toggleKeyboard: () => set((state) => ({ keyboardVisible: !state.keyboardVisible })),
   setFontSize: (size) => set({ fontSize: clampFont(size) }),
   setListing: (workspace, path, entries) =>
-    set((state) => ({
-      treeListings: {
+    set((state) => {
+      const treeListings = {
         ...state.treeListings,
         [workspace]: { ...state.treeListings[workspace], [path]: entries },
-      },
-    })),
+      }
+      // On the first root listing, expand the first folder by default. Skipped once the user has
+      // touched any node (expanded state is non-empty), so a manual collapse sticks.
+      if (path === '' && Object.keys(state.treeExpanded[workspace] ?? {}).length === 0) {
+        const first = entries.find((e) => e.type === 'dir')
+        if (first) {
+          return {
+            treeListings,
+            treeExpanded: { ...state.treeExpanded, [workspace]: { [first.name]: true } },
+          }
+        }
+      }
+      return { treeListings }
+    }),
   toggleTreeNode: (workspace, path) =>
     set((state) => {
       const current = state.treeExpanded[workspace] ?? {}

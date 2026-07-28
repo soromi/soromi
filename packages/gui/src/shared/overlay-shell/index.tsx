@@ -4,9 +4,6 @@ import { useAppStore } from '@/stores/app-store'
 //Icons
 import CloseSvg from '@/assets/icons/close.svg?react'
 
-//Styles
-import styles from './overlay-shell.module.css'
-
 //Types
 import type { ReactNode } from 'react'
 
@@ -28,13 +25,24 @@ export function OverlayShell({
 }) {
   const popOverlay = useAppStore((s) => s.popOverlay)
   return (
-    <div className={styles.overlay}>
-      <div className={styles.header}>
-        {icon && <span className={styles.icon}>{icon}</span>}
-        {title && <span className={styles.title}>{title}</span>}
+    <div className="absolute inset-0 z-[var(--z-overlay)] flex flex-col bg-[var(--soromi-bg-app)]">
+      <div className="flex h-[60px] flex-shrink-0 items-center gap-3 border-[var(--soromi-border)] border-b bg-[var(--soromi-bg-app)] px-6">
+        {icon && (
+          <span className="inline-flex items-center text-[var(--soromi-text-faint)]">{icon}</span>
+        )}
+        {title && (
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-[17px] text-[var(--soromi-text)]">
+            {title}
+          </span>
+        )}
         {extra}
-        <span className={styles.spacer} />
-        <button type="button" className={styles.close} onClick={popOverlay} title="Close">
+        <span className="flex-1" />
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+          onClick={popOverlay}
+          title="Close"
+        >
           <CloseSvg width={18} height={18} />
         </button>
       </div>

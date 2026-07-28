@@ -1,10 +1,8 @@
-import clsx from 'clsx'
-
 //Components
 import { FileIcon, FolderIcon } from './file-icon'
 
-//Styles
-import styles from './file-tree.module.css'
+//Utils
+import { cn } from '../lib/utils'
 
 //Types
 import type { MouseEvent as ReactMouseEvent } from 'react'
@@ -49,8 +47,10 @@ export function FileTree({
   onContextMenu,
   emptyLabel = 'Nothing here.',
 }: FileTreeProps) {
-  if (nodes === undefined) return <div className={styles.empty}>Loading…</div>
-  if (nodes.length === 0) return <div className={styles.empty}>{emptyLabel}</div>
+  if (nodes === undefined)
+    return <div className="px-2 py-1 text-[var(--soromi-text-faint)]">Loading…</div>
+  if (nodes.length === 0)
+    return <div className="px-2 py-1 text-[var(--soromi-text-faint)]">{emptyLabel}</div>
 
   return (
     <>
@@ -58,11 +58,11 @@ export function FileTree({
         <button
           key={node.path}
           type="button"
-          className={clsx(
-            styles.row,
-            node.type === 'file' && styles.file,
-            node.selected && styles.selected,
-            node.ignored && styles.ignored,
+          className={cn(
+            'flex w-full cursor-pointer items-center gap-[5px] overflow-hidden border-none bg-transparent px-2 py-1 text-left text-xs text-[var(--soromi-text)] transition-colors select-none hover:bg-[var(--soromi-bg-hover)]',
+            node.type === 'file' && '[font-family:var(--soromi-font-mono)]',
+            node.selected && 'bg-[var(--soromi-bg-active)] text-[var(--soromi-text)]',
+            node.ignored && 'text-[var(--soromi-text-faint)]',
           )}
           style={{ paddingLeft: 8 + node.depth * 14 }}
           onClick={() => (node.type === 'dir' ? onToggleDir(node.path) : onOpenFile(node.path))}
@@ -79,16 +79,21 @@ export function FileTree({
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className={clsx(styles.chevron, node.expanded && styles.chevronOpen)}
+              className={cn(
+                'h-3 w-3 flex-shrink-0 text-[var(--soromi-text-faint)] transition-transform duration-[120ms]',
+                node.expanded && 'rotate-90',
+              )}
               aria-hidden="true"
             >
               <path d="M9 6l6 6-6 6" />
             </svg>
           ) : (
-            <span className={styles.gap} />
+            <span className="w-3 flex-shrink-0" />
           )}
           {node.type === 'dir' ? <FolderIcon /> : <FileIcon name={node.name} />}
-          <span className={styles.label}>{node.name}</span>
+          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+            {node.name}
+          </span>
         </button>
       ))}
     </>

@@ -55,6 +55,7 @@ mod tests {
 
     fn opts() -> SessionOptions {
         SessionOptions {
+            agent: "claude".into(),
             command: "/bin/cat".into(),
             args: vec![],
             cwd: ".".into(),

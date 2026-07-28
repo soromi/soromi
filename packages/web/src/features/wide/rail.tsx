@@ -1,15 +1,22 @@
-import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
+
+//Packages
+import { cn } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
 
-//Styles
-import styles from './rail.module.css'
-
 //Types
 import type { ReactNode } from 'react'
 import type { SidebarMode } from '@/stores/ui-store'
+
+/** A rail section toggle. */
+const SECTION =
+  'relative flex h-11 w-11 cursor-pointer appearance-none items-center justify-center rounded-xl border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-40'
+
+/** Selected section: accent tint, ring, and the green left-edge indicator; holds on hover. */
+const SECTION_ACTIVE =
+  "bg-[var(--soromi-accent-dim)] text-[var(--soromi-accent)] shadow-[inset_0_0_0_1px_var(--soromi-accent-border)] enabled:hover:bg-[var(--soromi-accent-dim)] enabled:hover:text-[var(--soromi-accent)] before:absolute before:top-[9px] before:bottom-[9px] before:left-[-10px] before:w-[3px] before:rounded-[0_3px_3px_0] before:bg-[var(--soromi-accent)] before:content-['']"
 
 interface Section {
   mode: SidebarMode
@@ -41,8 +48,11 @@ export function Rail() {
   )
 
   return (
-    <div className={styles.rail}>
-      <div className={styles.logo} aria-hidden="true">
+    <div className="flex w-16 flex-shrink-0 flex-col items-center gap-3 border-[var(--soromi-border)] border-r bg-[var(--soromi-bg-rail)] py-3.5">
+      <div
+        className="mb-3 flex h-11 w-11 items-center justify-center rounded-[13px] bg-[#efece1]"
+        aria-hidden="true"
+      >
         <svg width="20" height="18" viewBox="0 0 22 20" aria-hidden="true">
           <rect x="0" y="1" width="22" height="4.4" rx="2.2" fill="#2fae6a" />
           <rect x="0" y="7.8" width="14" height="4.4" rx="2.2" fill="#2fae6a" />
@@ -50,15 +60,12 @@ export function Rail() {
         </svg>
       </div>
 
-      <div className={styles.sections}>
+      <div className="flex flex-col items-center gap-2">
         {SECTIONS.map((section) => (
           <button
             key={section.mode}
             type="button"
-            className={clsx(
-              styles.section,
-              active && sidebarMode === section.mode && styles.active,
-            )}
+            className={cn(SECTION, active && sidebarMode === section.mode && SECTION_ACTIVE)}
             onClick={() => setSidebarMode(section.mode)}
             disabled={!active}
             title={section.label}

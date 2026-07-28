@@ -1,5 +1,3 @@
-import { MantineProvider } from '@mantine/core'
-import { ModalsProvider } from '@mantine/modals'
 import { useEffect, useMemo } from 'react'
 
 //Packages
@@ -13,7 +11,6 @@ import { focusWindow, onNotificationClick } from '@/lib/host'
 
 //Constants
 import { DAEMON_URL } from '@/config'
-import { theme } from '@/config/theme'
 
 //Components
 import { AppLayout } from './app-layout'
@@ -109,12 +106,8 @@ export function App() {
   }, [transport])
 
   return (
-    <MantineProvider theme={theme} forceColorScheme="dark">
-      <ModalsProvider>
-        <TransportProvider value={transport}>
-          <AppLayout />
-        </TransportProvider>
-      </ModalsProvider>
-    </MantineProvider>
+    <TransportProvider value={transport}>
+      <AppLayout />
+    </TransportProvider>
   )
 }

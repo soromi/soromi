@@ -1,8 +1,8 @@
-import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore } from '@soromi/client'
+import { cn } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
@@ -17,9 +17,6 @@ import { TerminalDeck } from '@/features/terminal/terminal-deck'
 import { WorkspaceBar } from '@/features/workspace-bar/workspace-bar'
 import { WorkspaceSheet } from '@/features/workspaces/workspace-sheet'
 import { OverlayHost } from './overlay-host'
-
-//Styles
-import styles from './mobile-shell.module.css'
 
 /**
  * The phone shell: a persistent terminal base with the Files / Skills panels layered over it, a
@@ -43,10 +40,10 @@ export function MobileShell() {
   const showKeys = tab === 'terminal' && connected && keyboardVisible
 
   return (
-    <div className={styles.shell}>
-      <main className={styles.body}>
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--soromi-bg-app)] pt-[var(--safe-top)]">
+      <main className="relative flex min-h-0 flex-1 flex-col">
         {/* The deck never unmounts; it is only hidden when another tab is on top. */}
-        <div className={clsx(styles.pane, tab !== 'terminal' && styles.hidden)}>
+        <div className={cn('flex min-h-0 flex-1', tab !== 'terminal' && 'hidden')}>
           <TerminalDeck active={session} fontSize={fontSize} />
         </div>
         {tab === 'files' && <FilesPanel workspace={workspace?.name} />}

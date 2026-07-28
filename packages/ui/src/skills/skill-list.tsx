@@ -1,8 +1,5 @@
 import { useMemo, useState } from 'react'
 
-//Styles
-import styles from './skill-list.module.css'
-
 //Types
 import type { Skill } from '@soromi/protocol'
 
@@ -59,35 +56,45 @@ export function SkillList({
   }, [skills, filter])
 
   return (
-    <div className={styles.skills}>
+    <div className="flex flex-col gap-2.5 px-1">
       {showFilter && (
         <input
-          className={styles.filter}
+          className="rounded-[9px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] px-[11px] py-2 text-[12.5px] text-[var(--soromi-text)] focus:border-[var(--soromi-accent)] focus:outline-none"
           placeholder="Filter skills"
           value={filter}
           onChange={(event) => setFilter(event.currentTarget.value)}
         />
       )}
       {skills === undefined ? (
-        <div className={styles.empty}>Loading…</div>
+        <div className="p-3 text-[12.5px] text-[var(--soromi-text-faint)]">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className={styles.empty}>No skills</div>
+        <div className="p-3 text-[12.5px] text-[var(--soromi-text-faint)]">No skills</div>
       ) : (
         rows.map((row) => (
           <button
             key={row.key}
             type="button"
-            className={styles.skill}
+            className="flex cursor-pointer appearance-none flex-col gap-2 rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-tab)] px-4 py-3.5 text-left transition-colors hover:border-[var(--soromi-accent-border)] hover:bg-[var(--soromi-bg-hover)]"
             onClick={() => onInsert(row.name)}
             title={`Insert ${row.command}`}
           >
-            <span className={styles.name}>{row.title}</span>
-            <span className={styles.command}>{row.command}</span>
-            {row.description && <span className={styles.desc}>{row.description}</span>}
+            <span className="font-bold text-[15px] text-[var(--soromi-text)]">{row.title}</span>
+            <span className="-mt-0.5 self-start whitespace-nowrap rounded-[7px] border border-[var(--soromi-accent-border)] bg-[var(--soromi-accent-dim)] px-2 py-[3px] text-[11px] text-[var(--soromi-accent)] [font-family:var(--soromi-font-mono)]">
+              {row.command}
+            </span>
+            {row.description && (
+              <span className="line-clamp-2 text-[13px] text-[var(--soromi-text-faint)] leading-[1.5]">
+                {row.description}
+              </span>
+            )}
             {showTags && (
-              <span className={styles.meta}>
-                <span className={styles.tag}>{row.kind}</span>
-                <span className={styles.tag}>{row.scope}</span>
+              <span className="mt-0.5 flex gap-1.5">
+                <span className="rounded-md border border-[var(--soromi-border)] px-[7px] py-0.5 font-medium text-[10px] text-[var(--soromi-text-faint)] uppercase tracking-[0.05em]">
+                  {row.kind}
+                </span>
+                <span className="rounded-md border border-[var(--soromi-border)] px-[7px] py-0.5 font-medium text-[10px] text-[var(--soromi-text-faint)] uppercase tracking-[0.05em]">
+                  {row.scope}
+                </span>
               </span>
             )}
           </button>

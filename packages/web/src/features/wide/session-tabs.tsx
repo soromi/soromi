@@ -1,15 +1,19 @@
-import { Menu } from '@mantine/core'
 import { useMemo } from 'react'
 
 //Packages
 import { useTransport } from '@soromi/client'
-import { ProviderIcon, SessionTabs as SessionTabsView } from '@soromi/ui'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+  ProviderIcon,
+  SessionTabs as SessionTabsView,
+} from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
-
-//Styles
-import styles from './session-tabs.module.css'
 
 //Types
 import type { WorkspaceInfo } from '@soromi/client'
@@ -50,25 +54,26 @@ export function SessionTabs({ workspace }: { workspace: WorkspaceInfo }) {
 
   const newSession =
     agents.length > 0 ? (
-      <Menu position="bottom-start" width={160}>
-        <Menu.Target>
-          <button type="button" className={styles.newTab} title="New session">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-[40px] w-11 cursor-pointer appearance-none items-center justify-center border-none bg-transparent text-[var(--soromi-text-dim)] text-lg hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+            title="New session"
+          >
             +
           </button>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Label>New session</Menu.Label>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-40">
+          <DropdownMenuLabel>New session</DropdownMenuLabel>
           {agents.map((agent) => (
-            <Menu.Item
-              key={agent}
-              leftSection={<ProviderIcon provider={agent} size={14} />}
-              onClick={() => openTab(agent)}
-            >
+            <DropdownMenuItem key={agent} onClick={() => openTab(agent)}>
+              <ProviderIcon provider={agent} size={14} />
               {agentLabel(agent)}
-            </Menu.Item>
+            </DropdownMenuItem>
           ))}
-        </Menu.Dropdown>
-      </Menu>
+        </DropdownMenuContent>
+      </DropdownMenu>
     ) : undefined
 
   return (

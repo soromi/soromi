@@ -1,0 +1,128 @@
+/*
+ * Tailwind v4 + shadcn tokens. Preflight (Tailwind's base reset) replaces Mantine's reset now that
+ * the desktop is off Mantine; `tw-animate-css` provides the `animate-in` / `slide-in` utilities the
+ * shadcn dialogs, dropdowns, and sheets use.
+ */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+/* Scan the shared, source-consumed component package for class names. */
+@source "../../../ui/src";
+
+/*
+ * shadcn's semantic tokens, aliased to Soromi's palette (the single source of truth in
+ * @soromi/ui/theme.css), so shadcn components match the app with no visual drift. Dark-only.
+ */
+:root {
+  --background: var(--soromi-bg-app);
+  --foreground: var(--soromi-text);
+  --card: var(--soromi-bg-sidebar);
+  --card-foreground: var(--soromi-text);
+  --popover: var(--soromi-bg-sidebar);
+  --popover-foreground: var(--soromi-text);
+  --primary: var(--soromi-accent);
+  --primary-foreground: var(--soromi-accent-on);
+  --secondary: var(--soromi-bg-active);
+  --secondary-foreground: var(--soromi-text);
+  --muted: var(--soromi-bg-hover);
+  --muted-foreground: var(--soromi-text-faint);
+  --accent: var(--soromi-bg-active);
+  --accent-foreground: var(--soromi-text);
+  --destructive: #f47070;
+  --destructive-foreground: #ffffff;
+  --border: var(--soromi-border);
+  --input: var(--soromi-border);
+  --ring: var(--soromi-accent);
+  --radius: 0.5rem;
+
+  /* App-wide scrollbar thumb (mockup values). */
+  --sb-thumb: rgb(255 255 255 / 0.13);
+  --sb-thumb-hover: rgb(255 255 255 / 0.24);
+}
+
+/*
+ * App-wide scrollbars: a slim rounded thumb inset from the edge over a transparent track (the 3px
+ * transparent border + content-box clip is what makes the thumb a floating pill), matching the
+ * mockup.
+ *
+ * WebKit pseudo-elements only. We deliberately do NOT set the standard `scrollbar-width` /
+ * `scrollbar-color`: in current WebKit (WKWebView, Safari 18.2+) setting either one on an element
+ * makes it draw the *native* scrollbar and ignore all `::-webkit-scrollbar` styling — which turned
+ * the terminal's scrollbar into a bright native bar down its right edge. The desktop is pure WebKit,
+ * so the pseudo-elements are all we need.
+ */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--sb-thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--sb-thumb-hover);
+}
+
+/* The terminal keeps its own subtle dark scrollbar instead of the light app-wide thumb. */
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: var(--soromi-bg-active);
+  border: 3px solid var(--soromi-bg-terminal);
+  background-clip: content-box;
+  border-radius: 6px;
+}
+
+/*
+ * The status pulse for workspace activity dots (a warm ring that fades outward). Exposed as
+ * `animate-status-pulse`; pair with `motion-safe:` so it respects reduced-motion.
+ */
+@theme {
+  --animate-status-pulse: status-pulse 1.6s ease-out infinite;
+
+  @keyframes status-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgb(217 165 63 / 55%);
+    }
+    70% {
+      box-shadow: 0 0 0 5px rgb(217 165 63 / 0%);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgb(217 165 63 / 0%);
+    }
+  }
+}
+
+/* Expose the tokens as Tailwind utilities (bg-background, text-foreground, rounded-lg, ...). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}

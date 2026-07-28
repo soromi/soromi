@@ -1,15 +1,11 @@
-import clsx from 'clsx'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useUsage } from '@soromi/client'
-import { UsageWidget } from '@soromi/ui'
+import { UsageWidget, cn } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
-
-//Styles
-import styles from './status-bar.module.css'
 
 /** The wide layout's bottom status bar: plan usage on the left, connection state on the right. */
 export function StatusBar() {
@@ -20,10 +16,14 @@ export function StatusBar() {
   const { agents, loading, refresh } = useUsage(active)
 
   const text = !connected ? 'Disconnected' : holder ? `${holder} in control` : 'Connected'
-  const tone = !connected ? styles.off : holder ? styles.busy : styles.ok
+  const tone = !connected
+    ? 'bg-[var(--soromi-text-faint)]'
+    : holder
+      ? 'bg-[var(--soromi-warn)]'
+      : 'bg-[var(--soromi-ok)]'
 
   return (
-    <div className={styles.bar}>
+    <div className="flex flex-none items-center justify-between border-[var(--soromi-border-subtle)] border-t bg-[var(--soromi-bg-app)] px-2 h-[34px]">
       <UsageWidget
         agents={agents}
         loading={loading}
@@ -32,8 +32,8 @@ export function StatusBar() {
         onManage={(url) => window.open(url, '_blank', 'noopener')}
       />
 
-      <span className={styles.status}>
-        <span className={clsx(styles.dot, tone)} />
+      <span className="flex items-center gap-[7px] pr-2 text-[var(--soromi-text-dim)] text-xs">
+        <span className={cn('h-2 w-2 rounded-full', tone)} />
         {text}
       </span>
     </div>

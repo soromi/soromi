@@ -1,9 +1,6 @@
 //Packages
 import { useTransport } from '@soromi/client'
 
-//Styles
-import styles from './key-bar.module.css'
-
 /** A key: its face and the bytes it sends to the PTY. `wide` keys take more room (arrows are 1). */
 interface Key {
   label: string
@@ -33,13 +30,13 @@ export function KeyBar({ session }: { session?: string }) {
   }
 
   return (
-    <div className={styles.bar}>
-      <div className={styles.keys}>
+    <div className="flex-shrink-0 border-[var(--soromi-border)] border-t bg-[var(--soromi-bg-sidebar)] pb-[var(--safe-bottom)]">
+      <div className="flex gap-1.5 overflow-x-auto p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {KEYS.map((key) => (
           <button
             key={key.label}
             type="button"
-            className={styles.key}
+            className="h-[38px] min-w-[42px] flex-none cursor-pointer appearance-none rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-tab)] px-3 text-[15px] text-[var(--soromi-text-dim)] active:bg-[var(--soromi-bg-active)] active:text-[var(--soromi-text)] disabled:opacity-40"
             disabled={!session}
             onClick={() => press(key.bytes)}
           >

@@ -5,9 +5,6 @@ import { useEffect, useRef } from 'react'
 //Constants
 import { darkTheme } from './code-viewer-theme'
 
-//Styles
-import styles from './code-viewer.module.css'
-
 /** Read-only CodeMirror view with a line-number gutter. Language grammars load lazily. */
 export function CodeViewer({ value, path }: { value: string; path: string }) {
   const host = useRef<HTMLDivElement>(null)
@@ -55,7 +52,12 @@ export function CodeViewer({ value, path }: { value: string; path: string }) {
     }
   }, [path, language])
 
-  return <div ref={host} className={styles.host} />
+  return (
+    <div
+      ref={host}
+      className="min-h-0 flex-1 overflow-hidden text-[12.5px] [&_.cm-editor]:h-full [&_.cm-editor]:[font-family:var(--soromi-font-mono)] [&_.cm-scroller]:overflow-auto"
+    />
+  )
 }
 
 async function loadLanguage(path: string): Promise<Extension> {

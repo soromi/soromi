@@ -9,17 +9,14 @@ import { useWorkspaceShortcuts } from '@/features/workspaces/use-workspace-short
 
 //Components
 import { StatusBar } from '@/features/status-bar/status-bar'
-import { Rail } from '@/features/workspaces/rail'
 import { Sidebar } from '@/features/sidebar/sidebar'
+import { Explorer } from '@/features/explorer/explorer'
 import { TerminalDeck } from '@/features/terminal/terminal-deck'
 import { Welcome } from '@/features/welcome/welcome'
 import { OverlayHost } from './overlay-host'
 import { Splash } from './splash'
 import { StatusBanner } from './status-banner'
 import { UpdateBanner } from './update-banner'
-
-//Styles
-import styles from './app-layout.module.css'
 
 /**
  * The three-column shell. The workspace base (terminal) is persistent; overlays layer on
@@ -28,6 +25,7 @@ import styles from './app-layout.module.css'
 export function AppLayout() {
   const transport = useTransport()
   const active = useAppStore((s) => s.active)
+  const explorerOpen = useAppStore((s) => s.explorerOpen)
   const ready = useClientStore((s) => s.ready)
 
   useWorkspaceShortcuts()
@@ -37,15 +35,14 @@ export function AppLayout() {
   if (!ready) return <Splash />
 
   return (
-    <div className={styles.root}>
-      <div className={styles.shell}>
-        <Rail />
+    <div className="fixed inset-0 flex flex-col bg-[var(--soromi-bg-app)] text-[var(--soromi-text)]">
+      <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className={styles.content}>
+        <main className="relative flex min-w-0 flex-1 flex-col bg-[var(--soromi-bg-terminal)]">
           <UpdateBanner />
           <StatusBanner />
           {active !== null ? (
-            <div className={styles.terminalArea}>
+            <div className="flex min-h-0 flex-1 flex-col">
               <TerminalDeck transport={transport} />
             </div>
           ) : (
@@ -53,6 +50,7 @@ export function AppLayout() {
           )}
           <OverlayHost scope="content" />
         </main>
+        {explorerOpen && <Explorer />}
       </div>
       <StatusBar />
       <OverlayHost scope="full" handleEsc />

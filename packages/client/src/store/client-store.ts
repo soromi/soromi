@@ -3,6 +3,7 @@ import { create } from 'zustand'
 //Types
 import type {
   AccountProfile,
+  ChatEvent,
   KeepAwakeMode,
   SessionSummary,
   Skill,
@@ -57,6 +58,9 @@ interface ClientState {
   providerStatus: Record<string, boolean>
   /** Skills for a session, keyed by session id. */
   skills: Record<string, Skill[]>
+  /** Structured transcript events for the chat view, keyed by session id (Claude sessions only).
+   * Empty/absent means no transcript, so the viewport falls back to the terminal. */
+  chat: Record<string, ChatEvent[]>
   /** A newer release, once the daemon reports one. */
   update: AppUpdate | null
   /** The update version the user dismissed; the banner stays hidden while it matches. */
@@ -75,6 +79,8 @@ interface ClientState {
   setAccounts: (accounts: AccountProfile[]) => void
   setProviderStatus: (provider: string, configDir: string, loggedIn: boolean) => void
   setSkills: (session: string, skills: Skill[]) => void
+  appendChat: (session: string, events: ChatEvent[]) => void
+  resetChat: (session: string) => void
   setUpdate: (update: AppUpdate) => void
   dismissUpdate: () => void
 }
@@ -89,6 +95,7 @@ export const useClientStore = create<ClientState>()((set) => ({
   accounts: [],
   providerStatus: {},
   skills: {},
+  chat: {},
   update: null,
   dismissedUpdate: readDismissedUpdate(),
   controlHolder: null,
@@ -121,6 +128,11 @@ export const useClientStore = create<ClientState>()((set) => ({
     })),
   setSkills: (session, skills) =>
     set((state) => ({ skills: { ...state.skills, [session]: skills } })),
+  appendChat: (session, events) =>
+    set((state) => ({
+      chat: { ...state.chat, [session]: [...(state.chat[session] ?? []), ...events] },
+    })),
+  resetChat: (session) => set((state) => ({ chat: { ...state.chat, [session]: [] } })),
   setUpdate: (update) => set({ update }),
   dismissUpdate: () =>
     set((state) => {

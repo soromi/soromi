@@ -1,0 +1,298 @@
+//! Claude's transcript format: parses one JSONL line Claude writes as it works (one JSON object per
+//! line) into structured chat events. The generic tailer (`transcript::tailer`) follows the file
+//! and calls this via `Provider::parse_transcript_line`, streaming events so a viewport can render
+//! a reflowing chat and the sidebar can show per-tab activity and sub-agents.
+
+use serde_json::Value;
+use soromi_protocol::ChatEvent;
+
+/// Long tool bodies and results are clipped so a single transcript line can't flood the wire.
+const MAX_BODY: usize = 4000;
+
+/// Parses one transcript line into zero or more chat events. Metadata lines (mode changes,
+/// snapshots, attachments) yield nothing; an assistant line yields one event per content block.
+pub fn parse_line(line: &str) -> Vec<ChatEvent> {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .map(|value| parse_value(&value))
+        .unwrap_or_default()
+}
+
+fn parse_value(value: &Value) -> Vec<ChatEvent> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("user") => parse_user(value),
+        Some("assistant") => parse_assistant(value),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_user(value: &Value) -> Vec<ChatEvent> {
+    let Some(content) = value.pointer("/message/content") else {
+        return Vec::new();
+    };
+
+    // A plain prompt is a string; tool results come back as an array of blocks.
+    if let Some(text) = content.as_str() {
+        return user_text(text).into_iter().collect();
+    }
+
+    content
+        .as_array()
+        .map(|blocks| blocks.iter().filter_map(parse_user_block).collect())
+        .unwrap_or_default()
+}
+
+fn parse_user_block(block: &Value) -> Option<ChatEvent> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("tool_result") => {
+            let id = str_field(block, "tool_use_id");
+            let ok = !block
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let text = truncate(&result_text(block.get("content")), MAX_BODY);
+            Some(ChatEvent::ToolResult { id, ok, text })
+        }
+        Some("text") => user_text(block.get("text").and_then(Value::as_str).unwrap_or("")),
+        _ => None,
+    }
+}
+
+fn user_text(text: &str) -> Option<ChatEvent> {
+    let text = text.trim();
+    (!text.is_empty()).then(|| ChatEvent::User {
+        text: text.to_string(),
+    })
+}
+
+fn parse_assistant(value: &Value) -> Vec<ChatEvent> {
+    value
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|blocks| blocks.iter().filter_map(parse_assistant_block).collect())
+        .unwrap_or_default()
+}
+
+fn parse_assistant_block(block: &Value) -> Option<ChatEvent> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") => non_empty(block.get("text")).map(|text| ChatEvent::Assistant { text }),
+        Some("thinking") => {
+            non_empty(block.get("thinking")).map(|text| ChatEvent::Thinking { text })
+        }
+        Some("tool_use") => Some(parse_tool_use(block)),
+        _ => None,
+    }
+}
+
+fn parse_tool_use(block: &Value) -> ChatEvent {
+    let name = block
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string();
+    let input = block.get("input").cloned().unwrap_or(Value::Null);
+    let path = input
+        .get("file_path")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    ChatEvent::Tool {
+        id: str_field(block, "id"),
+        body: tool_body(&name, &input),
+        name,
+        path,
+    }
+}
+
+/// A renderable one-glance summary of a tool call: the command for `Bash`, a diff for `Edit`, the
+/// written content for `Write`, the query for searches, else compact JSON.
+fn tool_body(name: &str, input: &Value) -> Option<String> {
+    let text = match name {
+        "Bash" => str_input(input, "command"),
+        "Edit" | "MultiEdit" => diff_body(input),
+        "Write" => str_input(input, "content"),
+        "Read" => str_input(input, "file_path"),
+        "Grep" | "Glob" => str_input(input, "pattern"),
+        // A spawned sub-agent: its short task description is the label the sidebar shows (e.g.
+        // "Map v1 -> v2 fields"), falling back to the sub-agent type when there's no description.
+        "Task" => str_input(input, "description").or_else(|| str_input(input, "subagent_type")),
+        _ => Some(serde_json::to_string(input).unwrap_or_default()),
+    };
+
+    text.map(|body| truncate(&body, MAX_BODY))
+        .filter(|body| !body.is_empty())
+}
+
+fn diff_body(input: &Value) -> Option<String> {
+    let old = input
+        .get("old_string")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let new = input
+        .get("new_string")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if old.is_empty() && new.is_empty() {
+        return None;
+    }
+
+    let mut diff = String::new();
+    for line in old.lines() {
+        diff.push_str("- ");
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    for line in new.lines() {
+        diff.push_str("+ ");
+        diff.push_str(line);
+        diff.push('\n');
+    }
+
+    Some(diff)
+}
+
+/// A tool result's content is a string, or an array of text blocks; join the text.
+fn result_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn str_field(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn str_input(input: &Value, key: &str) -> Option<String> {
+    input.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn non_empty(value: Option<&Value>) -> Option<String> {
+    let text = value.and_then(Value::as_str).unwrap_or("").trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// Clips to `max` bytes on a char boundary, trailing an ellipsis.
+fn truncate(text: &str, max: usize) -> String {
+    let text = text.trim_end();
+    if text.len() <= max {
+        return text.to_string();
+    }
+
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_metadata_line_yields_nothing() {
+        assert!(parse_line(r#"{"type":"mode","mode":"default","sessionId":"s"}"#).is_empty());
+        assert!(parse_line(r#"{"type":"file-history-snapshot"}"#).is_empty());
+        assert!(parse_line("not json").is_empty());
+    }
+
+    #[test]
+    fn a_string_user_message_is_a_prompt() {
+        let events = parse_line(r#"{"type":"user","message":{"role":"user","content":"hello"}}"#);
+        assert_eq!(
+            events,
+            vec![ChatEvent::User {
+                text: "hello".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn assistant_text_and_thinking_blocks_split() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[
+            {"type":"thinking","thinking":"hmm"},
+            {"type":"text","text":"Done."}
+        ]}}"#;
+        assert_eq!(
+            parse_line(line),
+            vec![
+                ChatEvent::Thinking { text: "hmm".into() },
+                ChatEvent::Assistant {
+                    text: "Done.".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bash_tool_use_carries_the_command() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[
+            {"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls -a"}}
+        ]}}"#;
+        assert_eq!(
+            parse_line(line),
+            vec![ChatEvent::Tool {
+                id: "t1".into(),
+                name: "Bash".into(),
+                path: None,
+                body: Some("ls -a".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_edit_tool_use_carries_a_diff_and_path() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[
+            {"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"a.ts","old_string":"one","new_string":"two"}}
+        ]}}"#;
+        assert_eq!(
+            parse_line(line),
+            vec![ChatEvent::Tool {
+                id: "t2".into(),
+                name: "Edit".into(),
+                path: Some("a.ts".into()),
+                body: Some("- one\n+ two".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_tool_result_ties_back_by_id() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"t1","content":"file listing","is_error":false}
+        ]}}"#;
+        assert_eq!(
+            parse_line(line),
+            vec![ChatEvent::ToolResult {
+                id: "t1".into(),
+                ok: true,
+                text: "file listing".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_errored_tool_result_is_not_ok() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"t9","content":"boom","is_error":true}
+        ]}}"#;
+        assert_eq!(
+            parse_line(line),
+            vec![ChatEvent::ToolResult {
+                id: "t9".into(),
+                ok: false,
+                text: "boom".into(),
+            }]
+        );
+    }
+}

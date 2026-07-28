@@ -61,7 +61,8 @@ export function TerminalSurface({
       cursorBlink: true,
       allowProposedApi: true,
       // Cap scrollback per terminal; parked tabs each keep their own buffer, so this bounds memory.
-      scrollback: 2000,
+      // The daemon keeps the real history, so this is only how far back this viewport can scroll.
+      scrollback: 1000,
       theme: { background, foreground },
     })
     const fit = new FitAddon()

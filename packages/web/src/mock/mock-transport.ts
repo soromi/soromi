@@ -13,8 +13,25 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
     folders: ['.'],
     accounts: [{ id: 'personal', agent: 'claude' }],
     sessions: [
-      { id: 'sess-1', agent: 'claude', account: 'personal', status: 'thinking', title: 'daemon' },
-      { id: 'sess-2', agent: 'claude', account: 'personal', status: 'idle', title: 'gui' },
+      {
+        id: 'sess-1',
+        agent: 'claude',
+        account: 'personal',
+        status: 'thinking',
+        title: 'daemon',
+        subagents: [
+          { name: 'Map v1 → v2 fields', status: 'done' },
+          { name: 'Rewrite encoder', status: 'thinking' },
+        ],
+      },
+      {
+        id: 'sess-2',
+        agent: 'claude',
+        account: 'personal',
+        status: 'idle',
+        title: 'gui',
+        subagents: [],
+      },
     ],
   },
   {
@@ -24,7 +41,14 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
     folders: ['api', 'web'],
     accounts: [{ id: 'work', agent: 'claude' }],
     sessions: [
-      { id: 'sess-3', agent: 'claude', account: 'work', status: 'waiting-input', title: 'api' },
+      {
+        id: 'sess-3',
+        agent: 'claude',
+        account: 'work',
+        status: 'waiting-input',
+        title: 'api',
+        subagents: [],
+      },
     ],
   },
   {
@@ -33,7 +57,9 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
     root: '/Users/you/work/scratch',
     folders: ['.'],
     accounts: [{ id: 'personal', agent: 'codex' }],
-    sessions: [{ id: 'sess-4', agent: 'codex', account: 'personal', status: 'idle' }],
+    sessions: [
+      { id: 'sess-4', agent: 'codex', account: 'personal', status: 'idle', subagents: [] },
+    ],
   },
 ]
 

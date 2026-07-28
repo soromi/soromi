@@ -1,11 +1,12 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::AgentUsage;
+use soromi_protocol::{AgentUsage, Status};
 
 use super::{Provider, UsageAuthState};
 
 mod hooks;
+mod status;
 mod usage;
 
 /// OpenAI's Codex CLI.
@@ -52,6 +53,15 @@ impl Provider for Codex {
     fn parse_usage(&self, body: &[u8]) -> Option<AgentUsage> {
         usage::parse(body)
     }
+
+    fn parse_status(&self, chunk: &str) -> Option<Status> {
+        status::parse(chunk)
+    }
+
+    // Codex writes a "rollout" JSONL transcript, but its schema differs from Claude's and Soromi
+    // does not yet capture Codex's transcript path (the notify bridge reports only the session id).
+    // So `parse_transcript_line` stays the default (no events) until both are wired; the seam is
+    // ready for it. Codex still gets live status from `parse_status` + its notify hooks.
 }
 
 #[cfg(test)]

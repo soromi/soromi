@@ -20,11 +20,11 @@ export function statusTone(status: Status): Tone {
 }
 
 /**
- * The line shown under a workspace name in the switcher. The active workspace reads "Active now";
- * a finished-but-unseen one reads "needs review"; otherwise it reflects the aggregate tone.
+ * The line shown under a workspace name in the switcher. A finished-but-unseen workspace reads
+ * "needs review"; otherwise it reflects the agent's real status — including the one you're viewing,
+ * which no longer masks its state behind a blanket "Active now".
  */
-export function statusLabel(status: Status, active: boolean, needsReview: boolean): string {
-  if (active) return 'Active now'
+export function statusLabel(status: Status, needsReview: boolean): string {
   if (needsReview) return 'Finished · needs review'
 
   switch (statusTone(status)) {

@@ -1,10 +1,16 @@
-import { Menu } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { TakeoverScreen, TerminalSurface, useClientStore } from '@soromi/client'
-import { SessionTabs } from '@soromi/ui'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+  SessionTabs,
+} from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -19,9 +25,6 @@ import { ProviderIcon } from '@/shared/provider-icon'
 //Icons
 import PlusIcon from '@/assets/icons/plus.svg?react'
 
-//Styles
-import styles from './terminal-deck.module.css'
-
 //Types
 import type { Transport } from '@soromi/client'
 import type { SessionTab } from '@soromi/ui'
@@ -33,11 +36,13 @@ import type { SessionSummary } from '@soromi/protocol'
  * The tab strip belongs to the active workspace; a "＋" opens another session for a chosen agent.
  */
 export function TerminalDeck({ transport }: { transport: Transport }) {
-  const { active, activeSession, selectSession } = useAppStore(
+  const { active, activeSession, selectSession, explorerOpen, toggleExplorer } = useAppStore(
     useShallow((s) => ({
       active: s.active,
       activeSession: s.activeSession,
       selectSession: s.selectSession,
+      explorerOpen: s.explorerOpen,
+      toggleExplorer: s.toggleExplorer,
     })),
   )
   const { workspaces, accounts } = useClientStore(
@@ -106,33 +111,34 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
   )
 
   const newSession = (
-    <Menu position="bottom-start" width={160}>
-      <Menu.Target>
-        <button type="button" className={styles.newTab} title="New session">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex h-[40px] w-11 cursor-pointer appearance-none items-center justify-center border-none bg-transparent text-[var(--soromi-text-dim)] text-base hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+          title="New session"
+        >
           <PlusIcon width={16} height={16} />
         </button>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>New session</Menu.Label>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-40">
+        <DropdownMenuLabel>New session</DropdownMenuLabel>
         {availableProviders.length === 0 ? (
-          <Menu.Item disabled>No accounts configured</Menu.Item>
+          <DropdownMenuItem disabled>No accounts configured</DropdownMenuItem>
         ) : (
           availableProviders.map((provider) => (
-            <Menu.Item
-              key={provider.value}
-              leftSection={<ProviderIcon provider={provider.value} size={14} />}
-              onClick={() => openTab(provider.value)}
-            >
+            <DropdownMenuItem key={provider.value} onClick={() => openTab(provider.value)}>
+              <ProviderIcon provider={provider.value} size={14} />
               {provider.label}
-            </Menu.Item>
+            </DropdownMenuItem>
           ))
         )}
-      </Menu.Dropdown>
-    </Menu>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 
   return (
-    <div className={styles.deck}>
+    <div className="flex min-h-0 flex-1 flex-col">
       {workspace && (
         <SessionTabs
           tabs={tabs}
@@ -142,9 +148,36 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
           onClose={(id) => transport.send({ type: 'close-session', session: id })}
           renderIcon={(agent) => <ProviderIcon provider={agent} size={16} />}
           trailing={newSession}
+          rightSlot={
+            !explorerOpen && (
+              <button
+                type="button"
+                title="Explorer"
+                onClick={toggleExplorer}
+                className="mr-2 flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-2.5 py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+                Explorer
+              </button>
+            )
+          }
         />
       )}
-      <div className={styles.panes}>
+      {/* `isolate` keeps the takeover overlay's z-index contained to the terminal area, so it
+          can't paint over the status bar or its popups (usage / devices). */}
+      <div className="relative isolate flex min-h-0 flex-1 flex-col">
         {visited.map((id) => (
           <TerminalSurface
             key={id}

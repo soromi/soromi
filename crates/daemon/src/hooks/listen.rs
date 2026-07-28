@@ -38,7 +38,19 @@ pub fn spawn(service: Arc<WorkspaceService>) {
                     if let Some(resume_id) = event.resume_id {
                         service.set_resume_id(&event.session, resume_id);
                     }
-                    if let Some(cue) = super::cue_from(&event.cue) {
+                    if let Some(transcript_path) = event.transcript_path {
+                        service.set_transcript(&event.session, transcript_path.into());
+                    }
+                    if event.cue == "active" {
+                        // Authoritative "working" signal (UserPromptSubmit / PreToolUse): the tab is
+                        // running. Status only, no sound or banner — the agent starting work is not
+                        // a ping-worthy event.
+                        service.handle_agent_active(&event.session);
+                    } else if event.cue == "idle" {
+                        // The agent went quiet (Claude's idle notification): reflect it in the tab
+                        // status, but with no sound or banner — going idle is not worth a ping.
+                        service.handle_agent_idle(&event.session);
+                    } else if let Some(cue) = super::cue_from(&event.cue) {
                         service.handle_agent_event(&event.session, cue, event.agent.as_deref());
                     }
                 }

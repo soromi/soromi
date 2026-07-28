@@ -1,10 +1,8 @@
-import clsx from 'clsx'
+//Packages
+import { cn } from '@soromi/ui'
 
 //Store
 import { useUiStore } from '@/stores/ui-store'
-
-//Styles
-import styles from './tab-bar.module.css'
 
 //Types
 import type { MobileTab } from '@/stores/ui-store'
@@ -50,12 +48,15 @@ export function TabBar() {
   const setTab = useUiStore((s) => s.setTab)
 
   return (
-    <nav className={styles.bar}>
+    <nav className="flex flex-none items-stretch justify-around border-[var(--soromi-border-subtle)] border-t bg-[var(--soromi-bg-rail)] px-1 pt-1.5 pb-[calc(6px+var(--safe-bottom))]">
       {TABS.map((item) => (
         <button
           key={item.key}
           type="button"
-          className={clsx(styles.tab, item.key === tab && styles.active)}
+          className={cn(
+            'flex flex-1 cursor-pointer appearance-none flex-col items-center gap-[3px] rounded-[10px] border-none bg-transparent pt-1.5 pb-1 text-[var(--soromi-text-faint)]',
+            item.key === tab && 'text-[var(--soromi-accent)]',
+          )}
           onClick={() => setTab(item.key)}
         >
           <svg
@@ -71,7 +72,7 @@ export function TabBar() {
           >
             {item.icon}
           </svg>
-          <span className={styles.label}>{item.label}</span>
+          <span className="font-semibold text-[10.5px]">{item.label}</span>
         </button>
       ))}
     </nav>

@@ -8,6 +8,9 @@ pub struct Invocation {
     pub agent: Option<String>,
     /// The agent's own conversation id, on a `session-start` hook (read from stdin JSON).
     pub resume_id: Option<String>,
+    /// The agent's JSONL transcript path, on a `session-start` hook (read from stdin JSON), so the
+    /// daemon can tail it for the chat view.
+    pub transcript_path: Option<String>,
 }
 
 /// If this process was invoked as an event bridge, returns the parsed invocation:
@@ -21,21 +24,33 @@ pub fn invocation() -> Option<Invocation> {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("hook") => {
-            let cue = args.next()?;
+            let mut cue = args.next()?;
             let agent = args.next();
-            let resume_id = if cue == "session-start" {
-                read_stdin_json().and_then(|v| {
-                    v.get("session_id")?
-                        .as_str()
-                        .map(std::string::ToString::to_string)
-                })
+            // The session-start hook's stdin JSON carries the agent's conversation id (to resume)
+            // and its transcript path (to tail for chat). Read stdin once and take both.
+            let (resume_id, transcript_path) = if cue == "session-start" {
+                let payload = read_stdin_json();
+                let field = |key: &str| {
+                    payload
+                        .as_ref()
+                        .and_then(|value| value.get(key)?.as_str().map(str::to_string))
+                };
+                (field("session_id"), field("transcript_path"))
+            } else if cue == "notify" {
+                // Claude fires one Notification hook for two very different things: a prompt that
+                // needs the user (permission / input), and a "waiting for your input" nudge once the
+                // agent has simply gone idle. Read the message to tell them apart, so idle reads as
+                // idle (quiet, gray) instead of demanding attention.
+                cue = notify_cue(read_stdin_json());
+                (None, None)
             } else {
-                None
+                (None, None)
             };
             Some(Invocation {
                 cue,
                 agent,
                 resume_id,
+                transcript_path,
             })
         }
         Some("codex-notify") => {
@@ -51,6 +66,24 @@ pub fn invocation() -> Option<Invocation> {
             Some(inv)
         }
         _ => None,
+    }
+}
+
+/// Resolves a Claude `Notification` into a cue from its message: the idle "waiting for your input"
+/// nudge becomes `idle` (the tab goes quiet), while anything else — a permission or input prompt —
+/// becomes `request` (the tab wants you). Defaults to `request` so an unrecognized prompt is surfaced
+/// rather than silenced.
+fn notify_cue(payload: Option<serde_json::Value>) -> String {
+    let message = payload
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_lowercase();
+    if message.contains("waiting for your input") {
+        "idle".to_string()
+    } else {
+        "request".to_string()
     }
 }
 
@@ -85,6 +118,7 @@ fn codex_cue(event: &str) -> Option<Invocation> {
         cue: cue.to_string(),
         agent: Some("codex".to_string()),
         resume_id: None,
+        transcript_path: None,
     })
 }
 
@@ -102,6 +136,7 @@ pub fn deliver(invocation: &Invocation) {
             "session": session,
             "agent": invocation.agent,
             "resume_id": invocation.resume_id,
+            "transcript_path": invocation.transcript_path,
         })
         .to_string();
         let _ = writeln!(stream, "{line}");

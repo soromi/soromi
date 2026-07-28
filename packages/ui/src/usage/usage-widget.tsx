@@ -1,11 +1,10 @@
-import clsx from 'clsx'
 import { useMemo, useState } from 'react'
 
 //Components
 import { AgentLogo } from './agent-logo'
 
-//Styles
-import styles from './usage-widget.module.css'
+//Utils
+import { cn } from '../lib/utils'
 
 //Types
 import type { AgentUsage } from '@soromi/protocol'
@@ -125,10 +124,10 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
   )
 
   return (
-    <div className={styles.side}>
+    <div className="relative">
       <button
         type="button"
-        className={styles.trigger}
+        className="flex cursor-pointer appearance-none items-center gap-[7px] rounded-lg border-none bg-transparent px-2.5 py-1 font-medium text-[var(--soromi-text-faint)] text-xs transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-[0.55]"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
@@ -146,17 +145,23 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
           <path d="M3 3v18h18" />
           <path d="M7 15l4-5 3 3 5-7" />
         </svg>
-        <span className={styles.triggerLabel}>Usage</span>
+        <span className="font-semibold text-[var(--soromi-text-dim)]">Usage</span>
 
         {triggerStats.map((stat) => (
-          <span key={stat.agent} className={styles.triggerStat}>
-            <span className={styles.triggerDot} style={{ background: stat.color }} />
+          <span
+            key={stat.agent}
+            className="inline-flex items-center gap-[5px] font-semibold text-[var(--soromi-text-dim)] text-xs"
+          >
+            <span className="h-[7px] w-[7px] rounded-full" style={{ background: stat.color }} />
             {stat.percent}%
           </span>
         ))}
 
         <svg
-          className={clsx(styles.triggerChevron, open && styles.triggerChevronOpen)}
+          className={cn(
+            'text-[var(--soromi-text-faint)] transition-transform',
+            open && 'rotate-180',
+          )}
           width="12"
           height="12"
           viewBox="0 0 24 24"
@@ -175,15 +180,22 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
         <>
           {/** biome-ignore lint/a11y/noStaticElementInteractions: click-away backdrop. */}
           {/** biome-ignore lint/a11y/useKeyWithClickEvents: click-away backdrop. */}
-          <div className={styles.backdrop} onClick={() => setOpen(false)} />
-          <div className={clsx(styles.popup, styles.popupLeft)}>
-            <div className={styles.popupHead}>
-              <span className={styles.popupTitle}>Usage</span>
-              <div className={styles.headEnd}>
-                {soonestReset && <span className={styles.headReset}>Resets in {soonestReset}</span>}
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-10 left-1 z-[61] w-80 overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-rail)] shadow-[0_20px_60px_rgb(0_0_0/50%)]">
+            <div className="flex items-center justify-between border-[var(--soromi-border)] border-b px-3.5 pt-[13px] pb-[11px]">
+              <span className="font-semibold text-[12.5px] text-[var(--soromi-text)]">Usage</span>
+              <div className="flex items-center gap-1.5">
+                {soonestReset && (
+                  <span className="text-[var(--soromi-text-faint)] text-xs">
+                    Resets in {soonestReset}
+                  </span>
+                )}
                 <button
                   type="button"
-                  className={clsx(styles.refresh, loading && styles.spinning)}
+                  className={cn(
+                    'flex h-6 w-6 cursor-pointer appearance-none items-center justify-center rounded-md border-none bg-transparent text-[var(--soromi-text-faint)] enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)]',
+                    loading && 'animate-[spin_0.8s_linear_infinite]',
+                  )}
                   onClick={onRefresh}
                   aria-label="Refresh usage"
                   disabled={loading}
@@ -206,34 +218,53 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
               </div>
             </div>
 
-            <div className={styles.popupBody}>
+            <div className="flex flex-col gap-2 p-2.5">
               {views.length === 0 ? (
-                <div className={styles.empty}>
-                  <div className={styles.emptyTitle}>
+                <div className="px-1.5 pt-3.5 pb-4 text-center">
+                  <div className="font-medium text-[13px] text-[var(--soromi-text-dim)]">
                     {loading ? 'Loading usage…' : 'No usage available'}
                   </div>
                   {!loading && (
-                    <div className={styles.emptyDesc}>Sign in to an agent to see plan usage.</div>
+                    <div className="mt-[3px] text-[11.5px] text-[var(--soromi-text-faint)]">
+                      Sign in to an agent to see plan usage.
+                    </div>
                   )}
                 </div>
               ) : (
                 views.map((view) => (
-                  <div key={view.agent} className={styles.usageAgent}>
-                    <div className={styles.usageAgentHead}>
+                  <div
+                    key={view.agent}
+                    className="flex flex-col gap-[11px] px-1 py-3.5 [&:not(:first-child)]:border-[var(--soromi-border)] [&:not(:first-child)]:border-t"
+                  >
+                    <div className="flex items-center gap-[9px]">
                       <AgentLogo kind={view.logo} color={view.color} />
-                      <span className={styles.usageAgentName}>{view.label}</span>
-                      {view.plan && <span className={styles.usagePlan}>{view.plan}</span>}
+                      <span className="font-bold text-[var(--soromi-text)] text-sm">
+                        {view.label}
+                      </span>
+                      {view.plan && (
+                        <span className="ml-auto font-semibold text-[var(--soromi-text-faint)] text-xs capitalize">
+                          {view.plan}
+                        </span>
+                      )}
                     </div>
-                    {view.note && <p className={styles.usageNote}>{view.note}</p>}
+                    {view.note && (
+                      <p className="m-0 text-[11.5px] text-[var(--soromi-text-dim)] leading-[1.45]">
+                        {view.note}
+                      </p>
+                    )}
                     {view.windows.map((window) => (
-                      <div key={window.key} className={styles.usageWindow}>
-                        <div className={styles.usageWindowHead}>
-                          <span className={styles.usageWindowLabel}>{window.label}</span>
-                          <span className={styles.usageWindowPct}>{window.percent}%</span>
+                      <div key={window.key} className="flex flex-col gap-1">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-[12.5px] text-[var(--soromi-text-dim)]">
+                            {window.label}
+                          </span>
+                          <span className="font-bold text-[13px] text-[var(--soromi-text)]">
+                            {window.percent}%
+                          </span>
                         </div>
-                        <div className={styles.usageTrack}>
+                        <div className="h-[7px] overflow-hidden rounded bg-[var(--soromi-bg-active)]">
                           <div
-                            className={styles.usageFill}
+                            className="h-full rounded"
                             style={{ width: window.width, background: view.color }}
                           />
                         </div>
@@ -245,7 +276,11 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
             </div>
 
             {manageUrl && onManage && (
-              <button type="button" className={styles.manage} onClick={() => onManage(manageUrl)}>
+              <button
+                type="button"
+                className="flex w-full cursor-pointer appearance-none items-center justify-between border-[var(--soromi-border)] border-t bg-transparent px-3.5 py-3 font-medium text-[13px] text-[var(--soromi-text-dim)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+                onClick={() => onManage(manageUrl)}
+              >
                 Manage plan
                 <svg
                   width="13"

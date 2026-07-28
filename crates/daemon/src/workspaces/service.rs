@@ -242,6 +242,14 @@ impl WorkspaceService {
         }
     }
 
+    /// Points a live session's chat view at its agent transcript, so the daemon tails it into
+    /// structured chat events. No-op if the session isn't live (yet).
+    pub fn set_transcript(&self, session_id: &str, path: std::path::PathBuf) {
+        if let Some(session) = self.get(session_id) {
+            session.start_transcript(path);
+        }
+    }
+
     /// Records an available update and wakes viewports so they can show the banner.
     pub fn set_update(&self, info: UpdateInfo) {
         *self.update.lock().unwrap() = Some(info);
@@ -387,6 +395,8 @@ impl WorkspaceService {
             agent,
             status: Status::Idle,
             title: None,
+            subagents: Vec::new(),
+            activity: None,
         })
     }
 
@@ -482,16 +492,17 @@ impl WorkspaceService {
                 let sessions: Vec<SessionSummary> = meta
                     .sessions
                     .iter()
-                    .map(|session| SessionSummary {
-                        id: session.id.clone(),
-                        agent: session.agent.clone(),
-                        account: account_for(&meta.accounts, &session.agent),
-                        status: self
-                            .manager
-                            .get(&session.id)
-                            .map(|s| s.status())
-                            .unwrap_or(Status::Idle),
-                        title: session.title.clone(),
+                    .map(|session| {
+                        let live = self.manager.get(&session.id);
+                        SessionSummary {
+                            id: session.id.clone(),
+                            agent: session.agent.clone(),
+                            account: account_for(&meta.accounts, &session.agent),
+                            status: live.as_ref().map(|s| s.status()).unwrap_or(Status::Idle),
+                            title: session.title.clone(),
+                            subagents: live.as_ref().map(|s| s.subagents()).unwrap_or_default(),
+                            activity: live.as_ref().and_then(|s| s.activity()),
+                        }
                     })
                     .collect();
                 WorkspaceSummary {
@@ -938,6 +949,7 @@ impl WorkspaceService {
         }
 
         let options = SessionOptions {
+            agent: command.to_string(),
             command: parsed.command,
             args,
             cwd,
@@ -955,14 +967,35 @@ impl WorkspaceService {
     /// notifications come from the agent hooks (reliable), not this heuristic status parser.
     fn watch_status(&self, session_id: &str, session: &Session) {
         let mut status_rx = session.subscribe_status();
+        let mut subagents_rx = session.subscribe_subagents();
+        let mut activity_rx = session.subscribe_activity();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            while status_rx.changed().await.is_ok() {
-                let status = *status_rx.borrow_and_update();
-                keep_awake.handle(&session_id, status);
-                let _ = change_tx.send(());
+            loop {
+                tokio::select! {
+                    changed = status_rx.changed() => {
+                        if changed.is_err() { break }
+                        let status = *status_rx.borrow_and_update();
+                        keep_awake.handle(&session_id, status);
+                        let _ = change_tx.send(());
+                    }
+                    // The running sub-agents changed (a Task spawned or finished): re-broadcast so
+                    // the sidebar nests them under the tab live.
+                    changed = subagents_rx.changed() => {
+                        if changed.is_err() { break }
+                        subagents_rx.borrow_and_update();
+                        let _ = change_tx.send(());
+                    }
+                    // The current activity changed (a tool started or finished): re-broadcast so the
+                    // tab's live subtitle updates.
+                    changed = activity_rx.changed() => {
+                        if changed.is_err() { break }
+                        activity_rx.borrow_and_update();
+                        let _ = change_tx.send(());
+                    }
+                }
             }
         });
     }
@@ -1005,6 +1038,25 @@ impl WorkspaceService {
             None => cue_text(cue).to_string(),
         };
         self.notifications.fire(&workspace, &text);
+    }
+
+    /// Records that a session has gone idle (Claude's idle notification). Status only: unlike
+    /// `handle_agent_event` it plays no sound and fires no banner, because an agent going quiet is
+    /// not an event worth interrupting the user for.
+    pub fn handle_agent_idle(&self, session_id: &str) {
+        if let Some(session) = self.manager.get(session_id) {
+            session.set_hook_status(Status::Idle);
+        }
+    }
+
+    /// Records that a session is working (Claude's UserPromptSubmit / PreToolUse hooks): marks the
+    /// tab running and restarts the idle-decay clock. This is the reliable, per-agent "working"
+    /// signal — far better than scraping the terminal spinner, whose wording keeps changing. Status
+    /// only: an agent starting work fires no sound or banner.
+    pub fn handle_agent_active(&self, session_id: &str) {
+        if let Some(session) = self.manager.get(session_id) {
+            session.mark_active();
+        }
     }
 
     fn persist(&self) {

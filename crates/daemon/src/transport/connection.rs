@@ -310,11 +310,25 @@ impl Connection {
             session: session_id.to_string(),
             status: session.status(),
         });
+        // Reset the chat view, then replay the transcript so far. A session with no transcript
+        // (non-Claude, or before its first hook) sends the reset and no events, so the viewport
+        // falls back to the terminal.
+        self.send(ServerMessage::ChatReset {
+            session: session_id.to_string(),
+        });
+        let chat = session.chat_snapshot();
+        if !chat.is_empty() {
+            self.send(ServerMessage::Chat {
+                session: session_id.to_string(),
+                events: chat,
+            });
+        }
 
         let out = self.out.clone();
         let id = session_id.to_string();
         let mut output_rx = session.subscribe_output();
         let mut status_rx = session.subscribe_status();
+        let mut chat_rx = session.subscribe_chat();
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -332,6 +346,16 @@ impl Connection {
                         let status = *status_rx.borrow_and_update();
                         let _ = out.send(ServerMessage::Status { session: id.clone(), status });
                     }
+                    event = chat_rx.recv() => match event {
+                        Ok(event) => {
+                            let _ = out.send(ServerMessage::Chat {
+                                session: id.clone(),
+                                events: vec![event],
+                            });
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
                 }
             }
         });

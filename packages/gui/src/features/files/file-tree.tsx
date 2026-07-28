@@ -1,10 +1,9 @@
-import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
-import { FileTree as FileTreeView, flattenTree } from '@soromi/ui'
+import { FileTree as FileTreeView, cn, flattenTree } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -15,12 +14,13 @@ import { copyText, revealInFinder } from '@/lib/host'
 //Constants
 import { isTauri } from '@/config'
 
-//Styles
-import styles from './file-tree.module.css'
-
 //Types
 import type { FileNode } from '@soromi/ui'
 import type { MouseEvent as ReactMouseEvent } from 'react'
+
+/** Shared style for a right-click menu item. */
+const MENU_ITEM =
+  'block w-full cursor-pointer appearance-none rounded-md border-none bg-transparent px-2.5 py-1.5 text-left text-[13px] text-[var(--soromi-text)] hover:bg-[var(--soromi-bg-hover)]'
 
 interface MenuTarget {
   x: number
@@ -69,7 +69,11 @@ export function FileTree() {
   }, [active, expanded, listings, transport])
 
   if (!active) {
-    return <div className={styles.empty}>Open a workspace to see its folders.</div>
+    return (
+      <div className="px-2 py-1 text-[var(--soromi-text-faint)]">
+        Open a workspace to see its folders.
+      </div>
+    )
   }
 
   const nodes = flattenTree({
@@ -154,26 +158,25 @@ function ContextMenu({
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismissal; Escape is handled above.
     // biome-ignore lint/a11y/noStaticElementInteractions: an invisible click-away backdrop, not a control.
-    <div className={styles.backdrop} onClick={onClose} onContextMenu={(e) => e.preventDefault()}>
-      <div className={styles.menu} style={{ top: menu.y, left: menu.x }}>
-        <button
-          type="button"
-          className={styles.menuItem}
-          onClick={() => run(() => copyText(absolute))}
-        >
+    <div
+      className="fixed inset-0 z-[var(--z-context-menu)]"
+      onClick={onClose}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div
+        className="fixed min-w-[180px] select-none rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] p-1 shadow-[0_8px_24px_rgb(0_0_0/40%)]"
+        style={{ top: menu.y, left: menu.x }}
+      >
+        <button type="button" className={MENU_ITEM} onClick={() => run(() => copyText(absolute))}>
           Copy path
         </button>
-        <button
-          type="button"
-          className={styles.menuItem}
-          onClick={() => run(() => copyText(menu.path))}
-        >
+        <button type="button" className={MENU_ITEM} onClick={() => run(() => copyText(menu.path))}>
           Copy relative path
         </button>
         {isTauri && (
           <button
             type="button"
-            className={styles.menuItem}
+            className={MENU_ITEM}
             onClick={() => run(() => revealInFinder(absolute))}
           >
             Reveal in Finder
@@ -181,10 +184,10 @@ function ContextMenu({
         )}
         {canRemoveFolder && (
           <>
-            <div className={styles.menuDivider} />
+            <div className="my-1 h-px bg-[var(--soromi-border)]" />
             <button
               type="button"
-              className={clsx(styles.menuItem, styles.menuDanger)}
+              className={cn(MENU_ITEM, 'text-[#f87171]')}
               onClick={() => run(removeFolder)}
             >
               Remove from workspace

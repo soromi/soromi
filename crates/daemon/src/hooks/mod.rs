@@ -24,6 +24,10 @@ pub(crate) struct Event {
     /// The agent's own conversation id, on a `session-start` event, so the tab can resume it.
     #[serde(default)]
     pub resume_id: Option<String>,
+    /// The agent's JSONL transcript path, on a `session-start` event, so the daemon can tail it for
+    /// the chat view.
+    #[serde(default)]
+    pub transcript_path: Option<String>,
 }
 
 pub(crate) fn cue_from(name: &str) -> Option<Cue> {

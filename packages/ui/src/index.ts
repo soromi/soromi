@@ -19,7 +19,43 @@ export { ProviderIcon } from './icons/provider-icon'
 export { useReorder } from './hooks/use-reorder'
 export { DragHandle } from './drag-handle'
 
-export { theme } from './mantine-theme'
+export { cn } from './lib/utils'
+
+// shadcn/ui primitives (Tailwind + Radix), shared by the desktop and web apps.
+export { Button, buttonVariants } from './components/ui/button'
+export type { ButtonProps } from './components/ui/button'
+export { Input } from './components/ui/input'
+export { Textarea } from './components/ui/textarea'
+export { Label } from './components/ui/label'
+export { Switch } from './components/ui/switch'
+export { Spinner } from './components/ui/spinner'
+export {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select'
+export {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu'
+export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from './components/ui/dialog'
+export { ConfirmDialog } from './components/ui/alert-dialog'
+export { Sheet, SheetClose, SheetContent, SheetTrigger } from './components/ui/sheet'
+
+export { useMediaQuery } from './hooks/use-media-query'
 
 export { UsageWidget } from './usage/usage-widget'
 export type { UsageWidgetProps } from './usage/usage-widget'

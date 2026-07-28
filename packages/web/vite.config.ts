@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url'
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -8,6 +9,7 @@ export default defineConfig({
   plugins: [
     react(),
     svgr(),
+    tailwindcss(),
     // Installable PWA: precache the built app shell for offline launch, auto-update the service
     // worker on new deploys. Uses the hand-written public/manifest.webmanifest (already linked in
     // index.html), so this only owns the service worker.
@@ -35,7 +37,8 @@ export default defineConfig({
       '@soromi/ui/code-viewer': fileURLToPath(
         new URL('../ui/src/files/code-viewer.tsx', import.meta.url),
       ),
-      '@soromi/ui': fileURLToPath(new URL('../ui/src/index.ts', import.meta.url)),
+      // Bare package -> barrel; any subpath resolves under `src/` (for shadcn/AI-Elements imports).
+      '@soromi/ui': fileURLToPath(new URL('../ui/src', import.meta.url)),
     },
   },
 })
