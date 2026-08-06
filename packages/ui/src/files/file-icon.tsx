@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 /** The glyph a file gets. Shape marks the broad category; colour marks the specific type. */
 type Kind = 'code' | 'doc' | 'image' | 'lock' | 'page'
 
-const MUTED = '#9a9a9e'
+const MUTED = '#999999'
 
 /** Extension -> glyph + colour. Colours are brightened linguist-ish brand colours (dark-bg legible). */
 const BY_EXT: Record<string, { kind: Kind; color: string }> = {

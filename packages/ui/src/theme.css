@@ -4,23 +4,26 @@
  * live in each app's own theme.css.
  */
 :root {
-  /* Warm-neutral dark palette. */
-  --soromi-bg-app: #0a0a0b;
-  --soromi-bg-rail: #0b0b0c;
-  --soromi-bg-sidebar: #0f0f11;
-  --soromi-bg-tab: #0d0d0f;
-  --soromi-bg-terminal: #0f0f11;
-  --soromi-bg-hover: #19191c;
-  --soromi-bg-active: #242427;
-  --soromi-border: #242427;
-  --soromi-border-subtle: #1a1a1d;
+  /* Neutral dark palette. Surfaces collapse into a clean ladder: the darkest `shell` sits behind
+     everything and under the status bar; `app`/`terminal` are the content surfaces (sidebar, main,
+     panels), then hover, then active/borders. */
+  --soromi-bg-shell: #09090a;
+  --soromi-bg-app: #121213;
+  --soromi-bg-rail: #121213;
+  --soromi-bg-sidebar: #121213;
+  --soromi-bg-tab: #121213;
+  --soromi-bg-terminal: #121213;
+  --soromi-bg-hover: #1f1f1f;
+  --soromi-bg-active: #2a2a2a;
+  --soromi-border: #2a2a2a;
+  --soromi-border-subtle: #1f1f1f;
   --soromi-text: #f0f0f0;
-  --soromi-text-dim: #c9c9cc;
-  --soromi-text-faint: #6a6a6e;
+  --soromi-text-dim: #cccccc;
+  --soromi-text-faint: #6e6e6e;
 
   /* Emerald accent. */
   --soromi-accent: #3ecf8e;
-  --soromi-accent-dim: #143024;
+  --soromi-accent-dim: #11251b;
   --soromi-accent-border: #24523c;
   --soromi-accent-on: #08321f;
   --soromi-warn: #d9a53f;
@@ -34,6 +37,34 @@
 
   /* Monospace stack for code / terminal-adjacent surfaces (replaces Mantine's font var). */
   --soromi-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/*
+ * Light appearance. Applied as a `so-light` class on the root element (see the app store's `theme`);
+ * it overrides the palette tokens so every surface flips, while the emerald accent, amber warn, and
+ * red destructive colors stay literal in both themes. Higher specificity than `:root`, so it wins.
+ */
+.so-light {
+  --soromi-bg-shell: #eeeeec;
+  --soromi-bg-app: #eeeeec;
+  --soromi-bg-rail: #eeeeec;
+  --soromi-bg-sidebar: #ffffff;
+  --soromi-bg-tab: #e9e9e5;
+  --soromi-bg-terminal: #ffffff;
+  --soromi-bg-hover: #e9e9e5;
+  --soromi-bg-active: #d8d8d2;
+  --soromi-border: #d8d8d2;
+  --soromi-border-subtle: #e0e0da;
+  --soromi-text: #0f0f0e;
+  --soromi-text-dim: #3a3a36;
+  --soromi-text-faint: #75756e;
+
+  --soromi-accent: #3ecf8e;
+  --soromi-accent-dim: #dcf1e5;
+  --soromi-accent-border: #a7dcc2;
+  --soromi-accent-on: #08321f;
+  --soromi-warn: #d9a53f;
+  --soromi-ok: #3ecf8e;
 }
 
 /*

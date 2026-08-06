@@ -3,10 +3,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use soromi_protocol::Status;
+use tokio::sync::broadcast;
 
 use super::notifier::{Notification, Notifier};
 
 const DEBOUNCE: Duration = Duration::from_millis(3500);
+
+/// A banner routed to a native viewer (the Electron shell) instead of fired locally. Carries the
+/// `workspace` (and `session`, when known) it is about, so a click can open that tab.
+#[derive(Clone)]
+pub struct WireNotification {
+    pub title: String,
+    pub body: String,
+    pub workspace: String,
+    pub session: Option<String>,
+}
 
 fn is_attention(status: Status) -> bool {
     matches!(
@@ -38,6 +49,9 @@ pub struct NotificationController {
     notifier: Arc<dyn Notifier>,
     debounce: Duration,
     inner: Arc<Mutex<Inner>>,
+    /// Native viewers (the Electron shell) subscribe here; while any are, banners route to them as
+    /// `Notify` wire messages instead of firing through `notifier` (so they carry the app identity).
+    wire_tx: broadcast::Sender<WireNotification>,
 }
 
 impl NotificationController {
@@ -53,7 +67,14 @@ impl NotificationController {
                 states: HashMap::new(),
                 muted: HashSet::new(),
             })),
+            wire_tx: broadcast::channel(64).0,
         }
+    }
+
+    /// Subscribes a native viewer: while it (or any) is subscribed, banners are delivered over this
+    /// channel rather than fired locally.
+    pub fn subscribe_wire(&self) -> broadcast::Receiver<WireNotification> {
+        self.wire_tx.subscribe()
     }
 
     pub fn set_muted(&self, workspace: &str, muted: bool) {
@@ -70,16 +91,28 @@ impl NotificationController {
     }
 
     /// Fires a banner immediately for a discrete agent event (silent, since the sound player
-    /// owns the audio), unless the workspace is muted.
-    pub fn fire(&self, workspace: &str, text: &str) {
+    /// owns the audio), unless the workspace is muted. `session` (when known) rides along so a
+    /// native click can open that tab. Routes to a native viewer if one is subscribed, else the OS.
+    pub fn fire(&self, workspace: &str, session: Option<&str>, text: &str) {
         if self.is_muted(workspace) {
             return;
         }
-        self.notifier.notify(Notification {
-            title: "Soromi".into(),
-            message: format!("\"{workspace}\" {text}"),
-            sound: false,
-        });
+        let title = "Soromi".to_string();
+        let body = format!("\"{workspace}\" {text}");
+        if self.wire_tx.receiver_count() > 0 {
+            let _ = self.wire_tx.send(WireNotification {
+                title,
+                body,
+                workspace: workspace.to_string(),
+                session: session.map(str::to_string),
+            });
+        } else {
+            self.notifier.notify(Notification {
+                title,
+                message: body,
+                sound: false,
+            });
+        }
     }
 
     pub fn handle(&self, workspace: &str, session: &str, status: Status) {
@@ -111,6 +144,7 @@ impl NotificationController {
 
         let inner = self.inner.clone();
         let notifier = self.notifier.clone();
+        let wire_tx = self.wire_tx.clone();
         let debounce = self.debounce;
         let workspace = workspace.to_string();
         let session = session.to_string();
@@ -132,7 +166,17 @@ impl NotificationController {
                 (state.status, guard.muted.contains(&workspace))
             };
             if !muted {
-                notifier.notify(message_for(&workspace, status));
+                let notification = message_for(&workspace, status);
+                if wire_tx.receiver_count() > 0 {
+                    let _ = wire_tx.send(WireNotification {
+                        title: notification.title,
+                        body: notification.message,
+                        workspace: workspace.clone(),
+                        session: Some(session.clone()),
+                    });
+                } else {
+                    notifier.notify(notification);
+                }
             }
         });
     }

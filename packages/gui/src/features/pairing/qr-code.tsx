@@ -31,7 +31,7 @@ export function QrCode({ value, size = 240 }: { value: string; size?: number }) 
               y={r + MARGIN}
               width={1}
               height={1}
-              fill="#0a0a0b"
+              fill="#121213"
             />
           ) : null,
         ),

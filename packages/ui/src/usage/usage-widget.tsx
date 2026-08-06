@@ -31,6 +31,9 @@ const BRANDS: Record<
 /** Friendlier names for the rolling windows the daemon reports. */
 const WINDOW_LABELS: Record<string, string> = { '5h': 'Session · 5h', '7d': 'Weekly' }
 
+/** Fixed dot colors for the status-bar usage trigger, by position (matches the design). */
+const USAGE_DOT = ['#d97757', '#8fa2c4']
+
 /** A compact "3h 12m" until a unix-seconds instant, or empty when unknown or past. */
 function formatCountdown(resetsAt: number): string {
   const seconds = Math.round(resetsAt - Date.now() / 1000)
@@ -127,32 +130,35 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
     <div className="relative">
       <button
         type="button"
-        className="flex cursor-pointer appearance-none items-center gap-[7px] rounded-lg border-none bg-transparent px-2.5 py-1 font-medium text-[var(--soromi-text-faint)] text-xs transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-[0.55]"
+        className="flex cursor-pointer appearance-none items-center gap-[7px] rounded-lg border-none bg-transparent px-[10px] py-[5px] font-medium text-[var(--soromi-text-faint)] text-xs transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-[0.55]"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
         <svg
-          width="14"
-          height="14"
+          width="15"
+          height="15"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.9"
+          strokeWidth="1.7"
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
         >
           <path d="M3 3v18h18" />
-          <path d="M7 15l4-5 3 3 5-7" />
+          <path d="M7 15l3.5-4 3 2.5L21 6" />
         </svg>
         <span className="font-semibold text-[var(--soromi-text-dim)]">Usage</span>
 
-        {triggerStats.map((stat) => (
+        {triggerStats.map((stat, i) => (
           <span
             key={stat.agent}
-            className="inline-flex items-center gap-[5px] font-semibold text-[var(--soromi-text-dim)] text-xs"
+            className="inline-flex items-center gap-[5px] font-semibold text-[#c6c6c6] text-xs"
           >
-            <span className="h-[7px] w-[7px] rounded-full" style={{ background: stat.color }} />
+            <span
+              className="h-[6px] w-[6px] rounded-full"
+              style={{ background: USAGE_DOT[i] ?? stat.color }}
+            />
             {stat.percent}%
           </span>
         ))}

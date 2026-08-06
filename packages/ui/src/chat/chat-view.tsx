@@ -2,6 +2,7 @@ import { Paperclip } from 'lucide-react'
 import {
   type CSSProperties,
   type MouseEvent,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -104,10 +105,9 @@ export function ChatView({
 }: ChatViewProps) {
   const rows = useMemo(() => buildRows(events), [events])
   const scrollRef = useRef<HTMLDivElement>(null)
-  const elapsed = useElapsed(working)
-  // Pace the streamed reply so it types out steadily — the CLI delivers tokens in uneven chunks
-  // (often several words or whole lines at once), which would otherwise pop in blocks.
-  const revealed = useSmoothText(streaming?.trim() ? streaming : '')
+  // The streaming reply (paced by a ~40×/sec timer) and the working clock (1×/sec) live in their own
+  // isolated children — `StreamingTail` and `WorkingIndicator` — so their frequent ticks re-render
+  // just those nodes, not this whole view and every committed row.
 
   // "Load earlier" prepends a page from the daemon. Anchor by distance-from-bottom so the view holds
   // its place when older messages land above (`null` = no pending load).
@@ -200,8 +200,8 @@ export function ChatView({
               ))}
             </>
           )}
-          {revealed && <Markdown incomplete>{revealed}</Markdown>}
-          {working && !approvals?.length && <WorkingIndicator elapsed={elapsed} />}
+          <StreamingTail text={streaming?.trim() ? streaming : ''} />
+          {working && !approvals?.length && <WorkingIndicator />}
           {approvals?.map((approval) => (
             <Approval
               key={approval.id}
@@ -260,8 +260,10 @@ function useWorkingWord(): string {
  * running seconds — the way Claude Code rotates its spinner words. The `--color-background` override
  * flips the AI Elements Shimmer's sweep to a light highlight, since our app background is dark.
  */
-function WorkingIndicator({ elapsed }: { elapsed: number }) {
+function WorkingIndicator() {
   const word = useWorkingWord()
+  // Owns its own second timer so the running clock re-renders only this indicator, not the whole view.
+  const elapsed = useElapsed(true)
   return (
     <div
       className="flex items-center gap-2 py-1 text-[13px] leading-none"
@@ -274,7 +276,10 @@ function WorkingIndicator({ elapsed }: { elapsed: number }) {
   )
 }
 
-function ChatRow({ row }: { row: Row }) {
+// Memoized: `rows` (and each `row` object) are referentially stable while a turn streams — only the
+// live delta changes, not `events` — so a re-render of `ChatView` (which happens on every delta,
+// since `streaming` is a prop) skips every committed row instead of re-parsing all their markdown.
+const ChatRow = memo(function ChatRow({ row }: { row: Row }) {
   if (row.kind === 'tool') {
     return <ToolCall {...row.tool} />
   }
@@ -302,6 +307,16 @@ function ChatRow({ row }: { row: Row }) {
     )
   }
   return <Markdown>{row.text}</Markdown>
+})
+
+/**
+ * The live assistant reply, paced to type out steadily. Owns the smoothing timer, so its frequent
+ * (~40×/sec) updates re-render only this node instead of the whole ChatView and every committed row.
+ */
+function StreamingTail({ text }: { text: string }) {
+  const revealed = useSmoothText(text)
+  if (!revealed) return null
+  return <Markdown incomplete>{revealed}</Markdown>
 }
 
 /**
@@ -352,6 +367,20 @@ function useElapsed(active: boolean): number {
   return elapsed
 }
 
+// Stable, position-independent row keys: keyed by the event object's identity (the store reuses event
+// object references across both append and "load earlier" prepend), so prepending older messages
+// doesn't shift array indices and remount — and re-highlight — the entire list.
+let keySeq = 0
+const rowKeys = new WeakMap<object, string>()
+function rowKey(event: ChatEvent): string {
+  let key = rowKeys.get(event)
+  if (!key) {
+    key = `r${keySeq++}`
+    rowKeys.set(event, key)
+  }
+  return key
+}
+
 /**
  * Builds render rows: tool results fold into their call (matched by id); a run of consecutive tool
  * calls collapses into one `tool-group` (expandable) once it reaches `GROUP_MIN`, so a long read/grep
@@ -376,8 +405,8 @@ function buildRows(events: ChatEvent[]): Row[] {
     run = []
   }
 
-  events.forEach((event, index) => {
-    const key = String(index)
+  events.forEach((event) => {
+    const key = rowKey(event)
     if (event.kind === 'tool-result') return // folded into its tool card
     if (event.kind === 'tool') {
       run.push({

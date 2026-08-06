@@ -7,7 +7,7 @@ surface, and the daemon-mirrored store) and adds its own touch-first screens: a 
 terminal with a top bar, a scrollable tab strip, slide-over workspace and files/skills drawers,
 and a special-keys bar above the on-screen keyboard.
 
-The web app is a separate deployable from the desktop app: desktop code (Tauri) never enters this
+The web app is a separate deployable from the desktop app: desktop code (Electron) never enters this
 bundle, and this app's screens are its own, not the desktop ones. Both apps sit on the same engine,
 so the terminal, store, and protocol wiring are shared, not duplicated.
 

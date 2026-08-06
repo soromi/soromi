@@ -23,7 +23,7 @@ use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::sessions::stream_json::StreamJsonSession;
-use crate::sound::player::{Cue, SoundPlayer};
+use crate::sound::player::{Cue, SoundPlayer, cue_for};
 use crate::updates::UpdateInfo;
 use crate::workspaces::agent_command::parse_agent_command;
 use crate::workspaces::config::{PersistedSpace, SessionSpec, Workspace};
@@ -70,8 +70,9 @@ pub struct WorkspaceService {
     update: Mutex<Option<UpdateInfo>>,
     /// Whether the app window is focused. While it is, agent-event sounds and banners are
     /// suppressed (the user is already looking at the app). Set by the shell; false by default,
-    /// so the standalone daemon always fires.
-    focused: AtomicBool,
+    /// so the standalone daemon always fires. Shared (`Arc`) so background status watchers can read
+    /// it from their own tasks.
+    focused: Arc<AtomicBool>,
     /// PATH to launch sessions with, when the process's own PATH is too narrow (a GUI-launched
     /// app has no shell PATH). The shell resolves it and passes it here; `None` keeps the
     /// process PATH (a terminal-launched daemon already has the full one).
@@ -124,7 +125,7 @@ impl WorkspaceService {
             sound,
             change_tx,
             update: Mutex::new(None),
-            focused: AtomicBool::new(false),
+            focused: Arc::new(AtomicBool::new(false)),
             launch_path,
             watcher,
             dir_change_tx,
@@ -276,6 +277,14 @@ impl WorkspaceService {
     /// suppressed; they fire only when the user is away from the app.
     pub fn set_focused(&self, focused: bool) {
         self.focused.store(focused, Ordering::Relaxed);
+    }
+
+    /// Subscribes a native viewer (the Electron shell) to notification banners: while subscribed,
+    /// the daemon routes banners to it as `Notify` messages instead of firing them via the OS.
+    pub fn subscribe_notifications(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::notifications::controller::WireNotification> {
+        self.notifications.subscribe_wire()
     }
 
     /// Records a tab's agent conversation id (from its session-start hook), so a later restore
@@ -1138,7 +1147,7 @@ impl WorkspaceService {
                 StreamJsonSession::spawn(provider, &program, &chat_args, &cwd, Some(&env), seed)
             });
             if let Ok(sess) = spawned {
-                self.watch_chat(&id, &sess);
+                self.watch_chat(workspace, &id, &sess);
             }
             return warning;
         }
@@ -1160,16 +1169,34 @@ impl WorkspaceService {
 
     /// Like `watch_status`, but for a headless chat session: forwards its status to keep-awake and
     /// fires a change so the sidebar updates. Chat has no PTY sub-agent/activity channels yet.
-    fn watch_chat(&self, session_id: &str, session: &StreamJsonSession) {
+    ///
+    /// Chat also has no agent hooks: its `can_use_tool` approval prompt is a stream-json control
+    /// request, not a hook event, so `handle_agent_event` never runs for it. This watcher is
+    /// therefore the notification source for chat — when the agent reaches an attention state
+    /// (a permission prompt or a question) it plays the cue and fires the banner, gated on mute and
+    /// focus exactly like the hook path.
+    fn watch_chat(&self, workspace: &str, session_id: &str, session: &StreamJsonSession) {
         let mut status_rx = session.subscribe_status();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
+        let notifications = self.notifications.clone();
+        let sound = self.sound.clone();
+        let focused = self.focused.clone();
+        let workspace = workspace.to_string();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
             while status_rx.changed().await.is_ok() {
                 let status = *status_rx.borrow_and_update();
                 keep_awake.handle(&session_id, status);
                 let _ = change_tx.send(());
+
+                // Notify on entering an attention state, unless muted or the user is already here.
+                if let Some(cue) = cue_for(status) {
+                    if !notifications.is_muted(&workspace) && !focused.load(Ordering::Relaxed) {
+                        sound.play(cue);
+                        notifications.fire(&workspace, Some(&session_id), cue_text(cue));
+                    }
+                }
             }
         });
     }
@@ -1248,7 +1275,7 @@ impl WorkspaceService {
             Some(agent) => format!("({agent}) {}", cue_text(cue)),
             None => cue_text(cue).to_string(),
         };
-        self.notifications.fire(&workspace, &text);
+        self.notifications.fire(&workspace, Some(session_id), &text);
     }
 
     /// Records that a session has gone idle (Claude's idle notification). Status only: unlike

@@ -46,13 +46,19 @@ export function CodeBlock({ code, language }: { code: string; language: string }
   const [html, setHtml] = useState('')
   const [copied, setCopied] = useState(false)
 
+  // Debounced so a streaming code block (its text grows every ~24ms) doesn't re-run Shiki on every
+  // tick — it highlights once the code settles, showing the plain <pre> until then. A committed block
+  // settles immediately, so it highlights after one short delay.
   useEffect(() => {
     let alive = true
-    codeToHtml(code, { lang: language as BundledLanguage, theme: 'github-dark-default' })
-      .then((out) => alive && setHtml(out))
-      .catch(() => alive && setHtml('')) // unknown language: fall back to the plain <pre> below
+    const id = setTimeout(() => {
+      codeToHtml(code, { lang: language as BundledLanguage, theme: 'github-dark-default' })
+        .then((out) => alive && setHtml(out))
+        .catch(() => alive && setHtml('')) // unknown language: fall back to the plain <pre> below
+    }, 90)
     return () => {
       alive = false
+      clearTimeout(id)
     }
   }, [code, language])
 

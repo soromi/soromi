@@ -50,13 +50,21 @@ pub(super) fn install(config_dir: &Path) -> io::Result<()> {
     }
     let hooks = hooks.as_object_mut().unwrap();
 
+    // Purge our entries from *every* event, not just the ones this version installs: a hook a past
+    // version registered under an event we no longer use (e.g. `PermissionRequest` pointing at the
+    // old in-app binary) would otherwise linger forever — and launch that stale binary on the event.
+    for entry in hooks.values_mut() {
+        if let Some(list) = entry.as_array_mut() {
+            list.retain(|item| !is_ours(item));
+        }
+    }
+
     for (event, cue) in HOOKS {
         let entry = hooks.entry(*event).or_insert_with(|| json!([]));
         if !entry.is_array() {
             *entry = json!([]);
         }
         let list = entry.as_array_mut().unwrap();
-        list.retain(|item| !is_ours(item));
         list.push(json!({
             "hooks": [{
                 "type": "command",
@@ -97,10 +105,14 @@ mod tests {
     #[test]
     fn install_is_idempotent_and_preserves_foreign_hooks() {
         let dir = tempdir().unwrap();
-        // A user's own Stop hook that must survive.
+        // A user's own Stop hook that must survive, plus a stale Soromi hook under an event this
+        // version no longer installs (it must be removed, not linger and launch an old binary).
         fs::write(
             dir.path().join("settings.json"),
-            r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "user-thing" }] }] } }"#,
+            r#"{ "hooks": {
+                "Stop": [{ "hooks": [{ "type": "command", "command": "user-thing" }] }],
+                "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "/old/Soromi.app/Contents/MacOS/soromi", "args": ["hook", "request", "claude"] }] }]
+            } }"#,
         )
         .unwrap();
 
@@ -119,5 +131,7 @@ mod tests {
         );
         assert!(stop.iter().any(|e| e["hooks"][0]["args"][0] == "hook"));
         assert_eq!(root["hooks"]["Notification"].as_array().unwrap().len(), 1);
+        // The stale PermissionRequest hook is gone.
+        assert!(root["hooks"]["PermissionRequest"].as_array().unwrap().is_empty());
     }
 }

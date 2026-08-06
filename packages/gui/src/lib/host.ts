@@ -1,37 +1,53 @@
-import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { open } from '@tauri-apps/plugin-dialog'
-import { onAction } from '@tauri-apps/plugin-notification'
-import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener'
-
-//Constants
-import { isTauri } from '@/config'
-
 /**
- * The desktop shell's platform calls. This is the only module that talks to Tauri, so the
- * screens stay free of host specifics (a different shell, e.g. web, provides its own).
+ * The desktop shell's platform calls. This is the only module that talks to the native shell, so the
+ * screens stay free of host specifics. The Electron shell (`apps/desktop`) exposes a bridge on
+ * `window.__SOROMI_ELECTRON__` via its preload; outside it (e.g. the gui running in a plain browser
+ * during dev) the calls fall back to the browser or no-op.
  */
 
-/** Opens a URL in the user's browser (Tauri opener), falling back to a new tab in the browser. */
+/** The Electron shell's native bridge, exposed by its preload via `contextBridge`. */
+type ElectronHost = {
+  quit: () => void
+  pickFolder: (title: string) => Promise<string | null>
+  openExternal: (url: string) => void
+  revealInFinder: (path: string) => void
+  focusWindow: () => Promise<void>
+  onNotificationClick: (
+    handler: (workspace: string | null, session: string | null) => void,
+  ) => void
+  showNotification: (
+    title: string,
+    body: string,
+    workspace: string | null,
+    session: string | null,
+  ) => void
+}
+
+const electron: ElectronHost | undefined =
+  typeof window !== 'undefined'
+    ? (window.__SOROMI_ELECTRON__ as ElectronHost | undefined)
+    : undefined
+
+/** Opens a URL in the user's browser, falling back to a new tab in the browser. */
 export function openExternal(url: string) {
-  if (isTauri) openUrl(url)
+  if (electron) electron.openExternal(url)
   else window.open(url, '_blank', 'noreferrer')
 }
 
 /** Native folder picker; resolves to the chosen path, or null if cancelled or unavailable. */
 export async function pickFolder(title: string): Promise<string | null> {
-  const selected = await open({ directory: true, multiple: false, title })
-  return typeof selected === 'string' ? selected : null
+  if (electron) return electron.pickFolder(title)
+  return null
 }
 
-/** Quits the app (desktop only; a no-op outside the Tauri shell). */
+/** Quits the app (desktop only; a no-op in the browser). */
 export function quit() {
-  if (isTauri) invoke('quit')
+  if (electron) electron.quit()
 }
 
 /** Shows a path in the OS file manager (Finder). Desktop only. */
 export function revealInFinder(path: string) {
-  if (isTauri) revealItemInDir(path)
+  if (electron) electron.revealInFinder(path)
 }
 
 /** Copies text to the clipboard. */
@@ -41,16 +57,29 @@ export function copyText(text: string) {
 
 /** Brings the app window to the front (the window is hidden, not closed, on close). Desktop only. */
 export async function focusWindow() {
-  if (!isTauri) return
-
-  const window = getCurrentWindow()
-  await window.show()
-  await window.unminimize()
-  await window.setFocus()
+  if (electron) await electron.focusWindow()
 }
 
-/** Runs `handler` when an OS notification is clicked (to open the app). Desktop only; no-op else. */
-export function onNotificationClick(handler: () => void) {
-  if (!isTauri) return
-  void onAction(() => handler())
+/**
+ * Shows a native OS notification with the app identity. Electron only: the daemon routes agent
+ * banners to the shell (see the `notify` message) so they carry the Soromi icon and open the app on
+ * click. The web has no OS notifications, so it no-ops here.
+ */
+export function showNotification(
+  title: string,
+  body: string,
+  workspace: string | null = null,
+  session: string | null = null,
+) {
+  if (electron) electron.showNotification(title, body, workspace, session)
+}
+
+/**
+ * Runs `handler` when an OS notification is clicked, with the workspace/session it was about so the
+ * app can open that tab. Desktop only; no-op elsewhere.
+ */
+export function onNotificationClick(
+  handler: (workspace: string | null, session: string | null) => void,
+) {
+  if (electron) electron.onNotificationClick(handler)
 }

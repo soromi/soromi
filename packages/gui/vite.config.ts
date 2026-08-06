@@ -6,7 +6,7 @@ import svgr from 'vite-plugin-svgr'
 
 export default defineConfig({
   plugins: [react(), svgr(), tailwindcss()],
-  // Fixed port so the Tauri shell's devUrl always matches.
+  // Fixed port so the Electron shell's dev server URL (SOROMI_DEV) always matches.
   server: {
     port: 1420,
     strictPort: true,

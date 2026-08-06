@@ -7,10 +7,10 @@ import { LocalWebSocketTransport, TransportProvider, useClientStore } from '@sor
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
-import { focusWindow, onNotificationClick } from '@/lib/host'
+import { focusWindow, onNotificationClick, showNotification } from '@/lib/host'
 
 //Constants
-import { DAEMON_URL } from '@/config'
+import { DAEMON_URL, isElectron } from '@/config'
 
 //Components
 import { AppLayout } from './app-layout'
@@ -18,9 +18,38 @@ import { AppLayout } from './app-layout'
 /** Root: sets up the theme and transport, routes daemon messages into the store. */
 export function App() {
   const transport = useMemo(() => new LocalWebSocketTransport(DAEMON_URL), [])
+  const theme = useAppStore((s) => s.theme)
 
-  // Clicking an OS notification brings the app forward (the window is hidden, not closed, on close).
-  useEffect(() => onNotificationClick(focusWindow), [])
+  // Apply the appearance as a root class; `theme.css`'s `.so-light` overrides flip every surface.
+  useEffect(() => {
+    document.documentElement.classList.toggle('so-light', theme === 'light')
+  }, [theme])
+
+  // Clicking an OS notification opens the tab it was about (the shell also surfaces the window).
+  useEffect(
+    () =>
+      onNotificationClick((workspace, session) => {
+        focusWindow()
+        if (!workspace) return
+        const ui = useAppStore.getState()
+        ui.select(workspace)
+        if (session) ui.selectSession(workspace, session)
+      }),
+    [],
+  )
+
+  // Report window focus to the daemon so it suppresses sounds/banners while the app is in front, and
+  // fires them when it's away (the Electron shell relays focus over the wire; see host `showNotification`).
+  useEffect(() => {
+    if (!isElectron) return
+    const report = () => transport.send({ type: 'set-focused', focused: document.hasFocus() })
+    window.addEventListener('focus', report)
+    window.addEventListener('blur', report)
+    return () => {
+      window.removeEventListener('focus', report)
+      window.removeEventListener('blur', report)
+    }
+  }, [transport])
 
   useEffect(() => {
     // Daemon-mirrored data lands in the client store; navigation/banners in the UI store.
@@ -103,6 +132,12 @@ export function App() {
         case 'control':
           client.setControlHolder(message.holder ?? null)
           break
+        case 'notify':
+          // Agent banner routed here so the native shell shows it with the app identity (Electron;
+          // the daemon only sends this to a viewer that opted into native notifications). The
+          // workspace/session ride along so a click opens that tab.
+          showNotification(message.title, message.body, message.workspace, message.session)
+          break
         case 'error':
           ui.setError(message.message)
           break
@@ -112,6 +147,14 @@ export function App() {
     const offOpen = transport.onOpen(() => {
       client.setConnected(true)
       transport.send({ type: 'list-workspaces' })
+      // The Electron shell (ad-hoc signed, like Tauri) renders banners natively with the Soromi
+      // icon and click-to-open, so opt into wire notifications and let the daemon route them here
+      // instead of firing its own osascript banner. We also report window focus so banners and
+      // sounds fire only while you're away from the app.
+      if (isElectron) {
+        transport.send({ type: 'notifications-native', enabled: true })
+        transport.send({ type: 'set-focused', focused: document.hasFocus() })
+      }
     })
     const offClose = transport.onClose(() => client.setConnected(false))
     transport.connect()

@@ -22,7 +22,7 @@
     "dev:desktop": "pnpm --filter @soromi/desktop dev",
     "dev:web": "pnpm --filter @soromi/web dev",
     "dev:relay": "pnpm --filter @soromi/relay dev",
-    "app:mac": "pnpm --filter @soromi/desktop tauri build --bundles app",
+    "app:mac": "pnpm --filter @soromi/desktop package",
     "gen:protocol": "cargo test -p soromi-protocol --features ts",
     "release": "bash scripts/release.sh",
     "clean": "turbo run clean && rm -rf node_modules"
@@ -35,7 +35,9 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "electron",
+      "electron-winstaller"
     ]
   }
 }

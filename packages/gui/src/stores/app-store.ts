@@ -73,6 +73,22 @@ const writeWsColors = (colors: Record<string, string>): void => {
   } catch {}
 }
 
+/** Light/dark appearance, remembered across sessions (applied as a `so-light` root class). */
+export type Theme = 'dark' | 'light'
+const THEME_KEY = 'soromi.theme'
+const readTheme = (): Theme => {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'
+  } catch {
+    return 'dark'
+  }
+}
+const writeTheme = (theme: Theme): void => {
+  try {
+    localStorage.setItem(THEME_KEY, theme)
+  } catch {}
+}
+
 /** The workspace open when the app last closed, restored on launch (falls back to the first). */
 const ACTIVE_WORKSPACE_KEY = 'soromi.activeWorkspace'
 const readActiveWorkspace = (): string | null => {
@@ -140,6 +156,8 @@ interface UiState {
   treeListings: Record<string, Record<string, DirEntry[]>>
   treeExpanded: Record<string, Record<string, boolean>>
   sidebarMode: SidebarMode
+  /** Light/dark appearance (persisted; applied as a `so-light` root class). */
+  theme: Theme
   /** The left (workspaces) sidebar width in px (draggable, persisted). */
   sidebarWidth: number
   /** The right Explorer panel: whether it's open, and its width in px (both persisted). */
@@ -172,6 +190,8 @@ interface UiState {
   resetTree: (workspace: string) => void
   toggleTreeNode: (workspace: string, path: string) => void
   setSidebarMode: (mode: SidebarMode) => void
+  setTheme: (theme: Theme) => void
+  toggleTheme: () => void
   setSidebarWidth: (width: number) => void
   setExplorerOpen: (open: boolean) => void
   toggleExplorer: () => void
@@ -188,6 +208,7 @@ export const useAppStore = create<UiState>()((set) => ({
   treeListings: {},
   treeExpanded: {},
   sidebarMode: 'files',
+  theme: readTheme(),
   sidebarWidth: readSidebarWidth(),
   explorerOpen: readExplorerOpen(),
   explorerWidth: readExplorerWidth(),
@@ -319,6 +340,16 @@ export const useAppStore = create<UiState>()((set) => ({
       }
     }),
   setSidebarMode: (sidebarMode) => set({ sidebarMode }),
+  setTheme: (theme) => {
+    writeTheme(theme)
+    set({ theme })
+  },
+  toggleTheme: () =>
+    set((state) => {
+      const theme: Theme = state.theme === 'light' ? 'dark' : 'light'
+      writeTheme(theme)
+      return { theme }
+    }),
   setSidebarWidth: (width) => {
     const sidebarWidth = clampSidebarWidth(width)
     try {

@@ -15,3 +15,6 @@ export const DESC = 'm-0 max-w-[720px] text-[var(--soromi-text-dim)] text-sm lea
 
 /** A bordered card wrapping account / form content. */
 export const CARD = 'overflow-hidden rounded-xl border border-[var(--soromi-border)]'
+
+/** A card name / muted-workspace label. */
+export const CARD_NAME = 'font-semibold text-[var(--soromi-text)] text-base'

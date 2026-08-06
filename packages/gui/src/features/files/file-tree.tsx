@@ -12,7 +12,7 @@ import { useAppStore } from '@/stores/app-store'
 import { copyText, revealInFinder } from '@/lib/host'
 
 //Constants
-import { isTauri } from '@/config'
+import { isDesktop } from '@/config'
 
 //Types
 import type { FileNode } from '@soromi/ui'
@@ -173,7 +173,7 @@ function ContextMenu({
         <button type="button" className={MENU_ITEM} onClick={() => run(() => copyText(menu.path))}>
           Copy relative path
         </button>
-        {isTauri && (
+        {isDesktop && (
           <button
             type="button"
             className={MENU_ITEM}

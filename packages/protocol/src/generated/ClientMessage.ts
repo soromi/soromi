@@ -43,4 +43,4 @@ instructions?: string, } | { "type": "check-update" } | { "type": "create-device
 /**
  * Skip the daemon's usage cache and re-fetch (a manual refresh). Defaults to false.
  */
-force: boolean, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, } | { "type": "get-remote-config" } | { "type": "set-remote-config", config: RemoteConfig, } | { "type": "take-control" };
+force: boolean, } | { "type": "list-devices" } | { "type": "revoke-device", id: string, } | { "type": "get-remote-config" } | { "type": "set-remote-config", config: RemoteConfig, } | { "type": "take-control" } | { "type": "set-focused", focused: boolean, } | { "type": "notifications-native", enabled: boolean, };

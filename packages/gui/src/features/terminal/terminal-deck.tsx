@@ -65,8 +65,8 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {workspace && (
         <div
-          data-tauri-drag-region
-          className="flex h-[41px] flex-none items-stretch justify-between border-[var(--soromi-border)] border-b pr-5"
+          data-drag-region
+          className="flex h-[40px] flex-none items-stretch justify-between pr-5"
         >
           <div className="flex min-w-0 flex-none items-center gap-[9px] px-4">
             {session ? (
@@ -74,7 +74,7 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
                 <span className="flex h-[15px] w-[15px] flex-none items-center justify-center">
                   <ProviderIcon provider={session.agent} size={15} />
                 </span>
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-[13px] text-[var(--soromi-text)]">
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium text-[13px] text-[var(--soromi-text)]">
                   {displayLabel(session, sessions)}
                 </span>
               </>
@@ -84,44 +84,29 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
               </span>
             )}
           </div>
-          <div data-tauri-drag-region className="min-w-0 flex-1" />
-          {session && (
-            <button
-              type="button"
-              title={session.mode === 'chat' ? 'Switch to terminal' : 'Switch to chat'}
-              onClick={() =>
-                transport.send({
-                  type: 'switch-mode',
-                  session: session.id,
-                  mode: session.mode === 'chat' ? 'terminal' : 'chat',
-                })
-              }
-              className="mr-1 flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-[11px] py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
-            >
-              {session.mode === 'chat' ? 'Terminal' : 'Chat'}
-            </button>
-          )}
+          <div data-drag-region className="min-w-0 flex-1" />
+          {/* The Terminal/Chat mode toggle lives in the status bar now (see StatusBar). */}
           {!explorerOpen && (
             <button
               type="button"
               title="Explorer"
               onClick={toggleExplorer}
-              className="flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-[11px] py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+              className="mr-1 flex h-[28px] w-[28px] cursor-pointer appearance-none items-center justify-center self-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
             >
               <svg
-                width="14"
-                height="14"
+                width="16"
+                height="16"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.8"
+                strokeWidth="1.7"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                <path d="M15 4v16" />
               </svg>
-              Explorer
             </button>
           )}
         </div>

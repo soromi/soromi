@@ -221,7 +221,7 @@ exact same client, just a different transport.
           VIEWPORTS (stateless)
     ┌───────────────┐     ┌───────────────┐
     │  Desktop GUI  │     │    Web PWA    │     React + Zustand + xterm.js
-    │    (Tauri)    │     │    (phone)    │     render from messages, send input
+    │  (Electron)   │     │    (phone)    │     render from messages, send input
     └───────┬───────┘     └───────┬───────┘
             │ local WS            │ relay WS (E2EE)
             │ (localhost)         │ XChaCha20-Poly1305
@@ -265,8 +265,9 @@ exact same client, just a different transport.
   and sends input and resize. It holds no state authority of its own.
 - The **protocol** is defined once in Rust (`crates/protocol`) and the TypeScript types are
   generated from it with [ts-rs](https://github.com/Aleph-Alpha/ts-rs), so the two never drift.
-- The **desktop app** (Tauri) hosts the GUI in a webview and runs the daemon in-process on a
-  local socket. The transport is kept deliberately simple so the same viewport can run remotely.
+- The **desktop app** (Electron) renders the GUI and spawns the daemon as a child process,
+  connecting over a local socket. The transport is kept deliberately simple so the same viewport
+  can run remotely.
 
 ## Monorepo layout
 
@@ -281,7 +282,7 @@ packages/
   gui/        React + Zustand + xterm.js viewport (runs in the desktop app's webview)
   web/        Touch-first PWA viewport for the phone/browser, on the shared engine
 apps/
-  desktop/    Tauri 2 app that runs the daemon in-process
+  desktop/    Electron app that spawns the daemon and renders the gui
 ```
 
 Each package and crate has a README describing its boundaries.
@@ -310,7 +311,7 @@ cargo test
 Run it:
 
 ```bash
-pnpm desktop         # the full app (Tauri dev)
+pnpm dev:desktop     # the full app (Electron: builds the daemon + gui, then launches)
 ```
 
 Or iterate on the two processes separately:

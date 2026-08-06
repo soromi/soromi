@@ -11,8 +11,6 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-CONF="apps/desktop/src-tauri/tauri.conf.json"
-
 # Files that carry the version. JSON ones only in their top block (line <= 6); Cargo ones on the
 # package `version` line; plus the workspace crates in Cargo.lock.
 JSON_FILES=(
@@ -24,16 +22,14 @@ JSON_FILES=(
   packages/ui/package.json
   packages/web/package.json
   apps/desktop/package.json
-  "$CONF"
 )
 CARGO_FILES=(
   crates/daemon/Cargo.toml
   crates/protocol/Cargo.toml
-  apps/desktop/src-tauri/Cargo.toml
 )
-LOCK_CRATES=(soromi-daemon soromi-protocol soromi-desktop)
+LOCK_CRATES=(soromi-daemon soromi-protocol)
 
-current="$(grep -m1 '"version"' "$CONF" | sed -E 's/.*"version": "([^"]+)".*/\1/')"
+current="$(grep -m1 '"version"' package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
 
 arg="${1:-}"
 dry_run=false

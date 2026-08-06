@@ -34,23 +34,27 @@ export function AppLayout() {
   if (!ready) return <Splash />
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-[var(--soromi-bg-app)] text-[var(--soromi-text)]">
+    <div className="fixed inset-0 flex flex-col bg-[var(--soromi-bg-shell)] text-[var(--soromi-text)]">
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="relative flex min-w-0 flex-1 flex-col bg-[var(--soromi-bg-terminal)]">
-          <UpdateBanner />
-          <StatusBanner />
-          {active !== null ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <TerminalDeck transport={transport} />
-            </div>
-          ) : (
-            <Welcome />
-          )}
-          <OverlayHost scope="content" />
-        </main>
-        {/* Always mounted so its width can animate 0 <-> open, pushing the content smoothly. */}
-        <Explorer />
+        {/* One rounded panel floating on the shell (design), inset 8px top/right/bottom. The content
+            and the Explorer are columns *inside* it — no gap or divider between them. */}
+        <div className="relative my-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] shadow-[0_1px_2px_rgb(0_0_0/40%),0_10px_30px_rgb(0_0_0/32%)]">
+          <main className="relative flex min-w-0 flex-1 flex-col">
+            <UpdateBanner />
+            <StatusBanner />
+            {active !== null ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <TerminalDeck transport={transport} />
+              </div>
+            ) : (
+              <Welcome />
+            )}
+            <OverlayHost scope="content" />
+          </main>
+          {/* Always mounted so its width can animate 0 <-> open, pushing the content smoothly. */}
+          <Explorer />
+        </div>
       </div>
       <StatusBar />
       <OverlayHost scope="full" handleEsc />

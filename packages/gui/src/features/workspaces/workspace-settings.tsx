@@ -4,7 +4,6 @@ import { useShallow } from 'zustand/react/shallow'
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
 import {
-  Button,
   ConfirmDialog,
   Input,
   Select,
@@ -42,7 +41,7 @@ const H2 =
 const SECTION_HEAD = 'mt-9 mb-3 flex items-baseline justify-between'
 /** A bordered content card. */
 const CARD =
-  'overflow-hidden rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)]'
+  'overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)]'
 /** A row inside a card (folder / notification). */
 const FOLDER_ROW =
   'flex items-center justify-between gap-3 border-[var(--soromi-border-subtle)] border-b px-4 py-[13px]'
@@ -62,9 +61,6 @@ const NAV = [
   { id: 'danger', label: 'Danger zone', icon: <WarningIcon />, danger: true },
 ]
 
-// Hidden for now: with these few short sections the scroll-spy nav reads awkwardly. Flip to true
-// to bring the section nav back once there are more (and longer) sections.
-const SHOW_NAV = false
 
 /** Full-page workspace settings: section nav, folders, agent accounts, instructions, danger zone. */
 export function WorkspaceSettings({ workspace }: { workspace: string }) {
@@ -205,43 +201,58 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <OverlayShell title="Workspace settings">
+    <OverlayShell
+      title={
+        <span className="flex items-center gap-2">
+          <span className="text-[var(--soromi-text-dim)]">Workspace settings</span>
+          <span className="text-[var(--soromi-text-faint)]">/</span>
+          <span className="text-[var(--soromi-text)]">{workspace}</span>
+        </span>
+      }
+    >
       <div className="flex min-h-0 flex-1">
-        {SHOW_NAV && (
-          <nav className="flex w-[212px] flex-none flex-col gap-[3px] border-[var(--soromi-border-subtle)] border-r px-3.5 py-6">
-            <div className="px-3 pb-2.5 font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.1em]">
-              Settings
-            </div>
-            {NAV.map((item) => {
-              const isActive = active === item.id
-              return (
-                <button
-                  key={item.id}
-                  type="button"
+        <nav className="flex w-[212px] flex-none flex-col gap-[3px] px-3.5 py-5">
+          <div className="px-3 pb-2.5 font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.1em]">
+            Settings
+          </div>
+          {NAV.map((item) => {
+            const isActive = active === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  'flex cursor-pointer appearance-none items-center gap-[11px] rounded-[9px] border-none bg-transparent px-3 py-[9px] text-left font-medium text-[13.5px] transition-colors',
+                  isActive
+                    ? item.danger
+                      ? 'bg-[var(--soromi-bg-hover)] text-[#e08585]'
+                      : 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-text)]'
+                    : 'text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
+                )}
+                onClick={() => goTo(item.id)}
+              >
+                <span
                   className={cn(
-                    'flex cursor-pointer appearance-none items-center gap-[11px] rounded-[9px] border-none bg-transparent px-3 py-[9px] text-left font-medium text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:bg-[var(--soromi-bg-hover)]',
-                    isActive && 'bg-[var(--soromi-bg-active)] text-[var(--soromi-text)]',
-                    item.danger && isActive && 'text-[#e08585]',
+                    'flex h-[18px] w-[18px] flex-none items-center justify-center',
+                    isActive
+                      ? item.danger
+                        ? 'text-[#e08585]'
+                        : 'text-[var(--soromi-accent)]'
+                      : 'text-[var(--soromi-text-faint)]',
                   )}
-                  onClick={() => goTo(item.id)}
                 >
-                  <span
-                    className={cn(
-                      'flex h-[18px] w-[18px] flex-none items-center justify-center text-[var(--soromi-text-faint)]',
-                      isActive && 'text-[var(--soromi-accent)]',
-                      item.danger && isActive && 'text-[#e08585]',
-                    )}
-                  >
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </button>
-              )
-            })}
-          </nav>
-        )}
+                  {item.icon}
+                </span>
+                {item.label}
+              </button>
+            )
+          })}
+        </nav>
 
-        <div ref={contentRef} className="flex-1 overflow-y-auto">
+        <div
+          ref={contentRef}
+          className="mr-2 mb-2 flex-1 overflow-y-auto rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] shadow-[0_1px_2px_rgb(0_0_0/40%),0_10px_30px_rgb(0_0_0/32%)]"
+        >
           <div className="mx-auto max-w-[720px] px-7 pt-10 pb-14">
             <header className="flex items-center gap-3.5">
               <span className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-[var(--soromi-accent)] font-bold text-[var(--soromi-accent-on)] text-base">
@@ -325,7 +336,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                         value && setBindings((prev) => ({ ...prev, [row.agent]: value }))
                       }
                     >
-                      <SelectTrigger className="flex-1 rounded-[10px] bg-[var(--soromi-bg-tab)]">
+                      <SelectTrigger className="w-[200px] flex-none rounded-[9px] bg-[var(--soromi-bg-hover)]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -379,14 +390,40 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
             </section>
 
             <section data-sec="danger">
-              <div className="mt-[38px] mb-6 h-px bg-[var(--soromi-border-subtle)]" />
-              <div className="flex items-center gap-3">
-                <Button variant="ghost" onClick={exportSpace}>
-                  Export <span className={MONO}>soromi.space.json</span>
-                </Button>
-                <Button variant="ghost" className="text-destructive" onClick={removeSpace}>
-                  Remove workspace
-                </Button>
+              <div className={SECTION_HEAD}>
+                <h2 className={H2}>Danger zone</h2>
+              </div>
+              <div className="overflow-hidden rounded-[14px] border border-[rgb(224_133_133/0.28)] bg-[rgb(224_133_133/0.05)]">
+                <div className="flex items-center justify-between gap-4 border-[rgb(224_133_133/0.18)] border-b px-[18px] py-4">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">Export workspace</div>
+                    <div className="mt-0.5 text-[12.5px] text-[var(--soromi-text-faint)]">
+                      Write <span className={MONO}>soromi.space.json</span> to the workspace root.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={exportSpace}
+                    className="flex-none cursor-pointer appearance-none rounded-[9px] border border-[rgb(224_133_133/0.4)] bg-transparent px-[15px] py-[9px] font-semibold text-[13px] text-[#e08585] transition-colors hover:bg-[rgb(224_133_133/0.12)]"
+                  >
+                    Export
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-[18px] py-4">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">Delete workspace</div>
+                    <div className="mt-0.5 text-[12.5px] text-[var(--soromi-text-faint)]">
+                      Removes it and stops its agents. This can't be undone.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={removeSpace}
+                    className="flex-none cursor-pointer appearance-none rounded-[9px] border-none bg-[#e08585] px-[15px] py-[9px] font-bold text-[13px] text-[#2a0f0f] hover:bg-[#ea9595]"
+                  >
+                    Delete…
+                  </button>
+                </div>
               </div>
             </section>
           </div>
@@ -394,16 +431,26 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       </div>
 
       {changed && (
-        <div className="flex flex-none items-center justify-between gap-4 border-[var(--soromi-border)] border-t bg-[var(--soromi-bg-app)] px-[26px] py-3.5">
+        <div className="flex h-[64px] flex-none items-center justify-between gap-4 border-[var(--soromi-border-subtle)] border-t bg-[var(--soromi-bg-app)] px-[26px]">
           <span className="flex items-center gap-[9px] text-[13px] text-[var(--soromi-text-dim)]">
-            <span className="h-2 w-2 rounded-full bg-[var(--soromi-warn)]" />
+            <span className="h-[7px] w-[7px] rounded-full bg-[#e0b341]" />
             Unsaved changes
           </span>
           <div className="flex items-center gap-2.5">
-            <Button variant="secondary" onClick={discard}>
+            <button
+              type="button"
+              onClick={discard}
+              className="cursor-pointer appearance-none rounded-[10px] border border-[#363636] bg-transparent px-[18px] py-[10px] font-semibold text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[#424242]"
+            >
               Discard
-            </Button>
-            <Button onClick={save}>Save changes</Button>
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              className="cursor-pointer appearance-none rounded-[10px] border-none bg-[var(--soromi-accent)] px-[22px] py-[10px] font-bold text-[13.5px] text-[var(--soromi-accent-on)] hover:bg-[#4bdb9a]"
+            >
+              Save changes
+            </button>
           </div>
         </div>
       )}

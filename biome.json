@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!packages/protocol/src/generated/**", "!apps/desktop/src-tauri/gen/**"]
+    "includes": ["**", "!packages/protocol/src/generated/**", "!apps/desktop/.vite/**"]
   },
   "formatter": {
     "enabled": true,

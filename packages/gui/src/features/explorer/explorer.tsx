@@ -68,7 +68,8 @@ export function Explorer() {
     <aside
       ref={asideRef}
       className={cn(
-        'relative flex flex-shrink-0 flex-col overflow-hidden bg-[var(--soromi-bg-app)] text-[13px] text-[var(--soromi-text-dim)]',
+        'relative flex flex-shrink-0 flex-col overflow-hidden text-[13px] text-[var(--soromi-text-dim)]',
+        // A column inside the shared content panel, with a thin divider line to the terminal.
         // Collapsed to width 0 when closed; the width animates so opening/closing pushes the content.
         explorerOpen && 'border-[var(--soromi-border-subtle)] border-l',
         !resizing && 'transition-[width] duration-300 ease-out',
@@ -88,8 +89,8 @@ export function Explorer() {
           `aside`'s `overflow-hidden` clips it as it opens/closes. */}
       <div className="flex h-full flex-col" style={{ width: explorerWidth }}>
         <div
-          data-tauri-drag-region
-          className="box-border flex h-[41px] flex-none items-center justify-between border-[var(--soromi-border)] border-b px-[13px]"
+          data-drag-region
+          className="box-border flex h-[40px] flex-none items-center justify-between border-[var(--soromi-border-subtle)] border-b px-[13px]"
         >
           <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
             Explorer
@@ -115,7 +116,7 @@ export function Explorer() {
           </button>
         </div>
 
-        <div className="flex flex-none gap-1 px-3 pt-2.5 pb-2">
+        <div className="flex flex-none gap-1 px-3 pt-[11px] pb-[9px]">
           <SectionTab
             label="Files"
             active={sidebarMode === 'files'}

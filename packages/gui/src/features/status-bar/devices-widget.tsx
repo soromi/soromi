@@ -14,7 +14,7 @@ type Step = 'list' | 'name' | 'qr'
 
 /** The status-bar popup trigger (also used by the usage widget). */
 const TRIGGER =
-  'flex cursor-pointer appearance-none items-center gap-[7px] rounded-lg border-none bg-transparent px-2.5 py-1 font-medium text-[var(--soromi-text-faint)] text-xs transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-[0.55]'
+  'flex cursor-pointer appearance-none items-center gap-[7px] rounded-lg border-none bg-transparent px-[9px] py-[5px] font-medium text-[#c6c6c6] text-xs transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] enabled:hover:text-[var(--soromi-text-dim)] disabled:cursor-default disabled:opacity-[0.55]'
 
 /** The pop-up body (a column of rows / form fields). */
 const POPUP_BODY = 'flex flex-col gap-2 p-2.5'
@@ -62,21 +62,24 @@ export function DevicesWidget() {
     <div className="relative">
       <button type="button" className={TRIGGER} onClick={() => setOpen((o) => !o)}>
         <svg
-          width="14"
-          height="14"
+          width="15"
+          height="15"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.9"
+          strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <rect x="2" y="4" width="20" height="13" rx="2" />
-          <path d="M2 20h20" />
+          <rect x="3" y="4" width="14" height="10" rx="1.5" />
+          <path d="M7 20h6M10 14v6" />
+          <rect x="16.5" y="9" width="5" height="11" rx="1.2" />
         </svg>
-        <span className="font-semibold text-[var(--soromi-text-dim)]">{devices.length}</span>{' '}
-        devices
+        <span>
+          <span className="font-semibold text-[#e6e6e6]">{devices.length}</span> devices
+        </span>
+        <span className="h-[7px] w-[7px] rounded-full bg-[var(--soromi-accent)] shadow-[0_0_0_3px_rgb(62_207_142/0.14)]" />
       </button>
 
       {open && (
@@ -84,7 +87,7 @@ export function DevicesWidget() {
           {/** biome-ignore lint/a11y/noStaticElementInteractions: click-away backdrop. */}
           {/** biome-ignore lint/a11y/useKeyWithClickEvents: click-away backdrop. */}
           <div className="fixed inset-0 z-[var(--z-popover-backdrop)]" onClick={close} />
-          <div className="absolute right-1 bottom-10 z-[var(--z-popover)] w-80 overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-rail)] shadow-[0_20px_60px_rgb(0_0_0/50%)]">
+          <div className="absolute bottom-10 left-1 z-[var(--z-popover)] w-80 overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-rail)] shadow-[0_20px_60px_rgb(0_0_0/50%)]">
             <div className="flex items-center justify-between border-[var(--soromi-border)] border-b px-3.5 pt-[13px] pb-[11px]">
               <span className="font-semibold text-[12.5px] text-[var(--soromi-text)]">
                 {step === 'list' ? 'Paired devices' : 'Pair a device'}

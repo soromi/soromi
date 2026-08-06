@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
@@ -29,7 +29,6 @@ import { APP_VERSION, REPO_URL } from '@/config'
 //Icons
 import CaretSvg from '@/assets/icons/caret.svg?react'
 import CheckSvg from '@/assets/icons/check.svg?react'
-import IsoLogo from '@/assets/icons/iso-dark.svg?react'
 import MugSvg from '@/assets/icons/mug.svg?react'
 import PlusSvg from '@/assets/icons/plus.svg?react'
 import SettingsSvg from '@/assets/icons/settings.svg?react'
@@ -54,6 +53,17 @@ const AGENT_STATE: Record<Status, { dot: string; pulse: boolean; label: string }
   blocked: { dot: '#f47070', pulse: false, label: 'Blocked' },
   done: { dot: 'var(--soromi-accent)', pulse: false, label: 'Review' },
   idle: { dot: 'var(--soromi-text-faint)', pulse: false, label: 'Idle' },
+}
+
+/** The Soromi brand mark: three emerald rounded bars, drawn bare (no chip) per the design. */
+function SoromiMark({ width = 15, height = 14 }: { width?: number; height?: number }) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 22 20" fill="#3ecf8e" aria-hidden="true">
+      <rect x="0" y="1" width="22" height="4.4" rx="2.2" />
+      <rect x="0" y="7.8" width="14" height="4.4" rx="2.2" />
+      <rect x="0" y="14.6" width="18" height="4.4" rx="2.2" />
+    </svg>
+  )
 }
 
 /** Tracks whether the workspace-jump modifier (⌘ on macOS, Ctrl elsewhere) is currently held, so
@@ -113,22 +123,28 @@ export function Sidebar() {
     })),
   )
   const workspaces = useClientStore((s) => s.workspaces)
-  const accounts = useClientStore((s) => s.accounts)
   const transport = useTransport()
   const asideRef = useRef<HTMLElement>(null)
   const modHeld = useModifierHeld()
 
   // Which workspaces are expanded to show their sessions; the active one starts open.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(active ? [active] : []))
-  const toggleExpanded = (name: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      next.has(name) ? next.delete(name) : next.add(name)
-      return next
-    })
+  // Stable (identity never changes) so a memoized WorkspaceGroup isn't re-rendered just because this
+  // handler was re-created — it takes the workspace name as an argument instead of closing over it.
+  const toggleExpanded = useCallback(
+    (name: string) =>
+      setExpanded((prev) => {
+        const next = new Set(prev)
+        next.has(name) ? next.delete(name) : next.add(name)
+        return next
+      }),
+    [],
+  )
 
-  // "Jump to workspace" filter: matches a workspace by its name or any of its session labels.
+  // "Jump to workspace" filter: matches a workspace by its name or any of its session labels. The
+  // field is collapsed by default and revealed by the search toggle in the Workspaces header.
   const [wsQuery, setWsQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Load account profiles so a "New session" can bind to the right one.
   useEffect(() => {
@@ -136,17 +152,23 @@ export function Sidebar() {
   }, [transport])
 
   // Opens a fresh session in a workspace, as the real terminal or a headless chat (default terminal).
-  const openNewSession = (name: string, mode: SessionMode = 'terminal') => {
-    const ws = workspaces.find((w) => w.name === name)
-    const agent = ws?.accounts[0]?.agent ?? 'claude'
-    const bound = ws?.accounts.some((a) => a.agent === agent) ?? false
-    const account = bound
-      ? undefined
-      : (accounts.find((a) => agent in a.providers)?.name ?? 'personal')
-    transport.send({ type: 'open-session', workspace: name, agent, account, mode })
-    select(name)
-    setExpanded((prev) => new Set(prev).add(name))
-  }
+  // Stable: reads the current workspaces/accounts imperatively from the store (they change on every
+  // status tick), so its identity never changes and doesn't defeat WorkspaceGroup's memoization.
+  const openNewSession = useCallback(
+    (name: string, mode: SessionMode = 'terminal') => {
+      const { workspaces, accounts } = useClientStore.getState()
+      const ws = workspaces.find((w) => w.name === name)
+      const agent = ws?.accounts[0]?.agent ?? 'claude'
+      const bound = ws?.accounts.some((a) => a.agent === agent) ?? false
+      const account = bound
+        ? undefined
+        : (accounts.find((a) => agent in a.providers)?.name ?? 'personal')
+      transport.send({ type: 'open-session', workspace: name, agent, account, mode })
+      select(name)
+      setExpanded((prev) => new Set(prev).add(name))
+    },
+    [transport, select],
+  )
 
   // Drag-to-reorder with pointer events (native HTML5 DnD is unreliable in the desktop WKWebView:
   // it refuses to start without setData and shows a "+ can't drop" cursor). `order` is the optimistic
@@ -247,20 +269,53 @@ export function Sidebar() {
     endDrag(onMove, 'col-resize')
   }
 
-  // "Jump to workspace" narrows the list by workspace name or any of its session labels.
+  // "Jump to workspace" narrows the list by workspace name or any of its session labels. Memoized so
+  // the O(sessions²) label scan reruns only when the list or query changes, not on every render.
   const query = wsQuery.trim().toLowerCase()
-  const filtered = query
-    ? ordered.filter(
-        (w) =>
-          w.name.toLowerCase().includes(query) ||
-          w.sessions.some((s) => sessionLabel(s, w.sessions).toLowerCase().includes(query)),
-      )
-    : ordered
+  const filtered = useMemo(
+    () =>
+      query
+        ? ordered.filter(
+            (w) =>
+              w.name.toLowerCase().includes(query) ||
+              w.sessions.some((s) => sessionLabel(s, w.sessions).toLowerCase().includes(query)),
+          )
+        : ordered,
+    [ordered, query],
+  )
+  // Name -> position, so each row's index is an O(1) lookup instead of an O(n) indexOf (O(n²) total).
+  const orderIndex = useMemo(() => new Map(ordered.map((w, i) => [w.name, i])), [ordered])
+
+  // Stable per-row handlers so the memoized WorkspaceGroup / SessionRow skip re-rendering during the
+  // frequent status ticks. Each takes the workspace name / session id as an argument rather than
+  // closing over it, and reads volatile values (the filter query, the reorder closure) through refs.
+  const queryRef = useRef(query)
+  queryRef.current = query
+  const startReorderRef = useRef(startReorder)
+  startReorderRef.current = startReorder
+  const handleDragStart = useCallback((name: string, event: React.PointerEvent) => {
+    if (!queryRef.current) startReorderRef.current(name, event)
+  }, [])
+  const handleSelectSession = useCallback(
+    (name: string, id: string) => {
+      select(name)
+      selectSession(name, id)
+    },
+    [select, selectSession],
+  )
+  const handleRenameSession = useCallback(
+    (id: string, title: string) => transport.send({ type: 'rename-session', session: id, title }),
+    [transport],
+  )
+  const handleCloseSession = useCallback(
+    (id: string) => transport.send({ type: 'close-session', session: id }),
+    [transport],
+  )
 
   return (
     <aside
       ref={asideRef}
-      className="relative flex flex-shrink-0 flex-col overflow-hidden border-[var(--soromi-border)] border-r bg-[var(--soromi-bg-app)] text-[13px] text-[var(--soromi-text-dim)]"
+      className="relative flex flex-shrink-0 flex-col overflow-hidden bg-[var(--soromi-bg-shell)] text-[13px] text-[var(--soromi-text-dim)]"
       style={{ width: sidebarWidth }}
     >
       <TopBar />
@@ -270,28 +325,55 @@ export function Sidebar() {
           <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
             Workspaces
           </span>
-          <span className="rounded-full bg-[#1a1a1d] px-1.5 py-px text-[10px] font-bold text-[#6a6a6e]">
+          <span className="rounded-full bg-[#1f1f1f] px-1.5 py-px text-[10px] font-semibold text-[#6e6e6e]">
             {workspaces.length}
           </span>
         </div>
-        <button
-          type="button"
-          title="New workspace"
-          onClick={openCreateSpace}
-          className="flex h-[26px] w-[26px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-accent)]"
-        >
-          <PlusSvg width={15} height={15} />
-        </button>
+        <div className="flex items-center gap-[2px]">
+          <button
+            type="button"
+            title="Search workspaces"
+            onClick={() => setSearchOpen((open) => !open)}
+            className={cn(
+              'flex h-[26px] w-[26px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
+              searchOpen ? 'text-[var(--soromi-text-dim)]' : 'text-[var(--soromi-text-faint)]',
+            )}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="New workspace"
+            onClick={openCreateSpace}
+            className="flex h-[26px] w-[26px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-accent)]"
+          >
+            <PlusSvg width={15} height={15} />
+          </button>
+        </div>
       </div>
 
-      <div className="flex-none px-3 pb-3">
-        <div className="flex items-center gap-2 rounded-lg border border-[#1e1e21] bg-[#0c0c0e] px-[9px]">
+      {searchOpen && (
+        <div className="flex-none px-3 pb-3">
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-app)] px-[9px]">
           <svg
             width="14"
             height="14"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#5a5a5e"
+            stroke="#565656"
             strokeWidth="1.9"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -305,17 +387,18 @@ export function Sidebar() {
             value={wsQuery}
             onChange={(e) => setWsQuery(e.currentTarget.value)}
             placeholder="Jump to workspace"
-            className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#5a5a5e]"
+            className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#565656]"
           />
+          </div>
         </div>
-      </div>
+      )}
 
       <div
         ref={listRef}
         className="flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto overflow-x-hidden px-2 pb-3"
       >
         {filtered.map((workspace) => {
-          const index = ordered.indexOf(workspace)
+          const index = orderIndex.get(workspace.name) ?? 0
           return (
             <WorkspaceGroup
               key={workspace.name}
@@ -332,23 +415,19 @@ export function Sidebar() {
               dropAfter={
                 drag != null && drag.insertAt === ordered.length && index === ordered.length - 1
               }
-              onDragStart={(e) => !query && startReorder(workspace.name, e)}
-              onToggle={() => toggleExpanded(workspace.name)}
-              onNewSession={(mode) => openNewSession(workspace.name, mode)}
-              onSelectSession={(id) => {
-                select(workspace.name)
-                selectSession(workspace.name, id)
-              }}
-              onRenameSession={(id, title) =>
-                transport.send({ type: 'rename-session', session: id, title })
-              }
-              onCloseSession={(id) => transport.send({ type: 'close-session', session: id })}
+              onDragStart={handleDragStart}
+              onToggle={toggleExpanded}
+              onNewSession={openNewSession}
+              onSelectSession={handleSelectSession}
+              onRenameSession={handleRenameSession}
+              onCloseSession={handleCloseSession}
             />
           )
         })}
       </div>
 
-      {/* Drag handle on the right edge: a thin line that turns accent on hover/drag. */}
+      {/* Drag handle on the right edge: the sidebar's border shows the divider; this turns it accent
+          full-height on hover/drag. */}
       <div
         className="absolute inset-y-0 right-[-3px] z-[var(--z-sidebar-resize)] w-[7px] cursor-col-resize after:absolute after:inset-y-0 after:right-[3px] after:w-px after:bg-transparent after:transition-colors after:content-[''] hover:after:bg-[var(--soromi-accent)] active:after:bg-[var(--soromi-accent)]"
         onPointerDown={startResizeWidth}
@@ -401,11 +480,11 @@ function TopBar() {
 
   return (
     // Drag region so the window moves by dragging the top bar; on macOS the left inset clears the
-    // overlaid traffic-light buttons (see the Overlay title-bar style in the Tauri window builder).
+    // overlaid traffic-light buttons (hiddenInset title bar — see the Electron shell's window.ts).
     <div
-      data-tauri-drag-region
+      data-drag-region
       className={cn(
-        'box-border flex h-[41px] flex-none select-none items-center gap-[9px] border-[var(--soromi-border)] border-b pr-3',
+        'box-border flex h-[41px] flex-none select-none items-center gap-[9px] pr-3',
         isMac ? 'pl-[76px]' : 'pl-3',
       )}
     >
@@ -416,17 +495,17 @@ function TopBar() {
             title="Soromi"
             className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[10px] border-none bg-transparent py-[5px] pr-2 pl-[5px] outline-none hover:bg-[var(--soromi-bg-hover)] focus-visible:outline-none"
           >
-            <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-[7px] bg-[#efece1]">
-              <IsoLogo width={12} height={11} />
+            <span className="-mr-[3px] flex h-[30px] w-[22px] flex-none items-center justify-center">
+              <SoromiMark width={15} height={14} />
             </span>
-            <span className="font-semibold text-[14px] text-[var(--soromi-text)]">Soromi</span>
+            <span className="font-medium text-[14px] text-[var(--soromi-text)]">Soromi</span>
             <CaretSvg width={14} height={14} className="text-[var(--soromi-text-faint)]" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[230px]">
           <div className="flex items-center gap-2.5 px-3 pt-2 pb-1.5">
-            <span className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-[#efece1]">
-              <IsoLogo width={16} height={16} />
+            <span className="flex h-[30px] w-[22px] items-center justify-center">
+              <SoromiMark width={16} height={15} />
             </span>
             <div>
               <div className="font-semibold text-[13px] text-[var(--soromi-text)]">Soromi</div>
@@ -437,6 +516,7 @@ function TopBar() {
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setAboutOpen(true)}>About Soromi</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openExternal(REPO_URL)}>Help &amp; docs</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={openSettings}>
             Settings
@@ -454,8 +534,8 @@ function TopBar() {
       <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
         <DialogContent hideClose className="max-w-[340px]">
           <div className="flex flex-col items-center gap-2 px-1 pt-2 pb-1 text-center">
-            <span className="mb-1 flex h-[60px] w-[60px] items-center justify-center rounded-2xl bg-[#efece1]">
-              <IsoLogo width={34} height={34} />
+            <span className="mb-2 flex h-[52px] w-[52px] items-center justify-center">
+              <SoromiMark width={40} height={36} />
             </span>
             <div className="font-bold text-[var(--soromi-text)] text-lg">Soromi</div>
             <div className="mb-2 text-[13px] text-[var(--soromi-text-faint)]">
@@ -476,7 +556,7 @@ function TopBar() {
         </DialogContent>
       </Dialog>
 
-      <div data-tauri-drag-region className="flex-1" />
+      <div data-drag-region className="flex-1" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -535,7 +615,10 @@ function Dot({
 /** One workspace group: a collapsible header (chevron, uppercase name, a rule, aggregate status
  * pills, jump shortcut, menu) over its session rows. Sessions are the navigation surface; the
  * terminal has no tab strip, and fresh ones start from the "New session" row here. */
-function WorkspaceGroup({
+// Memoized: only re-renders when its own props change. Since `setSessionStatus` preserves the object
+// reference of every *unaffected* workspace and all the handlers below are stable, a status tick in
+// one workspace re-renders only that group — not the whole list.
+const WorkspaceGroup = memo(function WorkspaceGroup({
   workspace,
   index,
   active,
@@ -561,10 +644,10 @@ function WorkspaceGroup({
   dragging: boolean
   dropBefore: boolean
   dropAfter: boolean
-  onDragStart: (event: React.PointerEvent) => void
-  onToggle: () => void
-  onNewSession: (mode: SessionMode) => void
-  onSelectSession: (id: string) => void
+  onDragStart: (name: string, event: React.PointerEvent) => void
+  onToggle: (name: string) => void
+  onNewSession: (name: string, mode: SessionMode) => void
+  onSelectSession: (name: string, id: string) => void
   onRenameSession: (id: string, title: string) => void
   onCloseSession: (id: string) => void
 }) {
@@ -593,11 +676,11 @@ function WorkspaceGroup({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: click-to-toggle, press-and-drag to reorder. */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the menu is a focusable button; ⌘N jumps here. */}
       <div
-        className="flex cursor-pointer select-none items-center gap-2 rounded-[8px] py-[7px] pr-1.5 pl-2 hover:bg-[#141416]"
-        onClick={onToggle}
-        onPointerDown={onDragStart}
+        className="flex cursor-pointer select-none items-center gap-2 rounded-[8px] py-[7px] pr-1.5 pl-2 hover:bg-[#1f1f1f]"
+        onClick={() => onToggle(workspace.name)}
+        onPointerDown={(e) => onDragStart(workspace.name, e)}
       >
-        <span className="flex h-3 w-3 flex-none items-center justify-center text-[#5a5a5e]">
+        <span className="flex h-3 w-3 flex-none items-center justify-center text-[#565656]">
           <svg
             width="11"
             height="11"
@@ -615,17 +698,17 @@ function WorkspaceGroup({
         </span>
         <span
           className={cn(
-            'flex-none overflow-hidden text-ellipsis whitespace-nowrap font-bold text-[12.5px] tracking-[0.02em]',
+            'flex-none overflow-hidden text-ellipsis whitespace-nowrap font-normal text-[12.5px] tracking-[0.02em]',
             active ? 'text-[var(--soromi-text)]' : 'text-[var(--soromi-text-dim)]',
           )}
         >
           {workspace.name}
         </span>
-        <span className="h-px min-w-2 flex-1 bg-[#1c1c20]" />
+        <span className="min-w-2 flex-1" />
         {runCount > 0 && (
           <span
             title={`${runCount} running`}
-            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(224,179,65,0.13)] px-[7px] py-0.5 font-bold text-[#c99a2e] text-[10.5px]"
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(224,179,65,0.13)] px-[7px] py-0.5 font-semibold text-[#c99a2e] text-[10.5px]"
           >
             <span className="h-[5px] w-[5px] rounded-full bg-[#e0b341] motion-safe:animate-status-pulse" />
             {runCount}
@@ -634,17 +717,17 @@ function WorkspaceGroup({
         {reviewCount > 0 && (
           <span
             title={`${reviewCount} to review`}
-            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(62,207,142,0.13)] px-[7px] py-0.5 font-bold text-[#3ecf8e] text-[10.5px]"
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(62,207,142,0.13)] px-[7px] py-0.5 font-semibold text-[#3ecf8e] text-[10.5px]"
           >
             <span className="h-[5px] w-[5px] rounded-full bg-[#3ecf8e]" />
             {reviewCount}
           </span>
         )}
         {runCount === 0 && reviewCount === 0 && (
-          <span className="flex-none text-[#5a5a5e] text-[10.5px]">Idle</span>
+          <span className="flex-none text-[#565656] text-[10.5px]">Idle</span>
         )}
         {kbd && shortcutHeld && (
-          <span className="flex-none text-[#5a5a5e] text-[9.5px] [font-family:var(--soromi-font-mono)]">
+          <span className="flex-none text-[#565656] text-[9.5px] [font-family:var(--soromi-font-mono)]">
             {kbd}
           </span>
         )}
@@ -654,7 +737,7 @@ function WorkspaceGroup({
               type="button"
               title="More"
               onClick={(e) => e.stopPropagation()}
-              className="flex h-5 w-5 flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#5a5a5e] hover:bg-[#26262a] hover:text-[var(--soromi-text)] data-[state=open]:bg-[#26262a] data-[state=open]:text-[var(--soromi-text)]"
+              className="flex h-5 w-5 flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#565656] hover:bg-[#2a2a2a] hover:text-[var(--soromi-text)] data-[state=open]:bg-[#2a2a2a] data-[state=open]:text-[var(--soromi-text)]"
             >
               <svg
                 width="13"
@@ -697,16 +780,17 @@ function WorkspaceGroup({
               // Only the active workspace's current session is highlighted, so a non-active group's
               // open list doesn't look like it's the one in focus.
               activeSession={active && session.id === activeSession}
-              onClick={() => onSelectSession(session.id)}
-              onRename={(title) => onRenameSession(session.id, title)}
-              onClose={() => onCloseSession(session.id)}
+              workspaceName={workspace.name}
+              onSelectSession={onSelectSession}
+              onRenameSession={onRenameSession}
+              onCloseSession={onCloseSession}
             />
           ))}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6a6a6e] text-[12px] hover:bg-[#17171a] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]"
+                className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6e6e6e] text-[12px] hover:bg-[#1f1f1f] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]"
               >
                 <span className="flex w-1.5 flex-none items-center justify-center">
                   <svg
@@ -726,37 +810,45 @@ function WorkspaceGroup({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-[170px]">
-              <DropdownMenuItem onSelect={() => onNewSession('terminal')}>
+              <DropdownMenuItem onSelect={() => onNewSession(workspace.name, 'terminal')}>
                 Terminal
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onNewSession('chat')}>Chat</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onNewSession(workspace.name, 'chat')}>
+                Chat
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       )}
     </div>
   )
-}
+})
 
 /**
  * One session row inside an open workspace group: its status dot, name (double-click to rename), an
  * always-present subtitle (what it's working on, or "New session"), and its live state. Sub-agents
  * nest behind a count pill; a hover ✕ closes the session (managed here, no terminal tab strip).
+ *
+ * Memoized: within a group whose status changed, only the session whose object actually changed
+ * re-renders (`setSessionStatus` preserves the reference of the others), so the handlers are stable
+ * and parameterized by name/id rather than closed over per row.
  */
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   session,
   label,
   activeSession,
-  onClick,
-  onRename,
-  onClose,
+  workspaceName,
+  onSelectSession,
+  onRenameSession,
+  onCloseSession,
 }: {
   session: SessionSummary
   label: string
   activeSession: boolean
-  onClick: () => void
-  onRename: (title: string) => void
-  onClose: () => void
+  workspaceName: string
+  onSelectSession: (name: string, id: string) => void
+  onRenameSession: (id: string, title: string) => void
+  onCloseSession: (id: string) => void
 }) {
   const state = AGENT_STATE[session.status]
   // The subtitle is always shown so the two-line rhythm holds across the list: what the provider is
@@ -773,15 +865,15 @@ function SessionRow({
   }
   const commit = () => {
     setEditing(false)
-    onRename(draft.trim())
+    onRenameSession(session.id, draft.trim())
   }
 
   return (
     <div>
       <div
         className={cn(
-          'group/row flex items-center gap-[9px] rounded-[8px] px-[9px] py-[7px] hover:bg-[#17171a]',
-          activeSession && 'bg-[#1c1c20]',
+          'group/row flex items-center gap-[9px] rounded-[8px] px-[9px] py-[7px] hover:bg-[#1f1f1f]',
+          activeSession && 'bg-[#1f1f1f]',
         )}
       >
         {editing ? (
@@ -806,7 +898,7 @@ function SessionRow({
           <>
             <button
               type="button"
-              onClick={onClick}
+              onClick={() => onSelectSession(workspaceName, session.id)}
               onDoubleClick={startEdit}
               title="Double-click to rename"
               className="flex min-w-0 flex-1 cursor-pointer appearance-none items-center gap-[9px] border-none bg-transparent p-0 text-left"
@@ -816,12 +908,12 @@ function SessionRow({
                 <div
                   className={cn(
                     'overflow-hidden text-ellipsis whitespace-nowrap font-medium text-[12.5px]',
-                    activeSession ? 'text-[var(--soromi-text)]' : 'text-[#d7d7da]',
+                    activeSession ? 'text-[var(--soromi-text)]' : 'text-[#d6d6d6]',
                   )}
                 >
                   {label}
                 </div>
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[#6a6a6e] text-[11px]">
+                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[#6e6e6e] text-[11px]">
                   {subtitle}
                 </div>
               </div>
@@ -831,7 +923,7 @@ function SessionRow({
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 title={open ? 'Hide sub-agents' : 'Show sub-agents'}
-                className="inline-flex flex-none cursor-pointer appearance-none items-center gap-[3px] rounded-full border-none bg-[#1e1e21] px-1.5 py-0.5 font-bold text-[#8a8a8e] text-[10px] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
+                className="inline-flex flex-none cursor-pointer appearance-none items-center gap-[3px] rounded-full border-none bg-[#1f1f1f] px-1.5 py-0.5 font-semibold text-[#8a8a8a] text-[10px] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
               >
                 {subagents.length}
                 <svg
@@ -852,9 +944,9 @@ function SessionRow({
             )}
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onCloseSession(session.id)}
               title="Close session"
-              className="flex h-[19px] w-[19px] flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#5a5a5e] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
+              className="flex h-[19px] w-[19px] flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#565656] hover:bg-[#363636] hover:text-[var(--soromi-text)]"
             >
               <svg
                 width="11"
@@ -876,23 +968,23 @@ function SessionRow({
       {open && <SubAgentList sessionId={session.id} subagents={subagents} />}
     </div>
   )
-}
+})
 
 /** The sub-agents a session spawned (Claude Agent/Task calls), nested behind a connector rule; the
  * dot is each one's live status. */
 function SubAgentList({ sessionId, subagents }: { sessionId: string; subagents: SubAgent[] }) {
   return (
-    <div className="mt-px mb-1 ml-[15px] flex flex-col gap-px border-[#26262a] border-l pl-[11px]">
+    <div className="mt-px mb-1 ml-[15px] flex flex-col gap-px border-[#2a2a2a] border-l pl-[11px]">
       {subagents.map((sub, index) => {
         const st = AGENT_STATE[sub.status]
         return (
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: positional; same-named sub-agents can repeat.
             key={`${sessionId}:${sub.name}:${index}`}
-            className="flex items-center gap-2 rounded-[6px] px-[7px] py-1 hover:bg-[#1e1e21]"
+            className="flex items-center gap-2 rounded-[6px] px-[7px] py-1 hover:bg-[#1f1f1f]"
           >
             <Dot color={st.dot} pulse={st.pulse} size={5} />
-            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[#8a8a8e] text-[11px]">
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[#8a8a8a] text-[11px]">
               {sub.name}
             </span>
           </div>

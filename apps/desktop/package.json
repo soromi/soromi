@@ -1,14 +1,38 @@
 {
   "name": "@soromi/desktop",
+  "productName": "Soromi",
   "version": "0.1.1",
+  "description": "The Soromi desktop app (Electron): a native shell that spawns the soromi-daemon and renders the shared gui.",
+  "main": ".vite/build/main.js",
   "private": true,
-  "type": "module",
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "build:daemon": "cargo build -p soromi-daemon",
+    "build:daemon:release": "cargo build -p soromi-daemon --release",
+    "build:gui": "pnpm --filter @soromi/gui build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "electron-forge start",
+    "dev": "pnpm build:daemon && pnpm build:gui && electron-forge start",
+    "package": "pnpm build:daemon:release && pnpm build:gui && electron-forge package",
+    "make": "pnpm build:daemon:release && pnpm build:gui && electron-forge make"
   },
+  "license": "MIT",
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-deb": "^7.11.2",
+    "@electron-forge/maker-rpm": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
+    "@electron-forge/plugin-fuses": "^7.11.2",
+    "@electron-forge/plugin-vite": "^7.11.2",
+    "@electron/fuses": "^1.8.0",
+    "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/node": "^22",
+    "electron": "43.3.0",
+    "typescript": "~5.6.0",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
   }
 }

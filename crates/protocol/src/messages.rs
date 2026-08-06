@@ -484,6 +484,17 @@ pub enum ClientMessage {
     /// This viewport claims sole control of the terminals: it drives input and owns the size, and
     /// every other viewport shows a takeover screen. Triggers a `Control` broadcast.
     TakeControl,
+    /// The desktop window's focus changed. While focused, the daemon suppresses agent-event sounds
+    /// and banners (the user is already looking at the app). The native shells report this; other
+    /// viewers leave it alone.
+    SetFocused {
+        focused: bool,
+    },
+    /// This viewport renders notifications itself (the Electron shell shows native banners with the
+    /// app identity), so the daemon routes them here as `Notify` messages instead of firing its own.
+    NotificationsNative {
+        enabled: bool,
+    },
 }
 
 /// Daemon -> viewport. A discriminated union on `type`.
@@ -508,10 +519,17 @@ pub enum ServerMessage {
         session: String,
         status: Status,
     },
+    /// A desktop banner to show natively. Routed to a viewer that opted in via
+    /// `NotificationsNative` (the Electron shell), and only while such a viewer is connected —
+    /// otherwise the daemon fires the notification itself. `title` is the app name, `body` the text.
+    /// `workspace`/`session` identify what the banner is about, so clicking it opens that tab.
     Notify {
-        workspace: String,
-        status: Status,
-        message: String,
+        title: String,
+        body: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session: Option<String>,
     },
     SessionOpened {
         workspace: String,

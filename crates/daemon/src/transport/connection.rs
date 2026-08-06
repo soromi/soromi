@@ -26,6 +26,10 @@ pub struct Connection {
     pairing: Option<Arc<PairingService>>,
     out: Outbound,
     attached: HashMap<String, JoinHandle<()>>,
+    /// Forwards notification banners to this viewport as `Notify` messages, while it has opted into
+    /// native notifications (the Electron shell). Its live broadcast subscription is what tells the
+    /// controller to route banners here instead of firing them via the OS.
+    notify_task: Option<JoinHandle<()>>,
     /// This viewport's id, used to gate input/resize to the controller and to claim control.
     viewer_id: u64,
 }
@@ -44,6 +48,7 @@ impl Connection {
             pairing,
             out,
             attached: HashMap::new(),
+            notify_task: None,
             viewer_id,
         }
     }
@@ -307,6 +312,12 @@ impl Connection {
                 });
             }
             ClientMessage::TakeControl => self.hub.take_control(self.viewer_id),
+            // The native desktop shell reports its window focus so the daemon suppresses sounds and
+            // banners while the user is looking at the app.
+            ClientMessage::SetFocused { focused } => self.hub.set_focused(focused),
+            // The Electron shell renders banners itself: forward notifications to it as `Notify`
+            // messages (while it stays subscribed, the daemon skips the OS notifier).
+            ClientMessage::NotificationsNative { enabled } => self.set_notifications_native(enabled),
             ClientMessage::Attach { session } => self.attach(&session),
             ClientMessage::Input { session, data } => {
                 // Only the controlling viewport drives the terminal.
@@ -337,6 +348,42 @@ impl Connection {
 
     fn send(&self, message: ServerMessage) {
         let _ = self.out.send(message);
+    }
+
+    /// Turns native-notification forwarding on or off. While on, a task subscribes to the hub's
+    /// notification broadcast and relays each banner to this viewport as a `Notify` message; the
+    /// subscription's presence is what makes the controller route banners here. Aborting the task
+    /// (here or on disconnect) drops the subscription, so the daemon falls back to the OS notifier.
+    fn set_notifications_native(&mut self, enabled: bool) {
+        if let Some(task) = self.notify_task.take() {
+            task.abort();
+        }
+        if !enabled {
+            return;
+        }
+        let mut rx = self.hub.subscribe_notifications();
+        let out = self.out.clone();
+        self.notify_task = Some(tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(banner) => {
+                        if out
+                            .send(ServerMessage::Notify {
+                                title: banner.title,
+                                body: banner.body,
+                                workspace: Some(banner.workspace),
+                                session: banner.session,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }));
     }
 
     /// Sends this viewport its control state: `None` holder when it drives, else the controller's
@@ -530,6 +577,11 @@ impl Drop for Connection {
     fn drop(&mut self) {
         for (_, handle) in self.attached.drain() {
             handle.abort();
+        }
+        // Drop the notification subscription so a disconnecting native viewer stops holding the
+        // controller in "route to wire" mode (the OS notifier resumes when none remain).
+        if let Some(task) = self.notify_task.take() {
+            task.abort();
         }
     }
 }
