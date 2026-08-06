@@ -31,6 +31,17 @@ fn parse_user(value: &Value) -> Vec<ChatEvent> {
         return Vec::new();
     };
 
+    // A stop is recorded as a `user` message carrying `interruptedMessageId` (a field a real prompt
+    // never has) — surface it as a system notice, not a user bubble. Detected by the field, not by
+    // matching the wording.
+    if value.get("interruptedMessageId").is_some() {
+        let text = content
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| result_text(Some(content)));
+        return vec![ChatEvent::Notice { text }];
+    }
+
     // A plain prompt is a string; tool results come back as an array of blocks.
     if let Some(text) = content.as_str() {
         return user_text(text).into_iter().collect();
@@ -115,7 +126,10 @@ fn tool_body(name: &str, input: &Value) -> Option<String> {
         "Grep" | "Glob" => str_input(input, "pattern"),
         // A spawned sub-agent: its short task description is the label the sidebar shows (e.g.
         // "Map v1 -> v2 fields"), falling back to the sub-agent type when there's no description.
-        "Task" => str_input(input, "description").or_else(|| str_input(input, "subagent_type")),
+        // Named `Task` historically, renamed to `Agent` in Claude Code 2.1 — accept both.
+        "Task" | "Agent" => {
+            str_input(input, "description").or_else(|| str_input(input, "subagent_type"))
+        }
         _ => Some(serde_json::to_string(input).unwrap_or_default()),
     };
 

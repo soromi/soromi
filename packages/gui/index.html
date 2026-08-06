@@ -13,6 +13,10 @@
       }
       body {
         background: #161514;
+        /* Light text on a dark background renders heavy with subpixel AA (everything looks bold);
+           grayscale smoothing thins it so real bold stands out. */
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
     </style>
   </head>

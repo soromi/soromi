@@ -8,6 +8,7 @@ import type {
   SessionSummary,
   Skill,
   Status,
+  ToolApproval,
   WorkspaceSummary,
 } from '@soromi/protocol'
 
@@ -61,6 +62,14 @@ interface ClientState {
   /** Structured transcript events for the chat view, keyed by session id (Claude sessions only).
    * Empty/absent means no transcript, so the viewport falls back to the terminal. */
   chat: Record<string, ChatEvent[]>
+  /** The assistant message streaming in right now, keyed by session id (cumulative text). Empty /
+   * absent means nothing is mid-stream — the completed message lives in `chat`. */
+  chatDelta: Record<string, string>
+  /** Tool calls awaiting the user's allow/deny, keyed by session id. */
+  chatApproval: Record<string, ToolApproval[]>
+  /** Whether earlier messages exist on the daemon beyond what's loaded, keyed by session id (drives
+   * the "Load earlier" button). */
+  chatEarlier: Record<string, boolean>
   /** A newer release, once the daemon reports one. */
   update: AppUpdate | null
   /** The update version the user dismissed; the banner stays hidden while it matches. */
@@ -80,7 +89,11 @@ interface ClientState {
   setProviderStatus: (provider: string, configDir: string, loggedIn: boolean) => void
   setSkills: (session: string, skills: Skill[]) => void
   appendChat: (session: string, events: ChatEvent[]) => void
+  prependChatHistory: (session: string, events: ChatEvent[], hasMore: boolean) => void
   resetChat: (session: string) => void
+  setChatDelta: (session: string, text: string) => void
+  addChatApproval: (session: string, approval: ToolApproval) => void
+  removeChatApproval: (session: string, id: string) => void
   setUpdate: (update: AppUpdate) => void
   dismissUpdate: () => void
 }
@@ -96,6 +109,9 @@ export const useClientStore = create<ClientState>()((set) => ({
   providerStatus: {},
   skills: {},
   chat: {},
+  chatDelta: {},
+  chatApproval: {},
+  chatEarlier: {},
   update: null,
   dismissedUpdate: readDismissedUpdate(),
   controlHolder: null,
@@ -131,8 +147,36 @@ export const useClientStore = create<ClientState>()((set) => ({
   appendChat: (session, events) =>
     set((state) => ({
       chat: { ...state.chat, [session]: [...(state.chat[session] ?? []), ...events] },
+      // A committed message supersedes whatever was streaming in.
+      chatDelta: { ...state.chatDelta, [session]: '' },
     })),
-  resetChat: (session) => set((state) => ({ chat: { ...state.chat, [session]: [] } })),
+  prependChatHistory: (session, events, hasMore) =>
+    set((state) => ({
+      chat: { ...state.chat, [session]: [...events, ...(state.chat[session] ?? [])] },
+      chatEarlier: { ...state.chatEarlier, [session]: hasMore },
+    })),
+  resetChat: (session) =>
+    set((state) => ({
+      chat: { ...state.chat, [session]: [] },
+      chatDelta: { ...state.chatDelta, [session]: '' },
+      chatApproval: { ...state.chatApproval, [session]: [] },
+      chatEarlier: { ...state.chatEarlier, [session]: false },
+    })),
+  setChatDelta: (session, text) =>
+    set((state) => ({ chatDelta: { ...state.chatDelta, [session]: text } })),
+  addChatApproval: (session, approval) =>
+    set((state) => {
+      const current = state.chatApproval[session] ?? []
+      if (current.some((a) => a.id === approval.id)) return state
+      return { chatApproval: { ...state.chatApproval, [session]: [...current, approval] } }
+    }),
+  removeChatApproval: (session, id) =>
+    set((state) => ({
+      chatApproval: {
+        ...state.chatApproval,
+        [session]: (state.chatApproval[session] ?? []).filter((a) => a.id !== id),
+      },
+    })),
   setUpdate: (update) => set({ update }),
   dismissUpdate: () =>
     set((state) => {

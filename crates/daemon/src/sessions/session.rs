@@ -221,6 +221,21 @@ impl Session {
         let _ = self.status_tx.send(Status::Thinking);
     }
 
+    /// A tool is starting mid-turn (Claude's PreToolUse). Keeps the tab running and refreshes the
+    /// idle-decay clock — but, unlike a user prompt, never un-settles a finished turn: hooks deliver
+    /// out of order, and a late PreToolUse arriving after Stop/Notification must not resurrect a tab
+    /// that already went Done/Idle (which then sticks on "running" because Claude's blinking prompt
+    /// keeps the PTY from ever going quiet enough to decay).
+    pub fn mark_tool_active(&self) {
+        if self.settled.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Ok(mut at) = self.last_activity.lock() {
+            *at = Instant::now();
+        }
+        let _ = self.status_tx.send(Status::Thinking);
+    }
+
     /// A live feed of output frames produced after this call.
     pub fn subscribe_output(&self) -> broadcast::Receiver<String> {
         self.output_tx.subscribe()
@@ -471,10 +486,18 @@ fn spawn_idle_decay(
     Some(handle.abort_handle())
 }
 
+/// Claude's sub-agent spawn tool, named `Task` historically and renamed to `Agent` in Claude Code
+/// 2.1. Accept both so sub-agents surface (and aren't mistaken for the tab's own activity)
+/// regardless of the installed CLI version.
+fn is_subagent_tool(name: &str) -> bool {
+    name == "Task" || name == "Agent"
+}
+
 /// Applies transcript events to the sub-agent set for the current turn: a new user prompt clears it,
-/// a `Task` tool-use adds a running sub-agent (keyed by its id, labelled by its parsed body — the
-/// task description), and its tool-result marks that one done (or blocked on error) while keeping it
-/// in the list. Returns whether the set changed, so the caller only republishes on a real change.
+/// a sub-agent tool-use adds a running one (keyed by its id, labelled by its parsed body — the task
+/// description), and its tool-result *removes* it (the card shows only what's still running, so a
+/// finished sub-agent drops off). Returns whether the set changed, so the caller only republishes on
+/// a real change.
 fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -> bool {
     let mut changed = false;
     for event in events {
@@ -486,7 +509,7 @@ fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -
                     changed = true;
                 }
             }
-            ChatEvent::Tool { id, name, body, .. } if name == "Task" => {
+            ChatEvent::Tool { id, name, body, .. } if is_subagent_tool(name) => {
                 let name = body.clone().unwrap_or_else(|| "sub-agent".to_string());
                 active.push((
                     id.clone(),
@@ -497,14 +520,11 @@ fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -
                 ));
                 changed = true;
             }
-            ChatEvent::ToolResult { id, ok, .. } => {
-                if let Some((_, sub)) = active.iter_mut().find(|(tool_id, _)| tool_id == id) {
-                    let next = if *ok { Status::Done } else { Status::Blocked };
-                    if sub.status != next {
-                        sub.status = next;
-                        changed = true;
-                    }
-                }
+            // The sub-agent finished (or errored): it's no longer running, so drop it from the list.
+            ChatEvent::ToolResult { id, .. } => {
+                let before = active.len();
+                active.retain(|(tool_id, _)| tool_id != id);
+                changed |= active.len() != before;
             }
             _ => {}
         }
@@ -525,13 +545,13 @@ fn track_activity(pending: &mut Vec<(String, String)>, events: &[ChatEvent]) -> 
                     changed = true;
                 }
             }
-            // Sub-agents (`Task`) surface on their own row, so they're not the tab's own activity.
+            // Sub-agents surface on their own row, so they're not the tab's own activity.
             ChatEvent::Tool {
                 id,
                 name,
                 path,
                 body,
-            } if name != "Task" => {
+            } if !is_subagent_tool(name) => {
                 // Keep only the most recent tool: the gray line shows one thing at a time, and we
                 // deliberately hold on to it after the tool finishes so it stays visible while the
                 // agent thinks between calls ("Unravelling…"). Only a new user prompt clears it.
@@ -652,7 +672,7 @@ mod tests {
             }]
         ));
 
-        // One sub-agent finishes: it stays in the list, marked done.
+        // One sub-agent finishes: it drops off the list (the card shows only what's still running).
         assert!(track_subagents(
             &mut active,
             &[ChatEvent::ToolResult {
@@ -663,10 +683,7 @@ mod tests {
         ));
         assert_eq!(
             labels(&active),
-            vec![
-                ("Map v1 to v2".to_string(), Status::Done),
-                ("Rewrite encoder".to_string(), Status::Thinking),
-            ]
+            vec![("Rewrite encoder".to_string(), Status::Thinking)]
         );
 
         // A new user prompt starts a fresh turn and clears the set.
@@ -677,6 +694,37 @@ mod tests {
             }],
         ));
         assert!(active.is_empty());
+    }
+
+    #[test]
+    fn tracks_the_renamed_agent_tool_as_a_subagent() {
+        // Claude Code 2.1 renamed the sub-agent tool `Task` -> `Agent`; both must be tracked.
+        let mut active: Vec<(String, SubAgent)> = Vec::new();
+        assert!(track_subagents(
+            &mut active,
+            &[ChatEvent::Tool {
+                id: "a1".into(),
+                name: "Agent".into(),
+                path: None,
+                body: Some("Find gift card features".into()),
+            }],
+        ));
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].1.name, "Find gift card features");
+        assert_eq!(active[0].1.status, Status::Thinking);
+
+        // And it must NOT be counted as the tab's own activity (it has its own row).
+        let mut pending: Vec<(String, String)> = Vec::new();
+        assert!(!track_activity(
+            &mut pending,
+            &[ChatEvent::Tool {
+                id: "a1".into(),
+                name: "Agent".into(),
+                path: None,
+                body: Some("Find gift card features".into()),
+            }],
+        ));
+        assert!(pending.is_empty());
     }
 
     #[test]
@@ -763,6 +811,28 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(found, "chat was {:?}", session.chat_snapshot());
+        session.shutdown();
+    }
+
+    #[test]
+    fn a_late_tool_hook_does_not_resurrect_a_finished_turn() {
+        let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
+
+        session.mark_active(); // turn starts (UserPromptSubmit)
+        assert_eq!(session.status(), Status::Thinking);
+        session.set_hook_status(Status::Done); // Stop settles the turn
+        assert_eq!(session.status(), Status::Done);
+
+        // A PreToolUse delivered late (out of order, after Stop) must NOT flip it back to running.
+        session.mark_tool_active();
+        assert_eq!(session.status(), Status::Done);
+
+        // But a fresh user prompt does start a new turn.
+        session.mark_active();
+        assert_eq!(session.status(), Status::Thinking);
+        // And now a tool keeps that turn alive.
+        session.mark_tool_active();
+        assert_eq!(session.status(), Status::Thinking);
         session.shutdown();
     }
 

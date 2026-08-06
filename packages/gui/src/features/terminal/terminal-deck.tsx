@@ -3,69 +3,48 @@ import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { TakeoverScreen, TerminalSurface, useClientStore } from '@soromi/client'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-  SessionTabs,
-} from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
-import { PROVIDERS } from '@/config/providers'
 import { colors } from '@/config/theme'
 
 //Components
+import { ChatPane } from './chat-pane'
 import { ProviderIcon } from '@/shared/provider-icon'
-
-//Icons
-import PlusIcon from '@/assets/icons/plus.svg?react'
 
 //Types
 import type { Transport } from '@soromi/client'
-import type { SessionTab } from '@soromi/ui'
 import type { SessionSummary } from '@soromi/protocol'
 
 /**
- * The active workspace's tabs and their terminals. Each visited session keeps a live pane
- * (parked when hidden), so switching tabs or workspaces is instant and preserves scrollback.
- * The tab strip belongs to the active workspace; a "＋" opens another session for a chosen agent.
+ * The active workspace's terminals. Each visited session keeps a live pane (parked when hidden), so
+ * switching sessions or workspaces is instant and preserves scrollback. Sessions are navigated from
+ * the sidebar's workspace cards now — there is no tab strip; the header just names the one in view
+ * (its provider glyph + title) and offers a new session and the Explorer toggle.
  */
 export function TerminalDeck({ transport }: { transport: Transport }) {
-  const { active, activeSession, selectSession, explorerOpen, toggleExplorer } = useAppStore(
+  const { active, activeSession, explorerOpen, toggleExplorer } = useAppStore(
     useShallow((s) => ({
       active: s.active,
       activeSession: s.activeSession,
-      selectSession: s.selectSession,
       explorerOpen: s.explorerOpen,
       toggleExplorer: s.toggleExplorer,
     })),
   )
-  const { workspaces, accounts } = useClientStore(
-    useShallow((s) => ({ workspaces: s.workspaces, accounts: s.accounts })),
-  )
+  const workspaces = useClientStore((s) => s.workspaces)
   const [visited, setVisited] = useState<string[]>([])
 
   const workspace = workspaces.find((w) => w.name === active)
   const sessions = workspace?.sessions ?? []
   const currentSession = active ? activeSession[active] : undefined
-
-  // Only offer providers that have a usable account: one already bound in this workspace, or a
-  // configured account profile with a login for that provider.
-  const availableProviders = PROVIDERS.filter(
-    (p) =>
-      workspace?.accounts.some((a) => a.agent === p.value) ||
-      accounts.some((acc) => p.value in acc.providers),
+  const session = sessions.find((s) => s.id === currentSession)
+  // Every live session across workspaces, so a parked pane renders in the right mode (chat vs. term).
+  const byId = useMemo(
+    () => new Map(workspaces.flatMap((w) => w.sessions).map((s) => [s.id, s])),
+    [workspaces],
   )
-
-  // Make sure account profiles are loaded so the new-session menu can filter by them.
-  useEffect(() => {
-    transport.send({ type: 'list-accounts' })
-  }, [transport])
 
   // Mount a pane the first time its session becomes the active one.
   useEffect(() => {
@@ -73,7 +52,7 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
     setVisited((prev) => (prev.includes(currentSession) ? prev : [...prev, currentSession]))
   }, [currentSession])
 
-  // Drop panes whose session no longer exists (closed tabs, removed spaces).
+  // Drop panes whose session no longer exists (closed sessions, removed spaces).
   useEffect(() => {
     const live = new Set(workspaces.flatMap((w) => w.sessions.map((s) => s.id)))
     setVisited((prev) => {
@@ -82,119 +61,102 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
     })
   }, [workspaces])
 
-  const openTab = (agent: string) => {
-    if (!active) return
-    const bound = workspace?.accounts.some((a) => a.agent === agent)
-    // A bound agent reuses its account; a new agent binds to the first account configured for it.
-    const account = accounts.find((acc) => agent in acc.providers)?.name ?? 'personal'
-    transport.send({
-      type: 'open-session',
-      workspace: active,
-      agent,
-      account: bound ? undefined : account,
-    })
-  }
-
-  // Prepare the tab view data once (label, close-ability), so the strip only renders.
-  const tabs = useMemo<SessionTab[]>(
-    () =>
-      sessions.map((session) => ({
-        id: session.id,
-        label: displayLabel(session, sessions),
-        status: session.status,
-        agent: session.agent,
-        title: session.title ?? null,
-        account: session.account,
-        canClose: sessions.length > 1,
-      })),
-    [sessions],
-  )
-
-  const newSession = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex h-[40px] w-11 cursor-pointer appearance-none items-center justify-center border-none bg-transparent text-[var(--soromi-text-dim)] text-base hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
-          title="New session"
-        >
-          <PlusIcon width={16} height={16} />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-40">
-        <DropdownMenuLabel>New session</DropdownMenuLabel>
-        {availableProviders.length === 0 ? (
-          <DropdownMenuItem disabled>No accounts configured</DropdownMenuItem>
-        ) : (
-          availableProviders.map((provider) => (
-            <DropdownMenuItem key={provider.value} onClick={() => openTab(provider.value)}>
-              <ProviderIcon provider={provider.value} size={14} />
-              {provider.label}
-            </DropdownMenuItem>
-          ))
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {workspace && (
-        <SessionTabs
-          tabs={tabs}
-          activeId={currentSession}
-          onSelect={(id) => active && selectSession(active, id)}
-          onRename={(id, title) => transport.send({ type: 'rename-session', session: id, title })}
-          onClose={(id) => transport.send({ type: 'close-session', session: id })}
-          renderIcon={(agent) => <ProviderIcon provider={agent} size={16} />}
-          trailing={newSession}
-          rightSlot={
-            !explorerOpen && (
-              <button
-                type="button"
-                title="Explorer"
-                onClick={toggleExplorer}
-                className="mr-2 flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-2.5 py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+        <div
+          data-tauri-drag-region
+          className="flex h-[41px] flex-none items-stretch justify-between border-[var(--soromi-border)] border-b pr-5"
+        >
+          <div className="flex min-w-0 flex-none items-center gap-[9px] px-4">
+            {session ? (
+              <>
+                <span className="flex h-[15px] w-[15px] flex-none items-center justify-center">
+                  <ProviderIcon provider={session.agent} size={15} />
+                </span>
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-[13px] text-[var(--soromi-text)]">
+                  {displayLabel(session, sessions)}
+                </span>
+              </>
+            ) : (
+              <span className="whitespace-nowrap text-[13px] text-[var(--soromi-text-faint)]">
+                No active session
+              </span>
+            )}
+          </div>
+          <div data-tauri-drag-region className="min-w-0 flex-1" />
+          {session && (
+            <button
+              type="button"
+              title={session.mode === 'chat' ? 'Switch to terminal' : 'Switch to chat'}
+              onClick={() =>
+                transport.send({
+                  type: 'switch-mode',
+                  session: session.id,
+                  mode: session.mode === 'chat' ? 'terminal' : 'chat',
+                })
+              }
+              className="mr-1 flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-[11px] py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+            >
+              {session.mode === 'chat' ? 'Terminal' : 'Chat'}
+            </button>
+          )}
+          {!explorerOpen && (
+            <button
+              type="button"
+              title="Explorer"
+              onClick={toggleExplorer}
+              className="flex cursor-pointer appearance-none items-center gap-[7px] self-center rounded-lg border-none bg-transparent px-[11px] py-[5px] font-semibold text-[12px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                </svg>
-                Explorer
-              </button>
-            )
-          }
-        />
+                <path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              </svg>
+              Explorer
+            </button>
+          )}
+        </div>
       )}
       {/* `isolate` keeps the takeover overlay's z-index contained to the terminal area, so it
           can't paint over the status bar or its popups (usage / devices). */}
       <div className="relative isolate flex min-h-0 flex-1 flex-col">
-        {visited.map((id) => (
-          <TerminalSurface
-            key={id}
-            transport={transport}
-            session={id}
-            active={id === currentSession}
-            background={colors.bgTerminal}
-            foreground={colors.text}
-          />
-        ))}
+        {visited.map((id) => {
+          // Chat panes render their whole transcript (streamdown markdown + shiki highlighting), which
+          // is heavy — and their state lives in the store, so we only mount the *active* one and let
+          // hidden ones unmount (they re-render instantly from the store on return). Terminals must
+          // stay mounted even when hidden, to preserve their xterm scrollback.
+          if (byId.get(id)?.mode === 'chat') {
+            return id === currentSession ? (
+              <ChatPane key={id} transport={transport} session={id} active />
+            ) : null
+          }
+          return (
+            <TerminalSurface
+              key={id}
+              transport={transport}
+              session={id}
+              active={id === currentSession}
+              background={colors.bgTerminal}
+              foreground={colors.text}
+            />
+          )
+        })}
         <TakeoverScreen />
       </div>
     </div>
   )
 }
 
-/** A tab's display name: its custom title, or the account, auto-indexed when it collides. */
+/** A session's display name: its custom title, or the account, auto-indexed when it collides. */
 function displayLabel(session: SessionSummary, sessions: SessionSummary[]): string {
   if (session.title) return session.title
   const peers = sessions.filter((s) => !s.title && s.account === session.account)

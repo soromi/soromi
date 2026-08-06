@@ -2,12 +2,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::session::{Session, SessionOptions};
+use super::stream_json::StreamJsonSession;
 
-/// Owns the id-to-session map (one entry per terminal tab). Interior-mutable so it can be
-/// shared across async connections behind an `Arc`.
+/// Owns the live sessions, one entry per tab, keyed by id. A tab is EITHER a PTY terminal or a
+/// headless chat (never both at once - a mode switch tears one down before spawning the other), so
+/// the two maps are disjoint by id. Interior-mutable to share across async connections behind `Arc`.
 #[derive(Default)]
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
+    chat: Mutex<HashMap<String, Arc<StreamJsonSession>>>,
 }
 
 impl SessionManager {
@@ -30,12 +33,35 @@ impl SessionManager {
         self.sessions.lock().unwrap().get(id).cloned()
     }
 
+    /// Returns the existing headless chat session for an id, or spawns one from the given backend.
+    pub fn ensure_chat(
+        &self,
+        id: &str,
+        spawn: impl FnOnce() -> anyhow::Result<StreamJsonSession>,
+    ) -> anyhow::Result<Arc<StreamJsonSession>> {
+        let mut chat = self.chat.lock().unwrap();
+        if let Some(existing) = chat.get(id) {
+            return Ok(existing.clone());
+        }
+        let session = Arc::new(spawn()?);
+        chat.insert(id.to_string(), session.clone());
+        Ok(session)
+    }
+
+    pub fn get_chat(&self, id: &str) -> Option<Arc<StreamJsonSession>> {
+        self.chat.lock().unwrap().get(id).cloned()
+    }
+
     pub fn names(&self) -> Vec<String> {
         self.sessions.lock().unwrap().keys().cloned().collect()
     }
 
+    /// Removes a tab from whichever map holds it (terminal or chat) and stops it.
     pub fn dispose(&self, id: &str) {
         if let Some(session) = self.sessions.lock().unwrap().remove(id) {
+            session.shutdown();
+        }
+        if let Some(session) = self.chat.lock().unwrap().remove(id) {
             session.shutdown();
         }
     }
@@ -46,6 +72,11 @@ impl SessionManager {
             session.shutdown();
         }
         sessions.clear();
+        let mut chat = self.chat.lock().unwrap();
+        for session in chat.values() {
+            session.shutdown();
+        }
+        chat.clear();
     }
 }
 

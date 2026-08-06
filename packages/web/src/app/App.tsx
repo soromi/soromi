@@ -72,6 +72,18 @@ export function App() {
         case 'chat-reset':
           client.resetChat(message.session)
           break
+        case 'chat-delta':
+          client.setChatDelta(message.session, message.text)
+          break
+        case 'chat-history':
+          client.prependChatHistory(message.session, message.events, message.hasMore)
+          break
+        case 'chat-approval':
+          client.addChatApproval(message.session, message.approval)
+          break
+        case 'chat-approval-resolved':
+          client.removeChatApproval(message.session, message.id)
+          break
       }
     })
     const offOpen = transport.onOpen(() => {

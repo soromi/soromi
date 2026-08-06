@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
@@ -21,22 +21,34 @@ import SkillsSvg from '@/assets/icons/skills.svg?react'
  * left edge; the width and open state are persisted.
  */
 export function Explorer() {
-  const { active, sidebarMode, explorerWidth, setSidebarMode, setExplorerWidth, setExplorerOpen } =
-    useAppStore(
-      useShallow((s) => ({
-        active: s.active,
-        sidebarMode: s.sidebarMode,
-        explorerWidth: s.explorerWidth,
-        setSidebarMode: s.setSidebarMode,
-        setExplorerWidth: s.setExplorerWidth,
-        setExplorerOpen: s.setExplorerOpen,
-      })),
-    )
+  const {
+    active,
+    sidebarMode,
+    explorerOpen,
+    explorerWidth,
+    setSidebarMode,
+    setExplorerWidth,
+    setExplorerOpen,
+  } = useAppStore(
+    useShallow((s) => ({
+      active: s.active,
+      sidebarMode: s.sidebarMode,
+      explorerOpen: s.explorerOpen,
+      explorerWidth: s.explorerWidth,
+      setSidebarMode: s.setSidebarMode,
+      setExplorerWidth: s.setExplorerWidth,
+      setExplorerOpen: s.setExplorerOpen,
+    })),
+  )
   const asideRef = useRef<HTMLElement>(null)
+  // While dragging the resize edge, the width follows the cursor every frame — the open/close width
+  // transition must be off then, or the panel edge would lag behind the pointer.
+  const [resizing, setResizing] = useState(false)
 
   // Drag the left edge to resize; width grows as the pointer moves toward the window's left.
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault()
+    setResizing(true)
     const right = asideRef.current?.getBoundingClientRect().right ?? 0
     const onMove = (move: PointerEvent) => setExplorerWidth(right - move.clientX)
     const onUp = () => {
@@ -44,6 +56,7 @@ export function Explorer() {
       window.removeEventListener('pointerup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      setResizing(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -54,58 +67,72 @@ export function Explorer() {
   return (
     <aside
       ref={asideRef}
-      className="relative flex flex-shrink-0 flex-col overflow-hidden border-[var(--soromi-border-subtle)] border-l bg-[var(--soromi-bg-sidebar)] text-[13px] text-[var(--soromi-text-dim)]"
-      style={{ width: explorerWidth }}
+      className={cn(
+        'relative flex flex-shrink-0 flex-col overflow-hidden bg-[var(--soromi-bg-app)] text-[13px] text-[var(--soromi-text-dim)]',
+        // Collapsed to width 0 when closed; the width animates so opening/closing pushes the content.
+        explorerOpen && 'border-[var(--soromi-border-subtle)] border-l',
+        !resizing && 'transition-[width] duration-300 ease-out',
+      )}
+      style={{ width: explorerOpen ? explorerWidth : 0 }}
     >
       {/* Drag handle on the left edge: a thin line that turns accent on hover/drag. */}
-      <div
-        className="absolute inset-y-0 left-[-3px] z-[var(--z-sidebar-resize)] w-[7px] cursor-col-resize after:absolute after:inset-y-0 after:left-[3px] after:w-px after:bg-transparent after:transition-colors after:content-[''] hover:after:bg-[var(--soromi-accent)] active:after:bg-[var(--soromi-accent)]"
-        onPointerDown={startResize}
-        title="Drag to resize"
-      />
+      {explorerOpen && (
+        <div
+          className="absolute inset-y-0 left-[-3px] z-[var(--z-sidebar-resize)] w-[7px] cursor-col-resize after:absolute after:inset-y-0 after:left-[3px] after:w-px after:bg-transparent after:transition-colors after:content-[''] hover:after:bg-[var(--soromi-accent)] active:after:bg-[var(--soromi-accent)]"
+          onPointerDown={startResize}
+          title="Drag to resize"
+        />
+      )}
 
-      <div className="box-border flex h-[41px] flex-none items-center justify-between border-[var(--soromi-border)] border-b px-[13px]">
-        <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
-          Explorer
-        </span>
-        <button
-          type="button"
-          title="Close"
-          onClick={() => setExplorerOpen(false)}
-          className="flex h-[24px] w-[24px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+      {/* Fixed-width content, so the panel's contents don't reflow while the width animates; the
+          `aside`'s `overflow-hidden` clips it as it opens/closes. */}
+      <div className="flex h-full flex-col" style={{ width: explorerWidth }}>
+        <div
+          data-tauri-drag-region
+          className="box-border flex h-[41px] flex-none items-center justify-between border-[var(--soromi-border)] border-b px-[13px]"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.9"
-            strokeLinecap="round"
-            aria-hidden="true"
+          <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
+            Explorer
+          </span>
+          <button
+            type="button"
+            title="Close"
+            onClick={() => setExplorerOpen(false)}
+            className="flex h-[24px] w-[24px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
           >
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      </div>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
 
-      <div className="flex flex-none gap-1 px-3 pt-2.5 pb-2">
-        <SectionTab
-          label="Files"
-          active={sidebarMode === 'files'}
-          onClick={() => setSidebarMode('files')}
-          icon={<FilesSvg width={14} height={14} />}
-        />
-        <SectionTab
-          label="Skills"
-          active={sidebarMode === 'skills'}
-          onClick={() => setSidebarMode('skills')}
-          icon={<SkillsSvg width={14} height={14} />}
-        />
-      </div>
+        <div className="flex flex-none gap-1 px-3 pt-2.5 pb-2">
+          <SectionTab
+            label="Files"
+            active={sidebarMode === 'files'}
+            onClick={() => setSidebarMode('files')}
+            icon={<FilesSvg width={14} height={14} />}
+          />
+          <SectionTab
+            label="Skills"
+            active={sidebarMode === 'skills'}
+            onClick={() => setSidebarMode('skills')}
+            icon={<SkillsSvg width={14} height={14} />}
+          />
+        </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-        {active && (sidebarMode === 'files' ? <FileTree /> : <SkillList />)}
+        <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+          {active && (sidebarMode === 'files' ? <FileTree /> : <SkillList />)}
+        </div>
       </div>
     </aside>
   )

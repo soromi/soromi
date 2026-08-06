@@ -34,6 +34,7 @@ export default defineConfig({
       '@soromi/client': fileURLToPath(new URL('../client/src/index.ts', import.meta.url)),
       // Shared subpaths (specific paths listed before the package root so they win the match).
       '@soromi/ui/theme.css': fileURLToPath(new URL('../ui/src/theme.css', import.meta.url)),
+      '@soromi/ui/chat': fileURLToPath(new URL('../ui/src/chat/index.ts', import.meta.url)),
       '@soromi/ui/code-viewer': fileURLToPath(
         new URL('../ui/src/files/code-viewer.tsx', import.meta.url),
       ),

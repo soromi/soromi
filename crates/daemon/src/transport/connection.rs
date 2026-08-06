@@ -7,7 +7,12 @@ use tokio::task::JoinHandle;
 
 use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
+use crate::sessions::session::Session;
+use crate::sessions::stream_json::StreamJsonSession;
 use crate::workspaces::service::{CreateSpaceInput, WorkspaceService};
+
+/// Chat messages sent per page: the recent tail on attach, and each "Load earlier" step.
+const CHAT_PAGE: usize = 80;
 
 pub type Outbound = mpsc::UnboundedSender<ServerMessage>;
 
@@ -109,13 +114,74 @@ impl Connection {
                 workspace,
                 agent,
                 account,
-            } => match self.hub.open_session(&workspace, agent, account) {
+                mode,
+            } => match self
+                .hub
+                .open_session(&workspace, agent, account, mode.unwrap_or_default())
+            {
                 Ok(session) => self.send(ServerMessage::SessionOpened { workspace, session }),
                 Err(error) => self.send(ServerMessage::Error {
                     message: error.to_string(),
                 }),
             },
             ClientMessage::CloseSession { session } => self.hub.close_session(&session),
+            ClientMessage::ChatTurn {
+                session,
+                text,
+                files,
+            } => {
+                // A chat turn is "input": only the controlling viewport may drive the agent.
+                if self.hub.is_controller(self.viewer_id)
+                    && let Some(chat) = self.hub.get_chat(&session)
+                {
+                    tokio::spawn(async move { chat.send_turn(&text, &files).await });
+                }
+            }
+            ClientMessage::ChatInterrupt { session } => {
+                // Stop button: interrupt the running turn. Same control gate as a chat turn.
+                if self.hub.is_controller(self.viewer_id)
+                    && let Some(chat) = self.hub.get_chat(&session)
+                {
+                    tokio::spawn(async move { chat.interrupt().await });
+                }
+            }
+            ClientMessage::ChatApprovalResponse {
+                session,
+                id,
+                allow,
+            } => {
+                // Allow/deny a pending tool approval — the same control gate as driving the agent.
+                if self.hub.is_controller(self.viewer_id)
+                    && let Some(chat) = self.hub.get_chat(&session)
+                {
+                    tokio::spawn(async move { chat.respond_approval(&id, allow).await });
+                }
+            }
+            ClientMessage::ChatPermissionMode { session, mode } => {
+                // The composer's permission dropdown: apply live and persist.
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.set_permission_mode(&session, mode);
+                }
+            }
+            ClientMessage::ChatLoadEarlier { session, loaded } => {
+                // "Load earlier": send the page of messages just before what the viewport holds.
+                if let Some(chat) = self.hub.get_chat(&session) {
+                    let (events, has_more) = chat.chat_earlier(loaded as usize, CHAT_PAGE);
+                    if !events.is_empty() {
+                        self.send(ServerMessage::ChatHistory {
+                            session,
+                            events,
+                            has_more,
+                        });
+                    }
+                }
+            }
+            ClientMessage::SwitchMode { session, mode } => {
+                // Restarts the session in the other backend (resumes the same conversation).
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.switch_mode(&session, mode);
+                }
+            }
             ClientMessage::RenameSession { session, title } => {
                 self.hub.rename_session(&session, title)
             }
@@ -295,13 +361,19 @@ impl Connection {
     /// The snapshot is prefixed with a terminal reset (`ESC c`) so a re-attach (reconnect) wipes
     /// the old content instead of writing on top of it.
     fn attach(&mut self, session_id: &str) {
-        let Some(session) = self.hub.get(session_id) else {
-            return;
-        };
         if let Some(previous) = self.attached.remove(session_id) {
             previous.abort();
         }
+        // A tab is either a PTY terminal or a headless chat; attach whichever exists.
+        if let Some(session) = self.hub.get(session_id) {
+            self.attach_pty(session_id, &session);
+        } else if let Some(chat) = self.hub.get_chat(session_id) {
+            self.attach_chat(session_id, &chat);
+        }
+    }
 
+    /// Replays scrollback + status for a PTY terminal, then streams output/status/chat.
+    fn attach_pty(&mut self, session_id: &str, session: &Session) {
         self.send(ServerMessage::Output {
             session: session_id.to_string(),
             data: format!("\u{1b}c{}", session.snapshot()),
@@ -352,6 +424,94 @@ impl Connection {
                                 session: id.clone(),
                                 events: vec![event],
                             });
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                }
+            }
+        });
+        self.attached.insert(session_id.to_string(), handle);
+    }
+
+    /// Attaches a headless chat session: sends its status + transcript-so-far, then streams status and
+    /// new chat events. No terminal output/scrollback - the chat view renders from the events.
+    fn attach_chat(&mut self, session_id: &str, session: &StreamJsonSession) {
+        self.send(ServerMessage::Status {
+            session: session_id.to_string(),
+            status: session.status(),
+        });
+        self.send(ServerMessage::ChatReset {
+            session: session_id.to_string(),
+        });
+        // Only the recent tail, so a long transcript doesn't flood the wire / balloon the webview; the
+        // viewport pages back with `ChatLoadEarlier`.
+        let (tail, has_more) = session.chat_tail(CHAT_PAGE);
+        if !tail.is_empty() || has_more {
+            self.send(ServerMessage::ChatHistory {
+                session: session_id.to_string(),
+                events: tail,
+                has_more,
+            });
+        }
+        // A viewer joining mid-turn should see the in-progress reply.
+        let delta = session.delta_snapshot();
+        if !delta.is_empty() {
+            self.send(ServerMessage::ChatDelta {
+                session: session_id.to_string(),
+                text: delta,
+            });
+        }
+        // ...and any tool approvals still awaiting an answer.
+        for approval in session.approval_snapshot() {
+            self.send(ServerMessage::ChatApproval {
+                session: session_id.to_string(),
+                approval,
+            });
+        }
+
+        let out = self.out.clone();
+        let id = session_id.to_string();
+        let mut status_rx = session.subscribe_status();
+        let mut chat_rx = session.subscribe_chat();
+        let mut delta_rx = session.subscribe_delta();
+        let mut approval_rx = session.subscribe_approval();
+        let mut resolved_rx = session.subscribe_resolved();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    changed = status_rx.changed() => {
+                        if changed.is_err() { break }
+                        let status = *status_rx.borrow_and_update();
+                        let _ = out.send(ServerMessage::Status { session: id.clone(), status });
+                    }
+                    event = chat_rx.recv() => match event {
+                        Ok(event) => {
+                            let _ = out.send(ServerMessage::Chat {
+                                session: id.clone(),
+                                events: vec![event],
+                            });
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                    delta = delta_rx.recv() => match delta {
+                        Ok(text) => {
+                            let _ = out.send(ServerMessage::ChatDelta { session: id.clone(), text });
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                    approval = approval_rx.recv() => match approval {
+                        Ok(approval) => {
+                            let _ = out.send(ServerMessage::ChatApproval { session: id.clone(), approval });
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
+                    resolved = resolved_rx.recv() => match resolved {
+                        Ok(approval_id) => {
+                            let _ = out.send(ServerMessage::ChatApprovalResolved { session: id.clone(), id: approval_id });
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(broadcast::error::RecvError::Closed) => break,

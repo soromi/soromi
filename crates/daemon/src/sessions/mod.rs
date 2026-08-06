@@ -2,3 +2,4 @@ pub mod decoder;
 pub mod manager;
 pub mod scrollback;
 pub mod session;
+pub mod stream_json;

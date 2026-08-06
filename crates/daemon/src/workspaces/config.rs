@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use soromi_protocol::AgentAccount;
+use soromi_protocol::{AgentAccount, PermissionMode, SessionMode};
 
 /// One tab within a workspace: a stable id plus the agent it runs. Its account is resolved
 /// from the workspace's `accounts` bindings by matching the agent.
@@ -13,6 +13,14 @@ pub struct SessionSpec {
     /// this tab's conversation on restore (`--resume <id>`). Absent until the agent reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_id: Option<String>,
+    /// How the tab is presented and driven: real terminal (default) or headless chat. Persisted so a
+    /// restore reopens it in the same mode. Omitted from disk when terminal (backward-compatible).
+    #[serde(default, skip_serializing_if = "SessionMode::is_terminal")]
+    pub mode: SessionMode,
+    /// How the headless chat handles tool permissions (the composer's dropdown). Persisted so a
+    /// restore keeps the user's choice. Omitted from disk when the default (ask).
+    #[serde(default, skip_serializing_if = "PermissionMode::is_default")]
+    pub permission_mode: PermissionMode,
 }
 
 /// The committable descriptor at the root of a work folder (`soromi.space.json`). References

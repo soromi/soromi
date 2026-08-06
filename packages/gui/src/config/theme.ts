@@ -7,7 +7,7 @@ import type { Status } from '@soromi/protocol'
  * (e.g. the xterm theme) and small mapping helpers.
  */
 export const colors = {
-  bgTerminal: '#0a0a0b',
+  bgTerminal: '#0f0f11',
   text: '#f0f0f0',
 }
 

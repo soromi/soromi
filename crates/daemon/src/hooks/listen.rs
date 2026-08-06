@@ -42,10 +42,13 @@ pub fn spawn(service: Arc<WorkspaceService>) {
                         service.set_transcript(&event.session, transcript_path.into());
                     }
                     if event.cue == "active" {
-                        // Authoritative "working" signal (UserPromptSubmit / PreToolUse): the tab is
-                        // running. Status only, no sound or banner — the agent starting work is not
-                        // a ping-worthy event.
+                        // A user prompt started a turn (UserPromptSubmit): the tab is running. Status
+                        // only, no sound/banner — starting work is not a ping-worthy event.
                         service.handle_agent_active(&event.session);
+                    } else if event.cue == "active-tool" {
+                        // A tool is starting (PreToolUse): keep an in-progress turn alive, but don't
+                        // resurrect one a hook already finished (a late, out-of-order delivery).
+                        service.handle_agent_tool_active(&event.session);
                     } else if event.cue == "idle" {
                         // The agent went quiet (Claude's idle notification): reflect it in the tab
                         // status, but with no sound or banner — going idle is not worth a ping.

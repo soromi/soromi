@@ -44,7 +44,7 @@ export function MobileShell() {
       <main className="relative flex min-h-0 flex-1 flex-col">
         {/* The deck never unmounts; it is only hidden when another tab is on top. */}
         <div className={cn('flex min-h-0 flex-1', tab !== 'terminal' && 'hidden')}>
-          <TerminalDeck active={session} fontSize={fontSize} />
+          <TerminalDeck active={session} fontSize={fontSize} defaultMode="chat" />
         </div>
         {tab === 'files' && <FilesPanel workspace={workspace?.name} />}
         {tab === 'skills' && <SkillsPanel session={session} />}

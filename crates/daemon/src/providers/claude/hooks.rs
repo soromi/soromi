@@ -8,12 +8,15 @@ use serde_json::{Value, json};
 /// `Notification` fires both for prompts that need the user and for plain idle, so its `notify` cue
 /// is resolved (from the hook's message) into `request` / `idle` by the bridge. `session-start` is
 /// not a sound cue: it reports Claude's own conversation id so the tab can be resumed later.
-/// `UserPromptSubmit`/`PreToolUse` are the authoritative "working" signal (`active`): they mark the
-/// tab as running the moment a turn starts or a tool fires, so status never depends on scraping
-/// Claude's whimsical spinner text ("Musing…", "Unravelling…") out of the terminal.
+/// `UserPromptSubmit`/`PreToolUse` are the authoritative "working" signal, so status never depends
+/// on scraping Claude's whimsical spinner text ("Musing…", "Unravelling…") out of the terminal.
+/// They carry *different* cues on purpose: `UserPromptSubmit` (`active`) starts a fresh turn and may
+/// resurrect a settled tab, while `PreToolUse` (`active-tool`) only keeps an in-progress turn alive.
+/// Hooks deliver async, so a late `PreToolUse` from a just-finished turn can arrive after `Stop`;
+/// giving it a weaker cue keeps it from flipping an already-finished tab back to "running".
 const HOOKS: &[(&str, &str)] = &[
     ("UserPromptSubmit", "active"),
-    ("PreToolUse", "active"),
+    ("PreToolUse", "active-tool"),
     ("Notification", "notify"),
     ("Stop", "complete"),
     ("SessionStart", "session-start"),

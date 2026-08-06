@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use soromi_protocol::{
-    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
-    ProviderConfig, ServerMessage, SessionSummary, Status, SubAgent, WorkspaceSummary,
+    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode, PermissionMode,
+    ProviderConfig, ServerMessage, SessionMode, SessionSummary, Status, SubAgent, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -52,6 +52,7 @@ fn client_open_session_omits_absent_account() {
             workspace: "kazomi".into(),
             agent: "claude".into(),
             account: None,
+            mode: None,
         },
         json!({ "type": "open-session", "workspace": "kazomi", "agent": "claude" }),
     );
@@ -60,12 +61,14 @@ fn client_open_session_omits_absent_account() {
             workspace: "kazomi".into(),
             agent: "codex".into(),
             account: Some("work".into()),
+            mode: Some(SessionMode::Chat),
         },
         json!({
             "type": "open-session",
             "workspace": "kazomi",
             "agent": "codex",
-            "account": "work"
+            "account": "work",
+            "mode": "chat"
         }),
     );
 }
@@ -135,6 +138,8 @@ fn server_output_and_session_opened() {
                 title: None,
                 subagents: Vec::new(),
                 activity: None,
+                mode: SessionMode::Terminal,
+                permission_mode: PermissionMode::Default,
             },
         },
         json!({
@@ -144,7 +149,9 @@ fn server_output_and_session_opened() {
                 "id": "s1",
                 "agent": "claude",
                 "account": "work",
-                "status": "idle"
+                "status": "idle",
+                "mode": "terminal",
+                "permissionMode": "default"
             }
         }),
     );
@@ -307,6 +314,8 @@ fn server_workspace_list_and_summary() {
                         status: Status::Thinking,
                     }],
                     activity: Some("Editing config.ts".into()),
+                    mode: SessionMode::Terminal,
+                    permission_mode: PermissionMode::Default,
                 }],
                 instructions: None,
             }],
@@ -326,7 +335,9 @@ fn server_workspace_list_and_summary() {
                     "status": "idle",
                     "title": "build",
                     "subagents": [{ "name": "Map v1 to v2", "status": "thinking" }],
-                    "activity": "Editing config.ts"
+                    "activity": "Editing config.ts",
+                    "mode": "terminal",
+                    "permissionMode": "default"
                 }]
             }]
         }),

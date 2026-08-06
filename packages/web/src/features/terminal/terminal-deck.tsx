@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 
 //Packages
 import { TakeoverScreen, TerminalSurface, useClientStore, useTransport } from '@soromi/client'
@@ -6,21 +6,36 @@ import { TakeoverScreen, TerminalSurface, useClientStore, useTransport } from '@
 //Constants
 import { colors } from '@/config/theme'
 
-//Components
-import { ChatView } from './chat-view'
+// Lazy so the chat renderer's weight (streamdown + shiki + the markdown pipeline) splits into its
+// own chunk and only loads when a session's chat view is actually opened — not on first paint.
+const ChatView = lazy(() => import('./chat-view').then((m) => ({ default: m.ChatView })))
 
 /**
  * Keeps a live terminal for every visited session (parked when hidden), so switching tabs or
- * workspaces is instant and preserves scrollback. When a session has a transcript (Claude), the
- * reflowing chat view is shown over the terminal by default (better on a phone); a toggle switches
- * back to the raw terminal. The takeover screen covers both when this viewport can't drive.
+ * workspaces is instant and preserves scrollback. For a transcript-capable session (Claude) the
+ * reflowing chat view can render over the terminal, with a toggle between the two — the phone
+ * defaults to chat (`defaultMode="chat"`), the wide/desktop-web shell to the familiar terminal. The
+ * takeover screen covers both when this viewport can't drive.
  */
-export function TerminalDeck({ active, fontSize }: { active?: string; fontSize: number }) {
+export function TerminalDeck({
+  active,
+  fontSize,
+  defaultMode = 'terminal',
+}: {
+  active?: string
+  fontSize: number
+  defaultMode?: 'chat' | 'terminal'
+}) {
   const transport = useTransport()
   const workspaces = useClientStore((s) => s.workspaces)
-  const hasChat = useClientStore((s) => (active ? (s.chat[active]?.length ?? 0) > 0 : false))
+  // Chat is available whenever the active session is a transcript provider (Claude), not only once
+  // events have landed — so the phone shows the chat view (with a waiting state) the moment a session
+  // opens, instead of falling back to the terminal until the agent first speaks.
+  const chatCapable = workspaces
+    .flatMap((w) => w.sessions)
+    .some((s) => s.id === active && s.agent === 'claude')
   const [visited, setVisited] = useState<string[]>([])
-  const [mode, setMode] = useState<'chat' | 'terminal'>('chat')
+  const [mode, setMode] = useState<'chat' | 'terminal'>(defaultMode)
 
   // Mount a pane the first time its session becomes the active one.
   useEffect(() => {
@@ -36,7 +51,7 @@ export function TerminalDeck({ active, fontSize }: { active?: string; fontSize: 
     })
   }, [workspaces])
 
-  const showChat = Boolean(active) && hasChat && mode === 'chat'
+  const showChat = Boolean(active) && chatCapable && mode === 'chat'
 
   return (
     // `isolate` contains the takeover overlay's stacking to the terminal area (off the top/key bars).
@@ -58,8 +73,12 @@ export function TerminalDeck({ active, fontSize }: { active?: string; fontSize: 
           renderer="dom"
         />
       ))}
-      {active && showChat && <ChatView session={active} />}
-      {hasChat && (
+      {active && showChat && (
+        <Suspense fallback={null}>
+          <ChatView session={active} />
+        </Suspense>
+      )}
+      {chatCapable && (
         <button
           type="button"
           className="absolute top-2 right-2.5 z-[5] cursor-pointer appearance-none rounded-full border border-[var(--soromi-border)] bg-[var(--soromi-bg-active)] px-3 py-[5px] font-semibold text-[var(--soromi-text)] text-xs"

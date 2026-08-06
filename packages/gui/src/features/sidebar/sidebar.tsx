@@ -16,7 +16,7 @@ import {
 } from '@soromi/ui'
 
 //Store
-import { WS_COLOR_PALETTE, useAppStore } from '@/stores/app-store'
+import { useAppStore } from '@/stores/app-store'
 
 //Utils
 import { openExternal, quit } from '@/lib/host'
@@ -35,7 +35,7 @@ import PlusSvg from '@/assets/icons/plus.svg?react'
 import SettingsSvg from '@/assets/icons/settings.svg?react'
 
 //Types
-import type { SessionSummary, Status, SubAgent } from '@soromi/protocol'
+import type { SessionMode, SessionSummary, Status, SubAgent } from '@soromi/protocol'
 import type { WorkspaceInfo } from '@soromi/client'
 import type { KeepAwakeMode } from '@soromi/protocol'
 
@@ -45,24 +45,19 @@ const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
   { mode: 'always', label: 'Always on' },
 ]
 
-/** Per-status dot color + label for an agent (session) row. Amber states pulse to draw the eye. */
+/** Per-status dot color + label for an agent (session) row. The dot alone carries the status now
+ * (no text), so each state that matters has its own color: amber = running, blue = waiting on YOU,
+ * red = blocked, green = review, gray = idle. Working/waiting pulse to draw the eye. */
 const AGENT_STATE: Record<Status, { dot: string; pulse: boolean; label: string }> = {
   thinking: { dot: 'var(--soromi-warn)', pulse: true, label: 'Running' },
-  'waiting-input': { dot: 'var(--soromi-warn)', pulse: true, label: 'Waiting' },
+  'waiting-input': { dot: '#6b93d6', pulse: true, label: 'Waiting' },
   blocked: { dot: '#f47070', pulse: false, label: 'Blocked' },
   done: { dot: 'var(--soromi-accent)', pulse: false, label: 'Review' },
   idle: { dot: 'var(--soromi-text-faint)', pulse: false, label: 'Idle' },
 }
 
-/** The default avatar-square color for a workspace: a stable palette color hashed from its name. */
-const PICKABLE = WS_COLOR_PALETTE.filter((c) => c !== 'none')
-const defaultColor = (name: string): string => {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return PICKABLE[hash % PICKABLE.length]
-}
-
-/** Tracks whether the workspace-jump modifier (⌘ on macOS, Ctrl elsewhere) is currently held. */
+/** Tracks whether the workspace-jump modifier (⌘ on macOS, Ctrl elsewhere) is currently held, so
+ * the per-group ⌘N shortcut chips only appear while it is. */
 function useModifierHeld(): boolean {
   const [held, setHeld] = useState(false)
   useEffect(() => {
@@ -81,35 +76,6 @@ function useModifierHeld(): boolean {
 }
 
 /**
- * A workspace's one-line agent overview. There is always a line: review / waiting / running when
- * something's happening, otherwise a plain gray "Idle".
- */
-function summarize(sessions: SessionSummary[]): { label: string; dot: string; pulse: boolean } {
-  const done = sessions.filter((s) => s.status === 'done').length
-  const attention = sessions.filter((s) => statusTone(s.status) === 'attention').length
-  const running = sessions.filter((s) => statusTone(s.status) === 'running').length
-
-  if (done > 0) {
-    return {
-      label: `${done} need${done === 1 ? 's' : ''} review`,
-      dot: 'var(--soromi-accent)',
-      pulse: false,
-    }
-  }
-  if (attention > 0) {
-    return { label: `${attention} waiting for you`, dot: 'var(--soromi-warn)', pulse: true }
-  }
-  if (running > 0) {
-    return {
-      label: `${running} agent${running === 1 ? '' : 's'} running`,
-      dot: 'var(--soromi-warn)',
-      pulse: true,
-    }
-  }
-  return { label: 'Idle', dot: 'var(--soromi-text-faint)', pulse: false }
-}
-
-/**
  * A session's tab label — its custom title, or the account de-duplicated by an index suffix. Mirrors
  * the terminal tab strip so a sub-tab reads the same name as its tab ("bookr", "Mobile-update", …).
  */
@@ -121,9 +87,10 @@ function sessionLabel(session: SessionSummary, sessions: SessionSummary[]): stri
 }
 
 /**
- * The left sidebar: a top bar (app menu + keep-awake + settings) and the workspaces list, which
- * fills the rest. Each card can expand to its tabs and their sub-agents. Files/Skills live in the
- * separate right-hand Explorer panel now. The width (right edge) is draggable and persisted.
+ * The left sidebar: a top bar (app menu + keep-awake + settings), a "Jump to workspace" filter, and
+ * the workspaces list. Each workspace is a collapsible group whose rows are its sessions (name +
+ * what it's working on + state + sub-agents), with a "New session" row. Files/Skills live in the
+ * separate right-hand Explorer panel. The width (right edge) is draggable and persisted.
  */
 export function Sidebar() {
   const {
@@ -134,8 +101,6 @@ export function Sidebar() {
     selectSession,
     activeSession,
     openCreateSpace,
-    wsColors,
-    setWorkspaceColor,
   } = useAppStore(
     useShallow((s) => ({
       active: s.active,
@@ -145,16 +110,15 @@ export function Sidebar() {
       selectSession: s.selectSession,
       activeSession: s.activeSession,
       openCreateSpace: s.openCreateSpace,
-      wsColors: s.wsColors,
-      setWorkspaceColor: s.setWorkspaceColor,
     })),
   )
   const workspaces = useClientStore((s) => s.workspaces)
+  const accounts = useClientStore((s) => s.accounts)
   const transport = useTransport()
   const asideRef = useRef<HTMLElement>(null)
   const modHeld = useModifierHeld()
 
-  // Which workspaces are expanded to show their agents; the active one starts open.
+  // Which workspaces are expanded to show their sessions; the active one starts open.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(active ? [active] : []))
   const toggleExpanded = (name: string) =>
     setExpanded((prev) => {
@@ -163,10 +127,34 @@ export function Sidebar() {
       return next
     })
 
-  // Drag-to-reorder via native HTML5 DnD. `order` is the optimistic order held until the daemon's
-  // list matches it; `drag` is the card being dragged and the one it's hovering.
+  // "Jump to workspace" filter: matches a workspace by its name or any of its session labels.
+  const [wsQuery, setWsQuery] = useState('')
+
+  // Load account profiles so a "New session" can bind to the right one.
+  useEffect(() => {
+    transport.send({ type: 'list-accounts' })
+  }, [transport])
+
+  // Opens a fresh session in a workspace, as the real terminal or a headless chat (default terminal).
+  const openNewSession = (name: string, mode: SessionMode = 'terminal') => {
+    const ws = workspaces.find((w) => w.name === name)
+    const agent = ws?.accounts[0]?.agent ?? 'claude'
+    const bound = ws?.accounts.some((a) => a.agent === agent) ?? false
+    const account = bound
+      ? undefined
+      : (accounts.find((a) => agent in a.providers)?.name ?? 'personal')
+    transport.send({ type: 'open-session', workspace: name, agent, account, mode })
+    select(name)
+    setExpanded((prev) => new Set(prev).add(name))
+  }
+
+  // Drag-to-reorder with pointer events (native HTML5 DnD is unreliable in the desktop WKWebView:
+  // it refuses to start without setData and shows a "+ can't drop" cursor). `order` is the optimistic
+  // order held until the daemon's list matches it; `drag` is the card being moved and the index the
+  // green line marks (0..n, where n means "after the last card").
   const [order, setOrder] = useState<string[] | null>(null)
-  const [drag, setDrag] = useState<{ name: string; over: string | null } | null>(null)
+  const [drag, setDrag] = useState<{ name: string; insertAt: number } | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const ordered = useMemo(() => {
     if (!order) return workspaces
@@ -190,18 +178,65 @@ export function Sidebar() {
     }
   }, [workspaces, order])
 
-  const dropOn = (target: string) => {
-    const from = drag?.name
-    setDrag(null)
-    if (!from || from === target) return
-    const names = (order ?? ordered.map((w) => w.name)).slice()
+  // Which slot the pointer's Y is over: the first card whose vertical midpoint sits below it, else
+  // the end. Measured live off the DOM so expanded (taller) cards are handled correctly.
+  const insertIndexForY = (y: number): number => {
+    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-ws]')
+    if (!rows) return 0
+    let i = 0
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect()
+      if (y < rect.top + rect.height / 2) return i
+      i += 1
+    }
+    return i
+  }
+
+  const commitReorder = (from: string, insertAt: number) => {
+    const base = order ?? ordered.map((w) => w.name)
+    const names = base.slice()
     const fi = names.indexOf(from)
-    const ti = names.indexOf(target)
-    if (fi < 0 || ti < 0) return
+    if (fi < 0) return
+    // Removing the dragged card first shifts every later slot up by one.
+    const ti = fi < insertAt ? insertAt - 1 : insertAt
     names.splice(fi, 1)
     names.splice(ti, 0, from)
+    if (names.every((n, i) => n === base[i])) return
     setOrder(names)
     transport.send({ type: 'reorder-spaces', order: names })
+  }
+
+  // Begin a pointer-drag from a card body. A real move (past a small threshold) turns into a reorder;
+  // a press without movement falls through to the card's normal click (select).
+  const startReorder = (name: string, event: React.PointerEvent) => {
+    if (event.button !== 0) return
+    // Let the kebab / expand buttons handle their own presses; only the card body starts a drag.
+    if ((event.target as HTMLElement).closest('button')) return
+    const startY = event.clientY
+    // Suppress text selection for the whole gesture up front — waiting until the move threshold lets
+    // the browser start a selection on the initial press (highlighting the workspace names).
+    document.body.style.userSelect = 'none'
+    let moving = false
+    const onMove = (move: PointerEvent) => {
+      if (!moving && Math.abs(move.clientY - startY) < 4) return
+      if (!moving) {
+        moving = true
+        document.body.style.cursor = 'grabbing'
+      }
+      setDrag({ name, insertAt: insertIndexForY(move.clientY) })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setDrag((d) => {
+        if (d) commitReorder(d.name, d.insertAt)
+        return null
+      })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }
 
   // Drag the right edge to resize the sidebar width.
@@ -212,18 +247,33 @@ export function Sidebar() {
     endDrag(onMove, 'col-resize')
   }
 
+  // "Jump to workspace" narrows the list by workspace name or any of its session labels.
+  const query = wsQuery.trim().toLowerCase()
+  const filtered = query
+    ? ordered.filter(
+        (w) =>
+          w.name.toLowerCase().includes(query) ||
+          w.sessions.some((s) => sessionLabel(s, w.sessions).toLowerCase().includes(query)),
+      )
+    : ordered
+
   return (
     <aside
       ref={asideRef}
-      className="relative flex flex-shrink-0 flex-col overflow-hidden border-[var(--soromi-border)] border-r bg-[var(--soromi-bg-sidebar)] text-[13px] text-[var(--soromi-text-dim)]"
+      className="relative flex flex-shrink-0 flex-col overflow-hidden border-[var(--soromi-border)] border-r bg-[var(--soromi-bg-app)] text-[13px] text-[var(--soromi-text-dim)]"
       style={{ width: sidebarWidth }}
     >
       <TopBar />
 
-      <div className="flex items-center justify-between px-3.5 pt-4 pb-2.5">
-        <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
-          Workspaces
-        </span>
+      <div className="flex items-center justify-between px-3.5 pt-[15px] pb-2">
+        <div className="flex items-center gap-[7px]">
+          <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
+            Workspaces
+          </span>
+          <span className="rounded-full bg-[#1a1a1d] px-1.5 py-px text-[10px] font-bold text-[#6a6a6e]">
+            {workspaces.length}
+          </span>
+        </div>
         <button
           type="button"
           title="New workspace"
@@ -234,40 +284,68 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-[5px] overflow-y-auto px-2.5 pb-2">
-        {ordered.map((workspace, index) => (
-          <WorkspaceCard
-            key={workspace.name}
-            workspace={workspace}
-            index={index}
-            active={workspace.name === active}
-            expanded={expanded.has(workspace.name)}
-            activeSession={activeSession[workspace.name]}
-            shortcutHeld={modHeld}
-            color={wsColors[workspace.name] ?? defaultColor(workspace.name)}
-            onCycleColor={() => {
-              const current = wsColors[workspace.name] ?? defaultColor(workspace.name)
-              const next =
-                WS_COLOR_PALETTE[(WS_COLOR_PALETTE.indexOf(current) + 1) % WS_COLOR_PALETTE.length]
-              setWorkspaceColor(workspace.name, next)
-            }}
-            onPickColor={(c) => setWorkspaceColor(workspace.name, c)}
-            dragging={drag?.name === workspace.name}
-            dropOver={drag?.over === workspace.name && drag?.name !== workspace.name}
-            onDragStart={() => setDrag({ name: workspace.name, over: null })}
-            onDragOver={() =>
-              setDrag((d) => (d && d.over !== workspace.name ? { ...d, over: workspace.name } : d))
-            }
-            onDrop={() => dropOn(workspace.name)}
-            onDragEnd={() => setDrag(null)}
-            onSelect={() => select(workspace.name)}
-            onToggle={() => toggleExpanded(workspace.name)}
-            onSelectSession={(id) => {
-              select(workspace.name)
-              selectSession(workspace.name, id)
-            }}
+      <div className="flex-none px-3 pb-3">
+        <div className="flex items-center gap-2 rounded-lg border border-[#1e1e21] bg-[#0c0c0e] px-[9px]">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#5a5a5e"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="flex-none"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
+          <input
+            value={wsQuery}
+            onChange={(e) => setWsQuery(e.currentTarget.value)}
+            placeholder="Jump to workspace"
+            className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#5a5a5e]"
           />
-        ))}
+        </div>
+      </div>
+
+      <div
+        ref={listRef}
+        className="flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto overflow-x-hidden px-2 pb-3"
+      >
+        {filtered.map((workspace) => {
+          const index = ordered.indexOf(workspace)
+          return (
+            <WorkspaceGroup
+              key={workspace.name}
+              workspace={workspace}
+              index={index}
+              active={workspace.name === active}
+              open={expanded.has(workspace.name)}
+              activeSession={activeSession[workspace.name]}
+              shortcutHeld={modHeld}
+              dragging={drag?.name === workspace.name}
+              // Green insertion line: above this group when it's the drop slot, or below the last
+              // group when dropping at the very end.
+              dropBefore={drag != null && drag.insertAt === index}
+              dropAfter={
+                drag != null && drag.insertAt === ordered.length && index === ordered.length - 1
+              }
+              onDragStart={(e) => !query && startReorder(workspace.name, e)}
+              onToggle={() => toggleExpanded(workspace.name)}
+              onNewSession={(mode) => openNewSession(workspace.name, mode)}
+              onSelectSession={(id) => {
+                select(workspace.name)
+                selectSession(workspace.name, id)
+              }}
+              onRenameSession={(id, title) =>
+                transport.send({ type: 'rename-session', session: id, title })
+              }
+              onCloseSession={(id) => transport.send({ type: 'close-session', session: id })}
+            />
+          )
+        })}
       </div>
 
       {/* Drag handle on the right edge: a thin line that turns accent on hover/drag. */}
@@ -322,13 +400,21 @@ function TopBar() {
     'flex h-[30px] w-[30px] cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]'
 
   return (
-    <div className="box-border flex h-[41px] flex-none items-center gap-[9px] border-[var(--soromi-border)] border-b px-3">
+    // Drag region so the window moves by dragging the top bar; on macOS the left inset clears the
+    // overlaid traffic-light buttons (see the Overlay title-bar style in the Tauri window builder).
+    <div
+      data-tauri-drag-region
+      className={cn(
+        'box-border flex h-[41px] flex-none select-none items-center gap-[9px] border-[var(--soromi-border)] border-b pr-3',
+        isMac ? 'pl-[76px]' : 'pl-3',
+      )}
+    >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             title="Soromi"
-            className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[10px] border-none bg-transparent py-[5px] pr-2 pl-[5px] hover:bg-[var(--soromi-bg-hover)]"
+            className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[10px] border-none bg-transparent py-[5px] pr-2 pl-[5px] outline-none hover:bg-[var(--soromi-bg-hover)] focus-visible:outline-none"
           >
             <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-[7px] bg-[#efece1]">
               <IsoLogo width={12} height={11} />
@@ -390,7 +476,7 @@ function TopBar() {
         </DialogContent>
       </Dialog>
 
-      <div className="flex-1" />
+      <div data-tauri-drag-region className="flex-1" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -424,184 +510,155 @@ function TopBar() {
   )
 }
 
-/** A status dot; amber/running states pulse (motion-safe). Color comes from the caller. */
-function Dot({ color, pulse, size = 6 }: { color: string; pulse: boolean; size?: number }) {
+/** A status dot; amber/running states pulse (motion-safe). Color comes from the caller. `title`
+ * surfaces the status name on hover, since the row no longer shows it as text. */
+function Dot({
+  color,
+  pulse,
+  size = 6,
+  title,
+}: {
+  color: string
+  pulse: boolean
+  size?: number
+  title?: string
+}) {
   return (
     <span
+      title={title}
       className={cn('flex-none rounded-full', pulse && 'motion-safe:animate-status-pulse')}
       style={{ width: size, height: size, background: color }}
     />
   )
 }
 
-/** One workspace card: the row (avatar, name, agent overview, menu) and its expanded agent list. */
-function WorkspaceCard({
+/** One workspace group: a collapsible header (chevron, uppercase name, a rule, aggregate status
+ * pills, jump shortcut, menu) over its session rows. Sessions are the navigation surface; the
+ * terminal has no tab strip, and fresh ones start from the "New session" row here. */
+function WorkspaceGroup({
   workspace,
   index,
   active,
-  expanded,
+  open,
   activeSession,
   shortcutHeld,
-  color,
-  onCycleColor,
-  onPickColor,
   dragging,
-  dropOver,
+  dropBefore,
+  dropAfter,
   onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  onSelect,
   onToggle,
+  onNewSession,
   onSelectSession,
+  onRenameSession,
+  onCloseSession,
 }: {
   workspace: WorkspaceInfo
   index: number
   active: boolean
-  expanded: boolean
+  open: boolean
   activeSession?: string
   shortcutHeld: boolean
-  color: string
-  onCycleColor: () => void
-  onPickColor: (color: string) => void
   dragging: boolean
-  dropOver: boolean
-  onDragStart: () => void
-  onDragOver: () => void
-  onDrop: () => void
-  onDragEnd: () => void
-  onSelect: () => void
+  dropBefore: boolean
+  dropAfter: boolean
+  onDragStart: (event: React.PointerEvent) => void
   onToggle: () => void
+  onNewSession: (mode: SessionMode) => void
   onSelectSession: (id: string) => void
+  onRenameSession: (id: string, title: string) => void
+  onCloseSession: (id: string) => void
 }) {
   const openWorkspaceSettings = useAppStore((s) => s.openWorkspaceSettings)
   const sessions = workspace.sessions
-  const summary = useMemo(() => summarize(sessions), [sessions])
-  // With a single tab the card's own status line already says everything an expanded row would, so
-  // there's nothing to expand — only 2+ tabs get the chevron and the per-tab list.
-  const multiTab = sessions.length > 1
-  // A single-tab workspace has no expandable row, so surface its agent's current activity right on
-  // the status line ("Editing config.ts") instead of the generic "1 agent running" -- but only while
-  // it's actually working, so a finished turn doesn't leave a stale tool call under an idle card.
-  const solo = !multiTab ? sessions[0] : undefined
-  const soloLabel = (solo?.status === 'thinking' && solo.activity) || summary.label
-  // The first nine workspaces get a jump shortcut (⌘1..9 / Ctrl+1..9), shown while the key is held.
-  const shortcut = index < 9 ? `${modLabel}${index + 1}` : null
+  // Aggregate header pills: amber = sessions still working / waiting, green = done (needs review).
+  const runCount = sessions.filter((s) => {
+    const tone = statusTone(s.status)
+    return tone === 'running' || tone === 'attention'
+  }).length
+  const reviewCount = sessions.filter((s) => s.status === 'done').length
+  const kbd = index < 9 ? `${modLabel}${index + 1}` : null
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: native drag-to-reorder on the card.
     <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'move'
-        onDragStart()
-      }}
-      onDragOver={(e) => {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        onDragOver()
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        onDrop()
-      }}
-      onDragEnd={onDragEnd}
+      data-ws={workspace.name}
       className={cn(
-        'group relative rounded-[11px]',
-        active ? 'bg-[#1c1c20]' : 'hover:bg-[#17171a]',
-        // The green line at the top marks where a dragged card will drop.
-        dropOver && 'shadow-[inset_0_2px_0_0_var(--soromi-accent)]',
+        'group relative rounded-[8px]',
+        // Green insertion line marking where a dragged group will land: above this one, or below it
+        // when it's the last one and the drop is at the very end.
+        dropBefore && 'shadow-[inset_0_2px_0_0_var(--soromi-accent)]',
+        dropAfter && 'shadow-[inset_0_-2px_0_0_var(--soromi-accent)]',
       )}
       style={{ opacity: dragging ? 0.4 : 1 }}
     >
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: click-to-select the workspace. */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: children (color, toggle, menu) are focusable buttons. */}
-      <div className="flex cursor-pointer items-center gap-2.5 px-2.5 py-2" onClick={onSelect}>
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: click cycles the workspace color. */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: the whole card + kebab keep it reachable. */}
-        <span
-          title="Change color"
-          className="h-[14px] w-[14px] flex-none rounded-[5px] border transition-transform hover:scale-[1.18]"
-          style={{
-            background: color === 'none' ? 'transparent' : color,
-            borderColor: color === 'none' ? 'var(--soromi-text-faint)' : 'transparent',
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            onCycleColor()
-          }}
-        />
-        <div className="min-w-0 flex-1 leading-[1.35]">
-          <div
-            className={cn(
-              'overflow-hidden text-ellipsis whitespace-nowrap text-[12px]',
-              active
-                ? 'font-semibold text-[var(--soromi-text)]'
-                : 'font-medium text-[var(--soromi-text-dim)]',
-            )}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: click-to-toggle, press-and-drag to reorder. */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the menu is a focusable button; ⌘N jumps here. */}
+      <div
+        className="flex cursor-pointer select-none items-center gap-2 rounded-[8px] py-[7px] pr-1.5 pl-2 hover:bg-[#141416]"
+        onClick={onToggle}
+        onPointerDown={onDragStart}
+      >
+        <span className="flex h-3 w-3 flex-none items-center justify-center text-[#5a5a5e]">
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={cn('transition-transform', open && 'rotate-180')}
+            aria-hidden="true"
           >
-            {workspace.name}
-          </div>
-          {/* Status line: the agent overview (a gray "Idle" when nothing's running), plus the ⌘N
-              jump shortcut which only appears while the modifier is held. */}
-          <div className="mt-px flex items-center gap-[5px]">
-            {multiTab ? (
-              <button
-                type="button"
-                onClick={onToggle}
-                className="flex cursor-pointer appearance-none items-center gap-[5px] rounded-[5px] border-none bg-transparent py-px pr-1 pl-0 text-[10.5px] hover:text-[var(--soromi-text)]"
-                style={{ color: summary.dot }}
-              >
-                <Dot color={summary.dot} pulse={summary.pulse} size={5} />
-                <span>{summary.label}</span>
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={cn('opacity-75 transition-transform', expanded && 'rotate-180')}
-                  aria-hidden="true"
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-            ) : (
-              <span
-                className="flex min-w-0 items-center gap-[5px] text-[10.5px]"
-                style={{ color: summary.dot }}
-              >
-                <Dot color={summary.dot} pulse={summary.pulse} size={5} />
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap">{soloLabel}</span>
-              </span>
-            )}
-            {shortcut && shortcutHeld && (
-              <span
-                className={cn(
-                  'text-[9.5px] [font-family:var(--soromi-font-mono)]',
-                  active ? 'text-[#8a8a8e]' : 'text-[#5a5a5e]',
-                )}
-              >
-                {shortcut}
-              </span>
-            )}
-          </div>
-        </div>
-
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+        <span
+          className={cn(
+            'flex-none overflow-hidden text-ellipsis whitespace-nowrap font-bold text-[12.5px] tracking-[0.02em]',
+            active ? 'text-[var(--soromi-text)]' : 'text-[var(--soromi-text-dim)]',
+          )}
+        >
+          {workspace.name}
+        </span>
+        <span className="h-px min-w-2 flex-1 bg-[#1c1c20]" />
+        {runCount > 0 && (
+          <span
+            title={`${runCount} running`}
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(224,179,65,0.13)] px-[7px] py-0.5 font-bold text-[#c99a2e] text-[10.5px]"
+          >
+            <span className="h-[5px] w-[5px] rounded-full bg-[#e0b341] motion-safe:animate-status-pulse" />
+            {runCount}
+          </span>
+        )}
+        {reviewCount > 0 && (
+          <span
+            title={`${reviewCount} to review`}
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(62,207,142,0.13)] px-[7px] py-0.5 font-bold text-[#3ecf8e] text-[10.5px]"
+          >
+            <span className="h-[5px] w-[5px] rounded-full bg-[#3ecf8e]" />
+            {reviewCount}
+          </span>
+        )}
+        {runCount === 0 && reviewCount === 0 && (
+          <span className="flex-none text-[#5a5a5e] text-[10.5px]">Idle</span>
+        )}
+        {kbd && shortcutHeld && (
+          <span className="flex-none text-[#5a5a5e] text-[9.5px] [font-family:var(--soromi-font-mono)]">
+            {kbd}
+          </span>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               title="More"
               onClick={(e) => e.stopPropagation()}
-              className="flex h-[22px] w-[22px] flex-none cursor-pointer appearance-none items-center justify-center rounded-md border-none bg-transparent text-[#5a5a5e] hover:bg-[var(--soromi-bg-active)] hover:text-[var(--soromi-text)] data-[state=open]:bg-[var(--soromi-bg-active)] data-[state=open]:text-[var(--soromi-text)]"
+              className="flex h-5 w-5 flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#5a5a5e] hover:bg-[#26262a] hover:text-[var(--soromi-text)] data-[state=open]:bg-[#26262a] data-[state=open]:text-[var(--soromi-text)]"
             >
               <svg
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="currentColor"
                 aria-hidden="true"
@@ -612,36 +669,13 @@ function WorkspaceCard({
               </svg>
             </button>
           </DropdownMenuTrigger>
-          {/* Radix portals this content, but React events still bubble through the React tree to
-              the card's onClick={select}, which resets overlays[] — wiping the settings overlay the
-              moment it opens. Stop menu clicks from reaching the card. */}
+          {/* Radix portals this content, but React events still bubble through the React tree to the
+              header's onClick — stop menu clicks from toggling the group behind it. */}
           <DropdownMenuContent
             align="end"
-            className="w-[210px]"
+            className="w-[186px]"
             onClick={(e) => e.stopPropagation()}
           >
-            <DropdownMenuLabel>Color</DropdownMenuLabel>
-            <div className="flex items-center justify-between px-2 pb-1.5">
-              {WS_COLOR_PALETTE.map((c) => (
-                <button
-                  type="button"
-                  key={c}
-                  title={c === 'none' ? 'No color' : c}
-                  onClick={() => onPickColor(c)}
-                  className="h-[18px] w-[18px] flex-none cursor-pointer appearance-none rounded-md border-[1.5px]"
-                  style={{
-                    background: c === 'none' ? 'transparent' : c,
-                    borderColor:
-                      c === color
-                        ? 'var(--soromi-accent)'
-                        : c === 'none'
-                          ? 'var(--soromi-text-faint)'
-                          : 'transparent',
-                  }}
-                />
-              ))}
-            </div>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               className="whitespace-nowrap"
               onSelect={() => openWorkspaceSettings(workspace.name)}
@@ -653,135 +687,217 @@ function WorkspaceCard({
         </DropdownMenu>
       </div>
 
-      {/* 2+ tabs: the expandable per-tab list. One tab: no list, but still surface its sub-agents. */}
-      {multiTab
-        ? expanded && (
-            <div className="flex flex-col gap-px px-2.5 pt-0 pr-2.5 pb-2.5 pl-[11px]">
-              <div className="mb-[7px] h-px bg-[var(--soromi-border-subtle)]" />
-              {sessions.map((session) => (
-                <AgentRow
-                  key={session.id}
-                  session={session}
-                  label={sessionLabel(session, sessions)}
-                  // Only the active workspace's current tab is highlighted, so a non-active
-                  // workspace's expanded card doesn't look like it's the one in focus.
-                  activeSession={active && session.id === activeSession}
-                  onClick={() => onSelectSession(session.id)}
-                />
-              ))}
-            </div>
-          )
-        : (sessions[0]?.subagents?.length ?? 0) > 0 && (
-            <div className="flex flex-col gap-px px-2.5 pt-0 pr-2.5 pb-2.5 pl-[11px]">
-              <div className="mb-[7px] h-px bg-[var(--soromi-border-subtle)]" />
-              <SubAgentList sessionId={sessions[0].id} subagents={sessions[0].subagents ?? []} />
-            </div>
-          )}
+      {open && (
+        <div className="ml-[10px] flex flex-col gap-0.5 pt-1 pb-1.5 pl-1">
+          {sessions.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              label={sessionLabel(session, sessions)}
+              // Only the active workspace's current session is highlighted, so a non-active group's
+              // open list doesn't look like it's the one in focus.
+              activeSession={active && session.id === activeSession}
+              onClick={() => onSelectSession(session.id)}
+              onRename={(title) => onRenameSession(session.id, title)}
+              onClose={() => onCloseSession(session.id)}
+            />
+          ))}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6a6a6e] text-[12px] hover:bg-[#17171a] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]"
+              >
+                <span className="flex w-1.5 flex-none items-center justify-center">
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </span>
+                New session
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[170px]">
+              <DropdownMenuItem onSelect={() => onNewSession('terminal')}>
+                Terminal
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onNewSession('chat')}>Chat</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </div>
   )
 }
 
 /**
- * One agent (session) row inside an expanded workspace card. When the tab has spawned sub-agents, a
- * count + chevron toggles their nested list (each with its own live status dot).
+ * One session row inside an open workspace group: its status dot, name (double-click to rename), an
+ * always-present subtitle (what it's working on, or "New session"), and its live state. Sub-agents
+ * nest behind a count pill; a hover ✕ closes the session (managed here, no terminal tab strip).
  */
-function AgentRow({
+function SessionRow({
   session,
   label,
   activeSession,
   onClick,
+  onRename,
+  onClose,
 }: {
   session: SessionSummary
   label: string
   activeSession: boolean
   onClick: () => void
+  onRename: (title: string) => void
+  onClose: () => void
 }) {
   const state = AGENT_STATE[session.status]
-  // Bold line: the tab name (title, matching the terminal tab). Gray line: what the provider is
-  // working on. Only show it while the agent is actually working, so a finished turn doesn't leave
-  // the last tool call ("Reading index.tsx") sitting stale under an idle tab. Status stays on right.
-  const subtitle = session.status === 'thinking' ? session.activity : null
+  // The subtitle is always shown so the two-line rhythm holds across the list: what the provider is
+  // working on, or "New session" for one that hasn't done anything yet.
+  const subtitle = session.activity || 'New session'
   const subagents = session.subagents ?? []
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const startEdit = () => {
+    setDraft(session.title ?? '')
+    setEditing(true)
+  }
+  const commit = () => {
+    setEditing(false)
+    onRename(draft.trim())
+  }
 
   return (
-    <>
+    <div>
       <div
         className={cn(
-          'flex items-center rounded-[7px] hover:bg-[var(--soromi-border-subtle)]',
-          activeSession && 'bg-[var(--soromi-border-subtle)]',
+          'group/row flex items-center gap-[9px] rounded-[8px] px-[9px] py-[7px] hover:bg-[#17171a]',
+          activeSession && 'bg-[#1c1c20]',
         )}
       >
-        <button
-          type="button"
-          onClick={onClick}
-          className="flex min-w-0 flex-1 cursor-pointer appearance-none items-center gap-2.5 border-none bg-transparent px-[7px] py-1.5 text-left"
-        >
-          <Dot color={state.dot} pulse={state.pulse} />
-          <div className="min-w-0 flex-1 leading-[1.3]">
-            <div className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-[12px] text-[var(--soromi-text-dim)]">
-              {label}
-            </div>
-            {subtitle && (
-              <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[var(--soromi-text-faint)]">
-                {subtitle}
-              </div>
-            )}
-          </div>
-          <span className="flex-none font-semibold text-[10.5px]" style={{ color: state.dot }}>
-            {state.label}
-          </span>
-        </button>
-        {subagents.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            title={open ? 'Hide sub-agents' : 'Show sub-agents'}
-            className="mr-[7px] ml-1.5 flex flex-none cursor-pointer appearance-none items-center gap-0.5 rounded-[5px] border-none bg-transparent py-0.5 pr-1 pl-1.5 font-medium text-[11px] text-[var(--soromi-text-faint)] hover:text-[var(--soromi-text-dim)]"
-          >
-            {subagents.length}
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={cn('opacity-75 transition-transform', open && 'rotate-180')}
-              aria-hidden="true"
+        {editing ? (
+          <input
+            // biome-ignore lint/a11y/noAutofocus: focus the field the user just opened to rename.
+            autoFocus
+            className="w-full rounded border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] px-1.5 py-1 font-[inherit] text-[12px] text-[var(--soromi-text)] focus:border-[var(--soromi-accent)] focus:outline-none"
+            value={draft}
+            placeholder={session.account}
+            onChange={(e) => setDraft(e.currentTarget.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commit()
+              } else if (e.key === 'Escape') {
+                setEditing(false)
+              }
+            }}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onClick}
+              onDoubleClick={startEdit}
+              title="Double-click to rename"
+              className="flex min-w-0 flex-1 cursor-pointer appearance-none items-center gap-[9px] border-none bg-transparent p-0 text-left"
             >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
+              <Dot color={state.dot} pulse={state.pulse} size={6} title={state.label} />
+              <div className="min-w-0 flex-1 leading-[1.35]">
+                <div
+                  className={cn(
+                    'overflow-hidden text-ellipsis whitespace-nowrap font-medium text-[12.5px]',
+                    activeSession ? 'text-[var(--soromi-text)]' : 'text-[#d7d7da]',
+                  )}
+                >
+                  {label}
+                </div>
+                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[#6a6a6e] text-[11px]">
+                  {subtitle}
+                </div>
+              </div>
+            </button>
+            {subagents.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                title={open ? 'Hide sub-agents' : 'Show sub-agents'}
+                className="inline-flex flex-none cursor-pointer appearance-none items-center gap-[3px] rounded-full border-none bg-[#1e1e21] px-1.5 py-0.5 font-bold text-[#8a8a8e] text-[10px] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
+              >
+                {subagents.length}
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={cn('transition-transform', open && 'rotate-180')}
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close session"
+              className="flex h-[19px] w-[19px] flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#5a5a5e] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </>
         )}
       </div>
 
       {open && <SubAgentList sessionId={session.id} subagents={subagents} />}
-    </>
+    </div>
   )
 }
 
-/** The sub-agents a tab spawned (Claude Task calls), nested with a connector; the dot is its status. */
+/** The sub-agents a session spawned (Claude Agent/Task calls), nested behind a connector rule; the
+ * dot is each one's live status. */
 function SubAgentList({ sessionId, subagents }: { sessionId: string; subagents: SubAgent[] }) {
   return (
-    <>
+    <div className="mt-px mb-1 ml-[15px] flex flex-col gap-px border-[#26262a] border-l pl-[11px]">
       {subagents.map((sub, index) => {
         const st = AGENT_STATE[sub.status]
         return (
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: positional; same-named sub-agents can repeat.
             key={`${sessionId}:${sub.name}:${index}`}
-            className="ml-[13px] flex items-center gap-2 border-[var(--soromi-border-subtle)] border-l py-[3px] pr-[7px] pl-3.5"
+            className="flex items-center gap-2 rounded-[6px] px-[7px] py-1 hover:bg-[#1e1e21]"
           >
-            <Dot color={st.dot} pulse={st.pulse} />
-            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11.5px] text-[var(--soromi-text-dim)]">
+            <Dot color={st.dot} pulse={st.pulse} size={5} />
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[#8a8a8e] text-[11px]">
               {sub.name}
             </span>
           </div>
         )
       })}
-    </>
+    </div>
   )
 }

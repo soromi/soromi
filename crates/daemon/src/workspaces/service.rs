@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use soromi_protocol::{
-    AgentAccount, DirEntry, KeepAwakeMode, SessionSummary, Status, WorkspaceSummary,
+    AgentAccount, DirEntry, KeepAwakeMode, PermissionMode, SessionMode, SessionSummary, Status,
+    WorkspaceSummary,
 };
 use tokio::sync::broadcast;
 
@@ -21,6 +22,7 @@ use crate::keep_awake::controller::KeepAwakeController;
 use crate::notifications::controller::NotificationController;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
+use crate::sessions::stream_json::StreamJsonSession;
 use crate::sound::player::{Cue, SoundPlayer};
 use crate::updates::UpdateInfo;
 use crate::workspaces::agent_command::parse_agent_command;
@@ -90,6 +92,10 @@ pub struct WorkspaceService {
     viewers: Mutex<Vec<(u64, String)>>,
     /// Fires when control changes, so each viewport re-derives its own control state.
     control_tx: broadcast::Sender<()>,
+    /// The last thing each session did, read from its transcript once on startup (keyed by session
+    /// id). It's the subtitle a restored-but-not-yet-attached tab shows, so an old conversation reads
+    /// as its last activity instead of "New session". A live tab's own activity takes precedence.
+    restored_activity: Mutex<HashMap<String, String>>,
 }
 
 /// How long a stable usage result (fetched, scope-denied, or not signed in) stays cached.
@@ -127,6 +133,7 @@ impl WorkspaceService {
             controller: Mutex::new(None),
             viewers: Mutex::new(Vec::new()),
             control_tx: broadcast::channel(64).0,
+            restored_activity: Mutex::new(HashMap::new()),
         });
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
@@ -146,7 +153,57 @@ impl WorkspaceService {
         if dirty {
             service.persist();
         }
+        // Off the startup path, read each restored tab's last transcript activity so the sidebar
+        // shows what it was doing rather than "New session"; refresh the rail once it's ready.
+        let seeded = service.clone();
+        tokio::spawn(async move {
+            seeded.seed_restored_activity();
+            seeded.emit_change();
+        });
         service
+    }
+
+    /// Populates `restored_activity` by reading the tail of each session's transcript. Best-effort:
+    /// a missing/unreadable transcript is simply skipped (that tab keeps the "New session" subtitle).
+    fn seed_restored_activity(&self) {
+        // Snapshot what we need under the lock, then do the file reads without holding it.
+        let sessions: Vec<(String, String, String, String, Vec<String>, Vec<AgentAccount>)> = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .flat_map(|(_, meta)| {
+                    meta.sessions.iter().map(|spec| {
+                        (
+                            spec.id.clone(),
+                            spec.agent.clone(),
+                            spec.resume_id.clone().unwrap_or_else(|| spec.id.clone()),
+                            meta.root.clone(),
+                            meta.folders.clone(),
+                            meta.accounts.clone(),
+                        )
+                    })
+                })
+                .collect()
+        };
+
+        for (id, agent, convo_id, root, folders, accounts) in sessions {
+            let full_command = parse_agent_command(&agent).map(|p| p.command).unwrap_or_default();
+            let Some(provider) = crate::providers::provider(basename(&full_command)) else {
+                continue;
+            };
+            let account = account_for(&accounts, &agent);
+            let config_dir = provider_config_dir(&account, provider);
+            let (cwd, _) = session_dirs(&root, &folders);
+            let Some(path) = provider
+                .transcript_path(&config_dir, &cwd, &convo_id)
+                .filter(|p| p.exists())
+            else {
+                continue;
+            };
+            if let Some(activity) = last_transcript_activity(&path, provider) {
+                self.restored_activity.lock().unwrap().insert(id, activity);
+            }
+        }
     }
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
@@ -280,6 +337,8 @@ impl WorkspaceService {
                 agent: input.agent,
                 title: None,
                 resume_id: None,
+                mode: SessionMode::Terminal,
+                permission_mode: PermissionMode::default(),
             }],
             instructions: None,
             agent: None,
@@ -299,6 +358,8 @@ impl WorkspaceService {
                 agent: a.agent.clone(),
                 title: None,
                 resume_id: None,
+                mode: SessionMode::Terminal,
+                permission_mode: PermissionMode::default(),
             })
             .collect();
         if sessions.is_empty() {
@@ -307,6 +368,8 @@ impl WorkspaceService {
                 agent: "claude".to_string(),
                 title: None,
                 resume_id: None,
+                mode: SessionMode::Terminal,
+                permission_mode: PermissionMode::default(),
             });
         }
         let space = PersistedSpace {
@@ -349,6 +412,7 @@ impl WorkspaceService {
         workspace: &str,
         agent: String,
         account: Option<String>,
+        mode: SessionMode,
     ) -> anyhow::Result<SessionSummary> {
         let session = SessionSpec {
             id: new_session_id(),
@@ -356,6 +420,8 @@ impl WorkspaceService {
             title: None,
             // Fresh tab; its resume_id is captured from the agent's session-start hook.
             resume_id: None,
+            mode,
+            permission_mode: PermissionMode::default(),
         };
         let (root, folders, accounts, instructions) = {
             let mut metadata = self.metadata.lock().unwrap();
@@ -397,7 +463,77 @@ impl WorkspaceService {
             title: None,
             subagents: Vec::new(),
             activity: None,
+            mode,
+            permission_mode: PermissionMode::default(),
         })
+    }
+
+    /// Switches a tab between the terminal and headless chat, keeping the same conversation. Flips the
+    /// spec's mode, tears down the current backend, and starts it again in the new mode - which
+    /// resumes the pinned conversation id (`--resume <id>`), so no history is lost.
+    pub fn switch_mode(&self, session_id: &str, mode: SessionMode) {
+        let ctx = {
+            let mut metadata = self.metadata.lock().unwrap();
+            let mut found = None;
+            for (name, meta) in metadata.iter_mut() {
+                if let Some(spec) = meta.sessions.iter_mut().find(|s| s.id == session_id) {
+                    if spec.mode == mode {
+                        return; // already in this mode
+                    }
+                    spec.mode = mode;
+                    found = Some((
+                        name.clone(),
+                        spec.clone(),
+                        meta.root.clone(),
+                        meta.folders.clone(),
+                        meta.accounts.clone(),
+                        meta.instructions.clone(),
+                    ));
+                    break;
+                }
+            }
+            found
+        };
+        let Some((workspace, spec, root, folders, accounts, instructions)) = ctx else {
+            return;
+        };
+        // Tear down the current backend, then restart in the new mode (resumes the same conversation).
+        self.manager.dispose(session_id);
+        self.start_session(
+            &workspace,
+            &root,
+            &folders,
+            &accounts,
+            instructions.as_deref(),
+            &spec,
+        );
+        self.persist();
+        self.emit_change();
+    }
+
+    /// Sets a chat tab's permission mode (the composer dropdown): persists it for the next launch and,
+    /// if the headless session is running, applies it live over the control channel.
+    pub fn set_permission_mode(&self, session_id: &str, mode: PermissionMode) {
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            let Some(spec) = metadata
+                .iter_mut()
+                .flat_map(|(_, meta)| meta.sessions.iter_mut())
+                .find(|s| s.id == session_id)
+            else {
+                return;
+            };
+            if spec.permission_mode == mode {
+                return;
+            }
+            spec.permission_mode = mode;
+        }
+        if let Some(chat) = self.manager.get_chat(session_id) {
+            let flag = mode.as_flag().to_string();
+            tokio::spawn(async move { chat.set_permission_mode(&flag).await });
+        }
+        self.persist();
+        self.emit_change();
     }
 
     /// Renames a tab. An empty title clears the custom name (back to the account label).
@@ -475,9 +611,14 @@ impl WorkspaceService {
         self.emit_change();
     }
 
-    /// Returns a live session by its id.
+    /// Returns a live PTY terminal session by its id.
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
         self.manager.get(id)
+    }
+
+    /// Returns a live headless chat session by its id.
+    pub fn get_chat(&self, id: &str) -> Option<Arc<StreamJsonSession>> {
+        self.manager.get_chat(id)
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -494,14 +635,25 @@ impl WorkspaceService {
                     .iter()
                     .map(|session| {
                         let live = self.manager.get(&session.id);
+                        let live_chat = self.manager.get_chat(&session.id);
                         SessionSummary {
                             id: session.id.clone(),
                             agent: session.agent.clone(),
                             account: account_for(&meta.accounts, &session.agent),
-                            status: live.as_ref().map(|s| s.status()).unwrap_or(Status::Idle),
+                            status: live
+                                .as_ref()
+                                .map(|s| s.status())
+                                .or_else(|| live_chat.as_ref().map(|s| s.status()))
+                                .unwrap_or(Status::Idle),
                             title: session.title.clone(),
                             subagents: live.as_ref().map(|s| s.subagents()).unwrap_or_default(),
-                            activity: live.as_ref().and_then(|s| s.activity()),
+                            // Live activity wins; otherwise a restored tab shows its last transcript
+                            // activity so it doesn't read as "New session".
+                            activity: live.as_ref().and_then(|s| s.activity()).or_else(|| {
+                                self.restored_activity.lock().unwrap().get(&session.id).cloned()
+                            }),
+                            mode: session.mode,
+                            permission_mode: session.permission_mode,
                         }
                     })
                     .collect();
@@ -888,17 +1040,21 @@ impl WorkspaceService {
                 args.push(flag.to_string());
                 args.push(text.to_string());
             }
-            // Only resume when the prior conversation still exists (skip a stale id: an unused tab
-            // whose conversation was never saved, a pruned one, or one from a since-changed cwd), so
-            // the agent starts fresh instead of erroring with "No conversation found".
-            if let Some(resume_id) = &session.resume_id
-                && provider.resume_available(
-                    &provider_config_dir(&account, provider),
-                    &cwd,
-                    resume_id,
-                )
-            {
-                provider.apply_resume(&mut args, resume_id);
+            // Pin the conversation to a Soromi-owned id so a mode switch (terminal <-> chat) always
+            // resumes the *same* conversation, no matter what. New sessions use their own `session.id`
+            // as the conversation id; pre-existing tabs keep the id captured from their first run (so
+            // history isn't orphaned). When the transcript already exists we `--resume` it; otherwise
+            // we start it fresh with our pinned id via `--session-id`. A provider that can't pin
+            // (no `--session-id`) or can't resume no-ops both and just starts fresh.
+            let convo_id = session
+                .resume_id
+                .clone()
+                .unwrap_or_else(|| session.id.clone());
+            let config_dir = provider_config_dir(&account, provider);
+            if provider.resume_available(&config_dir, &cwd, &convo_id) {
+                provider.apply_resume(&mut args, &convo_id);
+            } else {
+                provider.apply_session_id(&mut args, &convo_id);
             }
         }
 
@@ -948,6 +1104,45 @@ impl WorkspaceService {
             let _ = provider.install_hooks(&config_dir);
         }
 
+        // Headless "chat" mode: drive the agent over stream-json instead of a PTY. Needs a provider
+        // with a headless command; otherwise fall through to the terminal. The headless base flags go
+        // in front of the shared args (add-dir / system-prompt / session-id/resume built above).
+        if session.mode == SessionMode::Chat
+            && let Some(provider) = provider
+            && let Some(base) = provider.headless_stream_json_args()
+        {
+            let mut chat_args = base;
+            // The persisted permission mode (the composer dropdown's choice) — the initial
+            // `--permission-mode`; changed live thereafter via `set_permission_mode`.
+            chat_args.push("--permission-mode".to_string());
+            chat_args.push(session.permission_mode.as_flag().to_string());
+            chat_args.extend(args.iter().cloned());
+            let program = parsed.command.clone();
+            // Seed the chat log from the prior conversation's transcript so a resumed tab (e.g. one
+            // switched over from a live terminal) shows its history right away — the CLI does not
+            // replay it on stdout when resuming.
+            let convo_id = session
+                .resume_id
+                .clone()
+                .unwrap_or_else(|| session.id.clone());
+            let config_dir = provider_config_dir(&account, provider);
+            let seed = provider
+                .transcript_path(&config_dir, &cwd, &convo_id)
+                .filter(|path| path.exists())
+                .map(|path| read_transcript_seed(&path, provider))
+                .unwrap_or_default();
+            let cwd = cwd.clone();
+            let env = env.clone();
+            let id = session.id.clone();
+            let spawned = self.manager.ensure_chat(&session.id, move || {
+                StreamJsonSession::spawn(provider, &program, &chat_args, &cwd, Some(&env), seed)
+            });
+            if let Ok(sess) = spawned {
+                self.watch_chat(&id, &sess);
+            }
+            return warning;
+        }
+
         let options = SessionOptions {
             agent: command.to_string(),
             command: parsed.command,
@@ -961,6 +1156,22 @@ impl WorkspaceService {
             self.watch_status(&session.id, &sess);
         }
         warning
+    }
+
+    /// Like `watch_status`, but for a headless chat session: forwards its status to keep-awake and
+    /// fires a change so the sidebar updates. Chat has no PTY sub-agent/activity channels yet.
+    fn watch_chat(&self, session_id: &str, session: &StreamJsonSession) {
+        let mut status_rx = session.subscribe_status();
+        let keep_awake = self.keep_awake.clone();
+        let change_tx = self.change_tx.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            while status_rx.changed().await.is_ok() {
+                let status = *status_rx.borrow_and_update();
+                keep_awake.handle(&session_id, status);
+                let _ = change_tx.send(());
+            }
+        });
     }
 
     /// Forwards a session's parsed status to keep-awake and the rail (change events). Sound and
@@ -1059,6 +1270,15 @@ impl WorkspaceService {
         }
     }
 
+    /// A tool is starting (Claude's PreToolUse hook): keep an in-progress turn marked running and
+    /// refresh its idle-decay clock, but never resurrect a turn a hook already settled (a late,
+    /// out-of-order PreToolUse delivered after Stop must not flip a finished tab back to "running").
+    pub fn handle_agent_tool_active(&self, session_id: &str) {
+        if let Some(session) = self.manager.get(session_id) {
+            session.mark_tool_active();
+        }
+    }
+
     fn persist(&self) {
         let spaces: Vec<PersistedSpace> = self
             .metadata
@@ -1090,6 +1310,68 @@ fn new_session_id() -> String {
 
 fn basename(command: &str) -> &str {
     command.rsplit(['/', '\\']).next().unwrap_or(command)
+}
+
+/// Reads a conversation's on-disk transcript into chat events, so a resumed headless chat backend
+/// starts with its history. Best-effort: an unreadable or malformed transcript yields no events
+/// rather than failing the launch.
+fn read_transcript_seed(
+    path: &Path,
+    provider: &dyn crate::providers::Provider,
+) -> Vec<soromi_protocol::ChatEvent> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    contents
+        .lines()
+        .flat_map(|line| provider.parse_transcript_line(line))
+        .collect()
+}
+
+/// A short "last activity" for a restored session's subtitle, from the tail of its transcript: the
+/// last thing the agent said (its first line, trimmed) or, failing that, the last tool it ran.
+/// Parses from the end and stops at the first renderable event, so it reads only a few lines.
+fn last_transcript_activity(path: &Path, provider: &dyn crate::providers::Provider) -> Option<String> {
+    use soromi_protocol::ChatEvent;
+    let contents = fs::read_to_string(path).ok()?;
+    for line in contents.lines().rev() {
+        for event in provider.parse_transcript_line(line).into_iter().rev() {
+            match event {
+                ChatEvent::Assistant { text } => {
+                    let summary = truncate_chars(text.trim().lines().next().unwrap_or("").trim(), 60);
+                    if !summary.is_empty() {
+                        return Some(summary);
+                    }
+                }
+                ChatEvent::Tool { name, path, body, .. } => {
+                    return Some(tool_activity(&name, path.as_deref(), body.as_deref()));
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// A one-line label for a tool call (used as a restored session's last-activity subtitle).
+fn tool_activity(name: &str, path: Option<&str>, body: Option<&str>) -> String {
+    let file = || path.and_then(|p| p.rsplit('/').next()).unwrap_or("a file");
+    match name {
+        "Bash" => format!("Ran {}", truncate_chars(body.and_then(|b| b.lines().next()).unwrap_or("").trim(), 40)),
+        "Edit" | "MultiEdit" => format!("Edited {}", file()),
+        "Write" => format!("Wrote {}", file()),
+        "Read" => format!("Read {}", file()),
+        other => other.to_string(),
+    }
+}
+
+/// Truncates to `max` chars with a trailing ellipsis (char-safe, unlike byte slicing).
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max).collect();
+    format!("{truncated}…")
 }
 
 /// A provider's config dir for an account: its profile `configDir` if set, else the provider's
@@ -1238,6 +1520,8 @@ fn migrate(space: &mut PersistedSpace) -> bool {
             agent,
             title: None,
             resume_id: None,
+            mode: SessionMode::Terminal,
+            permission_mode: PermissionMode::default(),
         });
         changed = true;
     }
@@ -1488,7 +1772,8 @@ mod tests {
         .unwrap();
 
         // A second tab, same agent, no explicit account (resolves the existing binding).
-        hub.open_session("kazomi", "/bin/cat".into(), None).unwrap();
+        hub.open_session("kazomi", "/bin/cat".into(), None, SessionMode::Terminal)
+            .unwrap();
         assert_eq!(hub.summaries()[0].sessions.len(), 2);
         hub.dispose();
 

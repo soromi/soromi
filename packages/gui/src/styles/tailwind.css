@@ -14,6 +14,15 @@
 @source "../../../ui/src";
 
 /*
+ * Streamdown (the engine behind our Markdown / AI Elements-style chat) bakes its code-block chrome —
+ * header, language label, copy/download buttons, padding, borders, `overflow-x-auto` — as raw
+ * Tailwind utility classes inside its compiled JSX. Tailwind v4 skips node_modules by default, so
+ * without scanning its dist none of that CSS is generated and code blocks render unstyled (detached
+ * header, no padding, horizontal overflow). This line is streamdown's required setup step.
+ */
+@source "../../../ui/node_modules/streamdown/dist/**/*.js";
+
+/*
  * shadcn's semantic tokens, aliased to Soromi's palette (the single source of truth in
  * @soromi/ui/theme.css), so shadcn components match the app with no visual drift. Dark-only.
  */

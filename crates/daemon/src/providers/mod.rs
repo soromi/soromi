@@ -87,11 +87,32 @@ pub trait Provider: Send + Sync {
     /// means the provider cannot resume, so its tabs always start fresh.
     fn apply_resume(&self, _args: &mut Vec<String>, _resume_id: &str) {}
 
+    /// Adds the args to start a *fresh* conversation pinned to a specific id, so Soromi owns the
+    /// conversation id from the first turn and can deterministically resume it later (in either the
+    /// terminal or the headless chat backend). A no-op default means the provider can't pin an id and
+    /// simply starts fresh with its own generated one.
+    fn apply_session_id(&self, _args: &mut Vec<String>, _id: &str) {}
+
+    /// Base args that put this provider into headless `stream-json` mode (the "chat" backend), or
+    /// `None` if it has no such mode. The caller appends the shared bits (session-id/resume, add-dir,
+    /// system prompt) with the same methods the terminal launch uses. Approvals and model/effort are
+    /// layered on in later phases.
+    fn headless_stream_json_args(&self) -> Option<Vec<String>> {
+        None
+    }
+
     /// Whether a prior conversation still exists to resume (given the account config dir + the tab's
     /// working dir). Guards against a stale id (an unused tab, a pruned conversation, a changed cwd)
     /// that would make the agent error on launch. The default assumes yes.
     fn resume_available(&self, _config_dir: &Path, _cwd: &str, _resume_id: &str) -> bool {
         true
+    }
+
+    /// The on-disk transcript for a conversation id, if this provider keeps one. Used to seed the
+    /// headless chat backend with the prior conversation on resume (the CLI doesn't replay it on
+    /// stdout). `None` means the provider has no readable transcript.
+    fn transcript_path(&self, _config_dir: &Path, _cwd: &str, _id: &str) -> Option<std::path::PathBuf> {
+        None
     }
 
     /// Where this provider keeps skills/slash-commands: the per-project config folder (e.g.

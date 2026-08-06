@@ -51,6 +51,8 @@ mod tests {
                 agent: "claude".into(),
                 title: None,
                 resume_id: None,
+                mode: soromi_protocol::SessionMode::Terminal,
+                permission_mode: soromi_protocol::PermissionMode::default(),
             }],
             instructions: None,
             agent: None,

@@ -103,6 +103,69 @@ pub struct SubAgent {
 
 /// One running terminal (tab) within a workspace. `account` is resolved from the workspace's
 /// account bindings by matching `agent`.
+/// How a session is presented: the real PTY terminal (default), or the headless chat driven over the
+/// agent's stream-json interface. A session can switch between the two on desktop (same conversation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionMode {
+    /// The real PTY / xterm terminal.
+    #[default]
+    Terminal,
+    /// Headless chat: the agent runs over stream-json and renders as a conversation.
+    Chat,
+}
+
+impl SessionMode {
+    /// True for the default terminal mode, so it can be omitted from the wire (backward-compatible:
+    /// an absent `mode` deserializes back to `Terminal`).
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, SessionMode::Terminal)
+    }
+}
+
+/// How the headless chat handles tool permissions. Serializes to Claude's `--permission-mode` values,
+/// and is what the composer's permission dropdown chooses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    /// Ask before running tools that need approval (the control channel raises them).
+    #[default]
+    Default,
+    /// Auto-accept file edits; still ask for the rest.
+    AcceptEdits,
+    /// Auto-approve everything (the old bypass behavior).
+    BypassPermissions,
+    /// Plan only — the agent proposes without executing.
+    Plan,
+}
+
+impl PermissionMode {
+    /// The `--permission-mode` value Claude expects.
+    pub fn as_flag(&self) -> &'static str {
+        match self {
+            PermissionMode::Default => "default",
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+            PermissionMode::Plan => "plan",
+        }
+    }
+
+    /// True for the default (ask) mode, so it can be omitted from persisted specs / the wire.
+    pub fn is_default(&self) -> bool {
+        matches!(self, PermissionMode::Default)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(
@@ -114,6 +177,14 @@ pub struct SessionSummary {
     pub agent: String,
     pub account: String,
     pub status: Status,
+    /// Terminal (default) or headless chat. Always serialized; `#[serde(default)]` lets older
+    /// messages / persisted records without it deserialize back to `Terminal`.
+    #[serde(default)]
+    pub mode: SessionMode,
+    /// The chat session's permission mode (drives the composer dropdown). Always serialized so the
+    /// UI can show the current choice; defaults to ask.
+    #[serde(default, rename = "permissionMode")]
+    pub permission_mode: PermissionMode,
     /// A user-set tab name. Absent means the tab shows its account (auto-indexed on collision).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
@@ -259,9 +330,48 @@ pub enum ClientMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         account: Option<String>,
+        /// How to open the tab: the real terminal (default) or the headless chat. Absent = terminal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        mode: Option<SessionMode>,
     },
     CloseSession {
         session: String,
+    },
+    /// A chat-mode turn: send this text to the headless agent as a new user message. Gated by the
+    /// same control model as terminal `Input`. `files` are pasted / attached images and documents.
+    ChatTurn {
+        session: String,
+        text: String,
+        #[serde(default)]
+        files: Vec<ChatFile>,
+    },
+    /// Interrupt the headless agent's current turn (the composer's stop button). Gated by control.
+    ChatInterrupt {
+        session: String,
+    },
+    /// Answer a pending tool approval (headless chat): `allow=false` denies it. Gated by control.
+    ChatApprovalResponse {
+        session: String,
+        id: String,
+        allow: bool,
+    },
+    /// Change a chat session's permission mode (the composer dropdown). Applied live and persisted.
+    ChatPermissionMode {
+        session: String,
+        mode: PermissionMode,
+    },
+    /// Request the page of messages just before the `loaded` most recent the viewport already holds
+    /// (the "Load earlier" button). The daemon replies with a `ChatHistory` to prepend.
+    ChatLoadEarlier {
+        session: String,
+        loaded: u32,
+    },
+    /// Switch a tab between the terminal and headless chat. The daemon tears down the current backend
+    /// and resumes the same conversation in the other. Gated by control.
+    SwitchMode {
+        session: String,
+        mode: SessionMode,
     },
     /// Renames a tab. An empty `title` clears the custom name (back to the account label).
     RenameSession {
@@ -504,6 +614,69 @@ pub enum ServerMessage {
     ChatReset {
         session: String,
     },
+    /// The assistant message currently streaming in, as cumulative text (each update replaces the
+    /// last). An empty string clears the live message — it has committed as a `Chat` event or the
+    /// turn ended. Only headless "chat" sessions emit these.
+    ChatDelta {
+        session: String,
+        text: String,
+    },
+    /// A tool call is waiting for the user to allow or deny it (headless chat, permission prompts).
+    /// Sent on the `can_use_tool` control request; the turn is paused until answered.
+    ChatApproval {
+        session: String,
+        approval: ToolApproval,
+    },
+    /// A pending approval was answered (here or by another viewer); viewports clear its panel.
+    ChatApprovalResolved {
+        session: String,
+        id: String,
+    },
+    /// A page of earlier messages to prepend: the initial tail snapshot on attach, or a "load
+    /// earlier" page. `has_more` is whether even-older messages remain on the daemon.
+    ChatHistory {
+        session: String,
+        events: Vec<ChatEvent>,
+        has_more: bool,
+    },
+}
+
+/// A tool call awaiting approval in the headless chat (`--permission-prompt-tool stdio`). `id` is the
+/// CLI's control-request id we answer with; `name` / `path` / `body` render it like a tool card so
+/// the user sees what they're approving.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ToolApproval {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub body: Option<String>,
+}
+
+/// A file pasted or attached to a chat turn: base64 `data` plus its MIME type. Images and PDFs go to
+/// the agent as image / document content blocks; text files are inlined as text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ChatFile {
+    pub media_type: String,
+    pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub filename: Option<String>,
 }
 
 /// One structured entry from an agent's on-disk transcript, rendered by the mobile "chat" viewport
@@ -541,4 +714,7 @@ pub enum ChatEvent {
     },
     /// The result of a tool call, tied to it by `id`.
     ToolResult { id: String, ok: bool, text: String },
+    /// A system notice, not conversation (e.g. the turn was interrupted). Rendered as a centered
+    /// marker, not a user/assistant message.
+    Notice { text: String },
 }

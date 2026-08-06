@@ -96,6 +96,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_decorum::init())
         .invoke_handler(tauri::generate_handler![quit])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -160,11 +161,34 @@ fn main() {
             let script = format!(
                 "window.__SOROMI_DAEMON_URL__ = \"ws://localhost:{port}\"; window.__SOROMI_VERSION__ = \"{version}\";"
             );
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Soromi")
-                .inner_size(1200.0, 800.0)
-                .initialization_script(&script)
-                .build()?;
+            let builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Soromi")
+                    .inner_size(1200.0, 800.0)
+                    // Let the webview handle HTML5 file drag-and-drop (the chat composer's
+                    // attachments). With Tauri's default handler on, the OS captures file drops and
+                    // the webview's `drop` never fires.
+                    .disable_drag_drop_handler()
+                    .initialization_script(&script);
+            // Unify the title bar with our own chrome on macOS: the traffic lights overlay the
+            // content (full-size content view) and the OS title text is hidden, so the app's top bar
+            // reads as one seamless surface. The webview extends under the lights, so the frontend
+            // insets its top bar to clear them (see the macOS padding in the sidebar TopBar).
+            #[cfg(target_os = "macos")]
+            let builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true);
+            let window = builder.build()?;
+
+            // Center the traffic lights vertically in our 41px top bar (they default to macOS's
+            // taller-titlebar height and would otherwise sit too high). Decorum repositions the
+            // buttons directly and re-applies on resize — tao's own traffic_light_position does
+            // nothing under a full-window WKWebView (it only runs in the content view's drawRect).
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_decorum::WebviewWindowExt;
+                let _ = window.set_traffic_lights_inset(13.0, 13.5);
+            }
 
             Ok(())
         })

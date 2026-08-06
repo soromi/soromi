@@ -9,7 +9,7 @@
   --soromi-bg-rail: #0b0b0c;
   --soromi-bg-sidebar: #0f0f11;
   --soromi-bg-tab: #0d0d0f;
-  --soromi-bg-terminal: #0a0a0b;
+  --soromi-bg-terminal: #0f0f11;
   --soromi-bg-hover: #19191c;
   --soromi-bg-active: #242427;
   --soromi-border: #242427;
@@ -35,3 +35,33 @@
   /* Monospace stack for code / terminal-adjacent surfaces (replaces Mantine's font var). */
   --soromi-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+/*
+ * The chat's "working" mark: the three Soromi logo bars fade in and out in a staggered pulse, so the
+ * brand mark itself reads as the live activity indicator.
+ */
+@keyframes soromi-bar-pulse {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+.soromi-bar {
+  animation: soromi-bar-pulse 1.3s ease-in-out infinite;
+}
+.soromi-bar-2 {
+  animation-delay: 0.18s;
+}
+.soromi-bar-3 {
+  animation-delay: 0.36s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .soromi-bar {
+    animation: none;
+    opacity: 0.75;
+  }
+}
+

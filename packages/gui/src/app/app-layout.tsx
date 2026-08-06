@@ -25,7 +25,6 @@ import { UpdateBanner } from './update-banner'
 export function AppLayout() {
   const transport = useTransport()
   const active = useAppStore((s) => s.active)
-  const explorerOpen = useAppStore((s) => s.explorerOpen)
   const ready = useClientStore((s) => s.ready)
 
   useWorkspaceShortcuts()
@@ -50,7 +49,8 @@ export function AppLayout() {
           )}
           <OverlayHost scope="content" />
         </main>
-        {explorerOpen && <Explorer />}
+        {/* Always mounted so its width can animate 0 <-> open, pushing the content smoothly. */}
+        <Explorer />
       </div>
       <StatusBar />
       <OverlayHost scope="full" handleEsc />

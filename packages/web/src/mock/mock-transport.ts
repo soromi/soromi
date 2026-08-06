@@ -23,6 +23,8 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
           { name: 'Map v1 → v2 fields', status: 'done' },
           { name: 'Rewrite encoder', status: 'thinking' },
         ],
+        mode: 'terminal',
+        permissionMode: 'default',
       },
       {
         id: 'sess-2',
@@ -31,6 +33,8 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
         status: 'idle',
         title: 'gui',
         subagents: [],
+        mode: 'terminal',
+        permissionMode: 'default',
       },
     ],
   },
@@ -48,6 +52,8 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
         status: 'waiting-input',
         title: 'api',
         subagents: [],
+        mode: 'terminal',
+        permissionMode: 'default',
       },
     ],
   },
@@ -58,7 +64,15 @@ const MOCK_WORKSPACES: WorkspaceSummary[] = [
     folders: ['.'],
     accounts: [{ id: 'personal', agent: 'codex' }],
     sessions: [
-      { id: 'sess-4', agent: 'codex', account: 'personal', status: 'idle', subagents: [] },
+      {
+        id: 'sess-4',
+        agent: 'codex',
+        account: 'personal',
+        status: 'idle',
+        subagents: [],
+        mode: 'terminal',
+        permissionMode: 'default',
+      },
     ],
   },
 ]
