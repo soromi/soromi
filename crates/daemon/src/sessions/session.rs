@@ -489,8 +489,18 @@ fn spawn_idle_decay(
 /// Claude's sub-agent spawn tool, named `Task` historically and renamed to `Agent` in Claude Code
 /// 2.1. Accept both so sub-agents surface (and aren't mistaken for the tab's own activity)
 /// regardless of the installed CLI version.
-fn is_subagent_tool(name: &str) -> bool {
+pub(crate) fn is_subagent_tool(name: &str) -> bool {
     name == "Task" || name == "Agent"
+}
+
+/// Current Unix time in seconds (for sub-agent start timestamps). Zero if the clock is before the
+/// epoch, which never happens in practice.
+pub(crate) fn now_secs() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(0)
 }
 
 /// Applies transcript events to the sub-agent set for the current turn: a new user prompt clears it,
@@ -498,7 +508,7 @@ fn is_subagent_tool(name: &str) -> bool {
 /// description), and its tool-result *removes* it (the card shows only what's still running, so a
 /// finished sub-agent drops off). Returns whether the set changed, so the caller only republishes on
 /// a real change.
-fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -> bool {
+pub(crate) fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -> bool {
     let mut changed = false;
     for event in events {
         match event {
@@ -516,6 +526,7 @@ fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -
                     SubAgent {
                         name,
                         status: Status::Thinking,
+                        started_at: Some(now_secs()),
                     },
                 ));
                 changed = true;

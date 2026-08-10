@@ -5,6 +5,7 @@ use soromi_protocol::{AgentUsage, ChatEvent, Status};
 
 use super::{Provider, UsageAuthState};
 
+mod commands;
 mod hooks;
 mod status;
 mod transcript;
@@ -128,6 +129,10 @@ impl Provider for Claude {
 
     fn parse_transcript_line(&self, line: &str) -> Vec<ChatEvent> {
         transcript::parse_line(line)
+    }
+
+    fn describe_command(&self, name: &str, cwd: &Path) -> Option<String> {
+        commands::describe(name, cwd)
     }
 }
 

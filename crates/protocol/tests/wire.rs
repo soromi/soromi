@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use soromi_protocol::{
     AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode, PermissionMode,
-    ProviderConfig, ServerMessage, SessionMode, SessionSummary, Status, SubAgent, WorkspaceSummary,
+    ProviderConfig, ServerMessage, SessionMode, SessionSummary, SlashCommand, Status, SubAgent,
+    WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -140,6 +141,10 @@ fn server_output_and_session_opened() {
                 activity: None,
                 mode: SessionMode::Terminal,
                 permission_mode: PermissionMode::Default,
+                model: None,
+                effort: None,
+                context_tokens: None,
+                commands: Vec::new(),
             },
         },
         json!({
@@ -312,10 +317,18 @@ fn server_workspace_list_and_summary() {
                     subagents: vec![SubAgent {
                         name: "Map v1 to v2".into(),
                         status: Status::Thinking,
+                        started_at: Some(1_700_000_000),
                     }],
                     activity: Some("Editing config.ts".into()),
                     mode: SessionMode::Terminal,
                     permission_mode: PermissionMode::Default,
+                    model: None,
+                    effort: None,
+                    context_tokens: Some(120_000),
+                    commands: vec![SlashCommand {
+                        name: "recap".into(),
+                        description: Some("Generate a recap".into()),
+                    }],
                 }],
                 instructions: None,
             }],
@@ -334,10 +347,12 @@ fn server_workspace_list_and_summary() {
                     "account": "personal",
                     "status": "idle",
                     "title": "build",
-                    "subagents": [{ "name": "Map v1 to v2", "status": "thinking" }],
+                    "subagents": [{ "name": "Map v1 to v2", "status": "thinking", "started_at": 1_700_000_000 }],
                     "activity": "Editing config.ts",
                     "mode": "terminal",
-                    "permissionMode": "default"
+                    "permissionMode": "default",
+                    "context_tokens": 120_000,
+                    "commands": [{ "name": "recap", "description": "Generate a recap" }]
                 }]
             }]
         }),

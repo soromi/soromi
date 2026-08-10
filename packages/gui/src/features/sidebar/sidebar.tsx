@@ -854,7 +854,9 @@ const SessionRow = memo(function SessionRow({
   // The subtitle is always shown so the two-line rhythm holds across the list: what the provider is
   // working on, or "New session" for one that hasn't done anything yet.
   const subtitle = session.activity || 'New session'
-  const subagents = session.subagents ?? []
+  // Sub-agents nest under the tab only for terminal sessions; chat sessions surface them in the
+  // panel above the composer instead (so they aren't shown twice).
+  const subagents = session.mode === 'chat' ? [] : (session.subagents ?? [])
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')

@@ -10,6 +10,21 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 
+@layer base {
+  /*
+   * Suppress the WebKit default focus ring on buttons and menu triggers. WKWebView colors it with
+   * the user's macOS accent (amber on some setups), which reads as a stray highlight on our custom
+   * composer buttons. Components that want a visible focus state use `ring` utilities (box-shadow),
+   * which this does not touch — so their intentional focus indicator stays.
+   */
+  button:focus,
+  button:focus-visible,
+  [role="button"]:focus,
+  [role="button"]:focus-visible {
+    outline: none;
+  }
+}
+
 /* Scan the shared, source-consumed component package for class names. */
 @source "../../../ui/src";
 

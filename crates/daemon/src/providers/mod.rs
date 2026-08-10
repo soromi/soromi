@@ -154,6 +154,13 @@ pub trait Provider: Send + Sync {
     fn parse_transcript_line(&self, _line: &str) -> Vec<ChatEvent> {
         Vec::new()
     }
+
+    /// A one-line description for a slash command ("action") this provider exposes, or `None` if
+    /// unknown. Annotates the chat `/` menu; `cwd` locates project-local custom commands. Default:
+    /// the provider surfaces no descriptions (the menu shows the bare command name).
+    fn describe_command(&self, _name: &str, _cwd: &Path) -> Option<String> {
+        None
+    }
 }
 
 /// The provider registry. Add a provider by adding it here.

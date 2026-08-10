@@ -168,6 +168,22 @@ impl Connection {
                     self.hub.set_permission_mode(&session, mode);
                 }
             }
+            ClientMessage::ChatSetModel {
+                session,
+                model,
+                effort,
+            } => {
+                // The composer's model dropdown: apply live and persist.
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.set_model(&session, model, effort);
+                }
+            }
+            ClientMessage::ChatCommand { session, command } => {
+                // The composer's context controls (/compact, /clear).
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.run_chat_command(&session, command);
+                }
+            }
             ClientMessage::ChatLoadEarlier { session, loaded } => {
                 // "Load earlier": send the page of messages just before what the viewport holds.
                 if let Some(chat) = self.hub.get_chat(&session) {

@@ -21,6 +21,14 @@ pub struct SessionSpec {
     /// restore keeps the user's choice. Omitted from disk when the default (ask).
     #[serde(default, skip_serializing_if = "PermissionMode::is_default")]
     pub permission_mode: PermissionMode,
+    /// The model alias the chat runs (`--model`; the composer's model dropdown). `None` = the
+    /// provider default. Persisted so a restore keeps the choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The reasoning effort level (`--effort`), for models that support it. `None` = the model's
+    /// default. Persisted with the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 /// The committable descriptor at the root of a work folder (`soromi.space.json`). References

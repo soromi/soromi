@@ -4,5 +4,6 @@ import type { Status } from "./Status";
 /**
  * A sub-agent the agent spawned this turn (a Claude `Task` call). `name` is its task description;
  * `status` reuses the agent statuses (`thinking` = running, `done` = finished, `blocked` = errored).
+ * `started_at` is the Unix-seconds timestamp it began, so viewers can show a live elapsed time.
  */
-export type SubAgent = { name: string, status: Status, };
+export type SubAgent = { name: string, status: Status, started_at: number | null, };

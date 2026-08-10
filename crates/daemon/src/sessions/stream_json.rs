@@ -16,9 +16,12 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{broadcast, watch};
 use tokio::task::AbortHandle;
 
-use soromi_protocol::{ChatEvent, ChatFile, Status, ToolApproval};
+use std::path::PathBuf;
+
+use soromi_protocol::{ChatEvent, ChatFile, SlashCommand, Status, SubAgent, ToolApproval};
 
 use crate::providers::Provider;
+use crate::sessions::session::track_subagents;
 
 const CHAT_CAPACITY: usize = 512;
 
@@ -52,6 +55,18 @@ pub struct StreamJsonSession {
     // Set when we send an interrupt; the CLI then reports the stop as a `user` message, which the
     // reader converts to a `Notice` (so the UI knows it was interrupted without matching the text).
     interrupted: Arc<AtomicBool>,
+    // Sub-agents (`Task` calls) running this turn, keyed by tool id. Mirrors the PTY session's
+    // tracking so a chat tab can show "N agents working in the background" over its composer.
+    active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
+    subagents_rx: watch::Receiver<Vec<SubAgent>>,
+    // The provider's slash commands ("actions"), captured once from the `system/init` frame. Empty
+    // for providers that don't expose them (the capability signal for the chat `/` menu).
+    commands_tx: Arc<watch::Sender<Vec<SlashCommand>>>,
+    commands_rx: watch::Receiver<Vec<SlashCommand>>,
+    // Tokens the conversation currently occupies (last turn's prompt + cache), for the context meter.
+    context_tx: Arc<watch::Sender<Option<u32>>>,
+    context_rx: watch::Receiver<Option<u32>>,
     reader: Option<AbortHandle>,
 }
 
@@ -105,6 +120,13 @@ impl StreamJsonSession {
         let (resolved_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let pending: Arc<Mutex<HashMap<String, Pending>>> = Arc::new(Mutex::new(HashMap::new()));
         let interrupted = Arc::new(AtomicBool::new(false));
+        let active_subagents = Arc::new(Mutex::new(Vec::new()));
+        let (subagents_tx, subagents_rx) = watch::channel(Vec::new());
+        let subagents_tx = Arc::new(subagents_tx);
+        let (commands_tx, commands_rx) = watch::channel(Vec::new());
+        let commands_tx = Arc::new(commands_tx);
+        let (context_tx, context_rx) = watch::channel(None);
+        let context_tx = Arc::new(context_tx);
         let stdin = Arc::new(tokio::sync::Mutex::new(stdin));
 
         // Handshake: the control channel (approvals) only wakes up after an `initialize` request.
@@ -135,6 +157,11 @@ impl StreamJsonSession {
             approval_tx.clone(),
             pending.clone(),
             interrupted.clone(),
+            active_subagents.clone(),
+            subagents_tx.clone(),
+            commands_tx.clone(),
+            context_tx.clone(),
+            PathBuf::from(cwd),
         );
 
         Ok(Self {
@@ -150,6 +177,13 @@ impl StreamJsonSession {
             resolved_tx,
             pending,
             interrupted,
+            active_subagents,
+            subagents_tx,
+            subagents_rx,
+            commands_tx,
+            commands_rx,
+            context_tx,
+            context_rx,
             reader: Some(reader),
         })
     }
@@ -259,6 +293,28 @@ impl StreamJsonSession {
         let _ = self.status_tx.send(Status::Thinking);
     }
 
+    /// Changes the model + reasoning effort live (the composer's model dropdown) by sending the
+    /// argument-form slash commands the CLI accepts as messages (`/model <alias>`, `/effort <level>`).
+    /// Sent as commands, not recorded in the chat log — they change session state, not the transcript.
+    /// `model` `None` resets to the provider default.
+    pub async fn set_model(&self, model: Option<&str>, effort: Option<&str>) {
+        self.send_command(&format!("/model {}", model.unwrap_or("default"))).await;
+        if let Some(effort) = effort {
+            self.send_command(&format!("/effort {effort}")).await;
+        }
+    }
+
+    /// Writes a bare slash command to the CLI as a user message (how headless mode invokes commands),
+    /// without touching the chat log or status — for state-changing commands like `/model`.
+    async fn send_command(&self, text: &str) {
+        let envelope =
+            json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string();
+        let mut stdin = self.stdin.lock().await;
+        let _ = stdin.write_all(envelope.as_bytes()).await;
+        let _ = stdin.write_all(b"\n").await;
+        let _ = stdin.flush().await;
+    }
+
     /// Changes the permission mode live (the composer dropdown) via a `set_permission_mode` control
     /// request. `mode` is Claude's flag value (`default` / `acceptEdits` / `bypassPermissions` / `plan`).
     pub async fn set_permission_mode(&self, mode: &str) {
@@ -297,6 +353,40 @@ impl StreamJsonSession {
 
     pub fn subscribe_status(&self) -> watch::Receiver<Status> {
         self.status_rx.clone()
+    }
+
+    /// The sub-agents (`Task` calls) running this turn, for the chat tab's "agents working" panel.
+    pub fn subagents(&self) -> Vec<SubAgent> {
+        self.subagents_rx.borrow().clone()
+    }
+
+    pub fn subscribe_subagents(&self) -> watch::Receiver<Vec<SubAgent>> {
+        self.subagents_rx.clone()
+    }
+
+    /// The provider's slash commands ("actions") for this session, for the chat `/` menu. Empty until
+    /// the `system/init` frame arrives, and for providers that don't expose them.
+    pub fn commands(&self) -> Vec<SlashCommand> {
+        self.commands_rx.borrow().clone()
+    }
+
+    pub fn subscribe_commands(&self) -> watch::Receiver<Vec<SlashCommand>> {
+        self.commands_rx.clone()
+    }
+
+    /// Tokens the conversation currently occupies (last turn's prompt + cache), for the context meter.
+    pub fn context_tokens(&self) -> Option<u32> {
+        *self.context_rx.borrow()
+    }
+
+    pub fn subscribe_context(&self) -> watch::Receiver<Option<u32>> {
+        self.context_rx.clone()
+    }
+
+    /// Runs a bare slash command (e.g. `/compact`, `/clear`) as a command message — not recorded in
+    /// the chat log. The context controls (compact / clear) use this.
+    pub async fn run_command(&self, command: &str) {
+        self.send_command(command).await;
     }
 
     pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
@@ -373,6 +463,11 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     approval_tx: broadcast::Sender<ToolApproval>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     interrupted: Arc<AtomicBool>,
+    active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
+    commands_tx: Arc<watch::Sender<Vec<SlashCommand>>>,
+    context_tx: Arc<watch::Sender<Option<u32>>>,
+    cwd: PathBuf,
 ) -> AbortHandle {
     // Clears the streaming partial and tells viewers the live message is gone (committed / ended).
     let clear_partial = {
@@ -392,6 +487,10 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            // The context meter: the last turn's prompt + cached tokens are the current context size.
+            if let Some(tokens) = context_tokens_from(&line) {
+                let _ = context_tx.send(Some(tokens));
+            }
             match classify(&line, provider) {
                 Dispatch::Chat(events) => {
                     // The complete frame commits the message; drop the streaming stand-in.
@@ -412,6 +511,14 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         .collect();
                     if let Ok(mut log) = chat_log.lock() {
                         log.extend(events.iter().cloned());
+                    }
+                    // Update the running sub-agent set (a `Task` starts one, its result ends it) so the
+                    // chat tab can show them over the composer. Only republish on a real change.
+                    if let Ok(mut active) = active_subagents.lock() {
+                        if track_subagents(&mut active, &events) {
+                            let list = active.iter().map(|(_, agent)| agent.clone()).collect();
+                            let _ = subagents_tx.send(list);
+                        }
                     }
                     for event in events {
                         let _ = chat_tx.send(event);
@@ -442,6 +549,18 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     }
                     let _ = approval_tx.send(approval);
                     let _ = status_tx.send(Status::WaitingInput);
+                }
+                Dispatch::Commands(names) => {
+                    // Annotate each command with the provider's description (built-in map + custom
+                    // frontmatter), then publish once — the set is fixed for the session.
+                    let list: Vec<SlashCommand> = names
+                        .into_iter()
+                        .map(|name| SlashCommand {
+                            description: provider.describe_command(&name, &cwd),
+                            name,
+                        })
+                        .collect();
+                    let _ = commands_tx.send(list);
                 }
                 Dispatch::None => {}
             }
@@ -493,8 +612,26 @@ enum Dispatch {
     Status(Status),
     /// A `can_use_tool` request: the tool to show, plus its original input (echoed back on allow).
     Approval(ToolApproval, Value),
+    /// The provider's available slash commands (names, no `/`), from the `system/init` frame.
+    Commands(Vec<String>),
     /// Nothing we surface (`system`, other control frames, non-text stream events).
     None,
+}
+
+/// The context size an `assistant` frame reports: its request's prompt tokens plus the cached tokens
+/// (`usage.input_tokens + cache_read_input_tokens + cache_creation_input_tokens`). The latest one is
+/// the conversation's current context occupancy. `None` for non-assistant frames or missing usage.
+fn context_tokens_from(line: &str) -> Option<u32> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    let usage = value.pointer("/message/usage")?;
+    let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let total = field("input_tokens")
+        + field("cache_read_input_tokens")
+        + field("cache_creation_input_tokens");
+    (total > 0).then_some(total as u32)
 }
 
 /// Maps a stream-json frame to a `Dispatch`. The `assistant`/`user` frames are byte-for-byte the same
@@ -512,6 +649,30 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
             } else {
                 Dispatch::Chat(events)
             }
+        }
+        // The session's opening frame lists the provider's available slash commands ("actions"). Only
+        // Claude emits it, so it doubles as the capability signal for the chat `/` menu.
+        Some("system") if value.get("subtype").and_then(Value::as_str) == Some("init") => {
+            match value.get("slash_commands").and_then(Value::as_array) {
+                Some(list) => Dispatch::Commands(
+                    list.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect(),
+                ),
+                None => Dispatch::None,
+            }
+        }
+        // Compaction ran (context freed up), auto when the window filled or from `/compact`. Surface
+        // it as a system notice so the conversation shows what happened.
+        Some("system") if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") => {
+            let auto = value.pointer("/compact_metadata/trigger").and_then(Value::as_str)
+                == Some("auto");
+            let text = if auto {
+                "Context was full — automatically compacted to free space".to_string()
+            } else {
+                "Conversation compacted to free up context".to_string()
+            };
+            Dispatch::Chat(vec![ChatEvent::Notice { text }])
         }
         // A turn finished; the agent is idle waiting for the next message.
         Some("result") => Dispatch::Status(Status::Idle),

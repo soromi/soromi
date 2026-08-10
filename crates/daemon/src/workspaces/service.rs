@@ -348,6 +348,8 @@ impl WorkspaceService {
                 resume_id: None,
                 mode: SessionMode::Terminal,
                 permission_mode: PermissionMode::default(),
+                model: None,
+                effort: None,
             }],
             instructions: None,
             agent: None,
@@ -369,6 +371,8 @@ impl WorkspaceService {
                 resume_id: None,
                 mode: SessionMode::Terminal,
                 permission_mode: PermissionMode::default(),
+                model: None,
+                effort: None,
             })
             .collect();
         if sessions.is_empty() {
@@ -379,6 +383,8 @@ impl WorkspaceService {
                 resume_id: None,
                 mode: SessionMode::Terminal,
                 permission_mode: PermissionMode::default(),
+                model: None,
+                effort: None,
             });
         }
         let space = PersistedSpace {
@@ -431,6 +437,8 @@ impl WorkspaceService {
             resume_id: None,
             mode,
             permission_mode: PermissionMode::default(),
+            model: None,
+            effort: None,
         };
         let (root, folders, accounts, instructions) = {
             let mut metadata = self.metadata.lock().unwrap();
@@ -474,6 +482,10 @@ impl WorkspaceService {
             activity: None,
             mode,
             permission_mode: PermissionMode::default(),
+            model: None,
+            effort: None,
+            context_tokens: None,
+            commands: Vec::new(),
         })
     }
 
@@ -543,6 +555,41 @@ impl WorkspaceService {
         }
         self.persist();
         self.emit_change();
+    }
+
+    /// Sets a chat tab's model + reasoning effort (the composer's model dropdown): persists it for the
+    /// next launch and, if the headless session is running, applies it live (`/model` / `/effort`).
+    pub fn set_model(&self, session_id: &str, model: Option<String>, effort: Option<String>) {
+        {
+            let mut metadata = self.metadata.lock().unwrap();
+            let Some(spec) = metadata
+                .iter_mut()
+                .flat_map(|(_, meta)| meta.sessions.iter_mut())
+                .find(|s| s.id == session_id)
+            else {
+                return;
+            };
+            if spec.model == model && spec.effort == effort {
+                return;
+            }
+            spec.model = model.clone();
+            spec.effort = effort.clone();
+        }
+        if let Some(chat) = self.manager.get_chat(session_id) {
+            tokio::spawn(async move {
+                chat.set_model(model.as_deref(), effort.as_deref()).await;
+            });
+        }
+        self.persist();
+        self.emit_change();
+    }
+
+    /// Runs a bare slash command in a chat session (`/compact`, `/clear`, …) — the composer's context
+    /// controls. Sent to the agent as a command, not recorded as a user message.
+    pub fn run_chat_command(&self, session_id: &str, command: String) {
+        if let Some(chat) = self.manager.get_chat(session_id) {
+            tokio::spawn(async move { chat.run_command(&command).await });
+        }
     }
 
     /// Renames a tab. An empty title clears the custom name (back to the account label).
@@ -655,7 +702,11 @@ impl WorkspaceService {
                                 .or_else(|| live_chat.as_ref().map(|s| s.status()))
                                 .unwrap_or(Status::Idle),
                             title: session.title.clone(),
-                            subagents: live.as_ref().map(|s| s.subagents()).unwrap_or_default(),
+                            subagents: live
+                                .as_ref()
+                                .map(|s| s.subagents())
+                                .or_else(|| live_chat.as_ref().map(|s| s.subagents()))
+                                .unwrap_or_default(),
                             // Live activity wins; otherwise a restored tab shows its last transcript
                             // activity so it doesn't read as "New session".
                             activity: live.as_ref().and_then(|s| s.activity()).or_else(|| {
@@ -663,6 +714,13 @@ impl WorkspaceService {
                             }),
                             mode: session.mode,
                             permission_mode: session.permission_mode,
+                            model: session.model.clone(),
+                            effort: session.effort.clone(),
+                            context_tokens: live_chat.as_ref().and_then(|s| s.context_tokens()),
+                            commands: live_chat
+                                .as_ref()
+                                .map(|s| s.commands())
+                                .unwrap_or_default(),
                         }
                     })
                     .collect();
@@ -1125,6 +1183,16 @@ impl WorkspaceService {
             // `--permission-mode`; changed live thereafter via `set_permission_mode`.
             chat_args.push("--permission-mode".to_string());
             chat_args.push(session.permission_mode.as_flag().to_string());
+            // The persisted model + effort (the composer's model dropdown), changed live thereafter
+            // via `set_model`. Absent = the provider default.
+            if let Some(model) = &session.model {
+                chat_args.push("--model".to_string());
+                chat_args.push(model.clone());
+            }
+            if let Some(effort) = &session.effort {
+                chat_args.push("--effort".to_string());
+                chat_args.push(effort.clone());
+            }
             chat_args.extend(args.iter().cloned());
             let program = parsed.command.clone();
             // Seed the chat log from the prior conversation's transcript so a resumed tab (e.g. one
@@ -1177,6 +1245,9 @@ impl WorkspaceService {
     /// focus exactly like the hook path.
     fn watch_chat(&self, workspace: &str, session_id: &str, session: &StreamJsonSession) {
         let mut status_rx = session.subscribe_status();
+        let mut subagents_rx = session.subscribe_subagents();
+        let mut commands_rx = session.subscribe_commands();
+        let mut context_rx = session.subscribe_context();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
         let notifications = self.notifications.clone();
@@ -1185,16 +1256,44 @@ impl WorkspaceService {
         let workspace = workspace.to_string();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            while status_rx.changed().await.is_ok() {
-                let status = *status_rx.borrow_and_update();
-                keep_awake.handle(&session_id, status);
-                let _ = change_tx.send(());
+            loop {
+                tokio::select! {
+                    changed = status_rx.changed() => {
+                        if changed.is_err() { break }
+                        let status = *status_rx.borrow_and_update();
+                        keep_awake.handle(&session_id, status);
+                        let _ = change_tx.send(());
 
-                // Notify on entering an attention state, unless muted or the user is already here.
-                if let Some(cue) = cue_for(status) {
-                    if !notifications.is_muted(&workspace) && !focused.load(Ordering::Relaxed) {
-                        sound.play(cue);
-                        notifications.fire(&workspace, Some(&session_id), cue_text(cue));
+                        // Notify on entering an attention state, unless muted or the user is here.
+                        if let Some(cue) = cue_for(status) {
+                            if !notifications.is_muted(&workspace)
+                                && !focused.load(Ordering::Relaxed)
+                            {
+                                sound.play(cue);
+                                notifications.fire(&workspace, Some(&session_id), cue_text(cue));
+                            }
+                        }
+                    }
+                    // The running sub-agents changed (a Task spawned or finished): re-broadcast so the
+                    // chat tab's "agents working" panel updates live.
+                    changed = subagents_rx.changed() => {
+                        if changed.is_err() { break }
+                        subagents_rx.borrow_and_update();
+                        let _ = change_tx.send(());
+                    }
+                    // The provider's slash commands arrived (the `system/init` frame): re-broadcast so
+                    // the chat composer's `/` menu is available right away.
+                    changed = commands_rx.changed() => {
+                        if changed.is_err() { break }
+                        commands_rx.borrow_and_update();
+                        let _ = change_tx.send(());
+                    }
+                    // The context token count changed (a turn reported usage): re-broadcast so the
+                    // composer's context meter updates.
+                    changed = context_rx.changed() => {
+                        if changed.is_err() { break }
+                        context_rx.borrow_and_update();
+                        let _ = change_tx.send(());
                     }
                 }
             }
@@ -1549,6 +1648,8 @@ fn migrate(space: &mut PersistedSpace) -> bool {
             resume_id: None,
             mode: SessionMode::Terminal,
             permission_mode: PermissionMode::default(),
+            model: None,
+            effort: None,
         });
         changed = true;
     }

@@ -53,6 +53,8 @@ mod tests {
                 resume_id: None,
                 mode: soromi_protocol::SessionMode::Terminal,
                 permission_mode: soromi_protocol::PermissionMode::default(),
+                model: None,
+                effort: None,
             }],
             instructions: None,
             agent: None,

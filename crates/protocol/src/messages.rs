@@ -90,6 +90,7 @@ pub struct AgentAccount {
 
 /// A sub-agent the agent spawned this turn (a Claude `Task` call). `name` is its task description;
 /// `status` reuses the agent statuses (`thinking` = running, `done` = finished, `blocked` = errored).
+/// `started_at` is the Unix-seconds timestamp it began, so viewers can show a live elapsed time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(
@@ -99,6 +100,25 @@ pub struct AgentAccount {
 pub struct SubAgent {
     pub name: String,
     pub status: Status,
+    pub started_at: Option<u32>,
+}
+
+/// A slash command ("action") the provider exposes for a session — Claude's `slash_commands` from
+/// its `system/init` frame. `name` has no leading `/`; `description` is a one-line hint the daemon
+/// resolves per provider (built-in map + custom `.claude/commands` frontmatter), absent when unknown.
+/// Only providers that emit them populate this, so it doubles as the capability signal for the UI's
+/// `/` menu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct SlashCommand {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub description: Option<String>,
 }
 
 /// One running terminal (tab) within a workspace. `account` is resolved from the workspace's
@@ -185,6 +205,14 @@ pub struct SessionSummary {
     /// UI can show the current choice; defaults to ask.
     #[serde(default, rename = "permissionMode")]
     pub permission_mode: PermissionMode,
+    /// The chat's model alias (`--model`) and reasoning effort (`--effort`), for the composer's model
+    /// dropdown. Absent = the provider/model default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub effort: Option<String>,
     /// A user-set tab name. Absent means the tab shows its account (auto-indexed on collision).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
@@ -198,6 +226,16 @@ pub struct SessionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub activity: Option<String>,
+    /// Approximate tokens the current conversation occupies in the model's context window (from the
+    /// last turn's `usage`: prompt + cached). The viewport compares it to the model's limit to warn
+    /// when the context is filling up. Absent until a turn reports usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub context_tokens: Option<u32>,
+    /// Slash commands ("actions") the provider exposes for this session (Claude only, for now), for
+    /// the chat composer's `/` menu. Empty for providers that don't expose them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<SlashCommand>,
 }
 
 /// Rail-facing summary of a workspace. `status` is the aggregate of its sessions.
@@ -360,6 +398,21 @@ pub enum ClientMessage {
     ChatPermissionMode {
         session: String,
         mode: PermissionMode,
+    },
+    /// Change a chat session's model + reasoning effort (the composer's model dropdown). Both `None`
+    /// resets to the provider default. Applied live (`/model` / `/effort`) and persisted.
+    ChatSetModel {
+        session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
+    },
+    /// Run a bare slash command in a chat session (e.g. `/compact`, `/clear`) — sent to the agent as a
+    /// command, not recorded as a user message. The composer's context controls use this.
+    ChatCommand {
+        session: String,
+        command: String,
     },
     /// Request the page of messages just before the `loaded` most recent the viewport already holds
     /// (the "Load earlier" button). The daemon replies with a `ChatHistory` to prepend.

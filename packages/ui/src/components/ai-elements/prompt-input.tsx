@@ -831,7 +831,15 @@ export const PromptInputTextarea = ({
       if (isComposing || e.nativeEvent.isComposing) {
         return;
       }
+      // Shift+Enter inserts a newline via the browser default; leave it alone.
       if (e.shiftKey) {
+        return;
+      }
+      // Option/Alt+Enter also breaks the line instead of submitting. The default doesn't insert one,
+      // so do it explicitly (execCommand keeps the caret + native undo + fires the input event).
+      if (e.altKey) {
+        e.preventDefault();
+        document.execCommand("insertText", false, "\n");
         return;
       }
       e.preventDefault();
