@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 //Components
 import { AgentsPanel } from './agents-panel'
@@ -64,6 +64,8 @@ export interface ChatViewProps {
   contextLimit?: number
   /** Runs a bare slash command in the session (`/compact`, `/clear`) — the context banner's actions. */
   onCommand?: (command: string) => void
+  /** Keys the composer's unsent-text draft (the session id), so it survives switching chats. */
+  draftKey?: string
   /** Earlier messages exist on the daemon beyond what's loaded (shows the "Load earlier" button). */
   canLoadEarlier?: boolean
   /** Requests the previous page of messages from the daemon (prepended to `events`). */
@@ -103,11 +105,25 @@ export function ChatView({
   contextTokens,
   contextLimit = 200_000,
   onCommand,
+  draftKey,
   canLoadEarlier = false,
   onLoadEarlier,
 }: ChatViewProps) {
   const rows = useMemo(() => buildRows(events), [events])
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // A context command (`/compact` / `/clear`) in flight: disables the banner actions + the composer
+  // and shows a spinner until the turn settles, so it can't be double-triggered (compaction is slow).
+  const [commandPending, setCommandPending] = useState<'/compact' | '/clear' | null>(null)
+  useEffect(() => {
+    if (!working) setCommandPending(null)
+  }, [working])
+  const runCommand = onCommand
+    ? (command: '/compact' | '/clear') => {
+        setCommandPending(command)
+        onCommand(command)
+      }
+    : undefined
   // The streaming reply (paced by a ~40×/sec timer) and the working clock (1×/sec) live in their own
   // isolated children — `StreamingTail` and `WorkingIndicator` — so their frequent ticks re-render
   // just those nodes, not this whole view and every committed row.
@@ -232,17 +248,26 @@ export function ChatView({
         </div>
       </div>
       <div className="mx-auto w-full max-w-3xl px-4 pt-1 pb-3">
-        {contextTokens != null && onCommand && (
+        {contextTokens != null && runCommand && (
           <ContextBanner
             tokens={contextTokens}
             limit={contextLimit}
-            onCompact={() => onCommand('/compact')}
-            onClear={() => onCommand('/clear')}
+            busy={working || commandPending !== null}
+            pending={commandPending}
+            onCompact={() => runCommand('/compact')}
+            onClear={() => runCommand('/clear')}
           />
         )}
         <AgentsPanel subagents={subagents ?? []} onStop={onStop} />
         <Composer
-          disabled={disabled}
+          disabled={disabled || commandPending !== null}
+          disabledLabel={
+            commandPending === '/compact'
+              ? 'Compacting…'
+              : commandPending === '/clear'
+                ? 'Clearing…'
+                : undefined
+          }
           working={working}
           placeholder={placeholder}
           onSend={onSend}
@@ -255,6 +280,7 @@ export function ChatView({
           onModel={onModel}
           account={account}
           accountIcon={accountIcon}
+          draftKey={draftKey}
         />
       </div>
     </div>

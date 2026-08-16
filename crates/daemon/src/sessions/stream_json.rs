@@ -18,7 +18,9 @@ use tokio::task::AbortHandle;
 
 use std::path::PathBuf;
 
-use soromi_protocol::{ChatEvent, ChatFile, SlashCommand, Status, SubAgent, ToolApproval};
+use soromi_protocol::{
+    ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval,
+};
 
 use crate::providers::Provider;
 use crate::sessions::session::track_subagents;
@@ -67,6 +69,10 @@ pub struct StreamJsonSession {
     // Tokens the conversation currently occupies (last turn's prompt + cache), for the context meter.
     context_tx: Arc<watch::Sender<Option<u32>>>,
     context_rx: watch::Receiver<Option<u32>>,
+    // The permission mode we enforce on `can_use_tool` requests: the CLI routes every tool here (our
+    // `--permission-prompt-tool`), so bypass / auto-accept are applied on our side (the CLI's live
+    // `set_permission_mode` doesn't reliably switch into bypass). Shared with the reader.
+    permission_mode: Arc<Mutex<PermissionMode>>,
     reader: Option<AbortHandle>,
 }
 
@@ -84,6 +90,8 @@ impl StreamJsonSession {
         // its history immediately. Empty for a fresh conversation. The CLI does not replay the
         // transcript on stdout when resuming, so without this seed a switched-in tab would be blank.
         seed: Vec<ChatEvent>,
+        // The tab's permission mode (also its launch `--permission-mode` flag), enforced on approvals.
+        permission_mode: PermissionMode,
     ) -> anyhow::Result<Self> {
         let mut cmd = Command::new(program);
         cmd.args(args)
@@ -127,6 +135,7 @@ impl StreamJsonSession {
         let commands_tx = Arc::new(commands_tx);
         let (context_tx, context_rx) = watch::channel(None);
         let context_tx = Arc::new(context_tx);
+        let permission_mode = Arc::new(Mutex::new(permission_mode));
         let stdin = Arc::new(tokio::sync::Mutex::new(stdin));
 
         // Handshake: the control channel (approvals) only wakes up after an `initialize` request.
@@ -161,6 +170,8 @@ impl StreamJsonSession {
             subagents_tx.clone(),
             commands_tx.clone(),
             context_tx.clone(),
+            permission_mode.clone(),
+            stdin.clone(),
             PathBuf::from(cwd),
         );
 
@@ -184,6 +195,7 @@ impl StreamJsonSession {
             commands_rx,
             context_tx,
             context_rx,
+            permission_mode,
             reader: Some(reader),
         })
     }
@@ -315,14 +327,18 @@ impl StreamJsonSession {
         let _ = stdin.flush().await;
     }
 
-    /// Changes the permission mode live (the composer dropdown) via a `set_permission_mode` control
-    /// request. `mode` is Claude's flag value (`default` / `acceptEdits` / `bypassPermissions` / `plan`).
-    pub async fn set_permission_mode(&self, mode: &str) {
+    /// Changes the permission mode live (the composer dropdown). Records it so the reader enforces
+    /// bypass / auto-accept on our side, and tells the CLI via a `set_permission_mode` control request
+    /// (which drives plan mode and lets the CLI optimize when it honors the switch).
+    pub async fn set_permission_mode(&self, mode: PermissionMode) {
+        if let Ok(mut current) = self.permission_mode.lock() {
+            *current = mode;
+        }
         static SEQ: AtomicU64 = AtomicU64::new(1);
         let request = json!({
             "type": "control_request",
             "request_id": format!("mode-{}", SEQ.fetch_add(1, Ordering::Relaxed)),
-            "request": { "subtype": "set_permission_mode", "mode": mode },
+            "request": { "subtype": "set_permission_mode", "mode": mode.as_flag() },
         })
         .to_string();
         let mut stdin = self.stdin.lock().await;
@@ -384,9 +400,12 @@ impl StreamJsonSession {
     }
 
     /// Runs a bare slash command (e.g. `/compact`, `/clear`) as a command message — not recorded in
-    /// the chat log. The context controls (compact / clear) use this.
+    /// the chat log. The context controls (compact / clear) use this. Marks the tab working so the
+    /// composer shows progress (compaction can take a while); the command's `result` frame returns it
+    /// to idle, and a `compact_boundary` surfaces as a notice.
     pub async fn run_command(&self, command: &str) {
         self.send_command(command).await;
+        let _ = self.status_tx.send(Status::Thinking);
     }
 
     pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
@@ -467,6 +486,8 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     commands_tx: Arc<watch::Sender<Vec<SlashCommand>>>,
     context_tx: Arc<watch::Sender<Option<u32>>>,
+    permission_mode: Arc<Mutex<PermissionMode>>,
+    stdin: Arc<tokio::sync::Mutex<ChildStdin>>,
     cwd: PathBuf,
 ) -> AbortHandle {
     // Clears the streaming partial and tells viewers the live message is gone (committed / ended).
@@ -539,16 +560,39 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     let _ = status_tx.send(status);
                 }
                 Dispatch::Approval(approval, input) => {
-                    // A tool needs approval: park it (for the response + snapshot), announce it, and
-                    // mark the tab waiting on the user.
-                    if let Ok(mut map) = pending.lock() {
-                        map.insert(
-                            approval.id.clone(),
-                            Pending { approval: approval.clone(), input },
-                        );
+                    // Enforce the permission mode on our side (the CLI routes every tool here): bypass
+                    // allows everything, auto-accept allows edits. Otherwise surface it to the user.
+                    let mode = permission_mode.lock().map(|m| *m).unwrap_or_default();
+                    let auto_allow = match mode {
+                        PermissionMode::BypassPermissions => true,
+                        PermissionMode::AcceptEdits => is_edit_tool(&approval.name),
+                        _ => false,
+                    };
+                    if auto_allow {
+                        let response = json!({
+                            "type": "control_response",
+                            "response": {
+                                "subtype": "success",
+                                "request_id": approval.id,
+                                "response": { "behavior": "allow", "updatedInput": input },
+                            },
+                        })
+                        .to_string();
+                        let mut guard = stdin.lock().await;
+                        let _ = guard.write_all(response.as_bytes()).await;
+                        let _ = guard.write_all(b"\n").await;
+                        let _ = guard.flush().await;
+                    } else {
+                        // Park it (for the response + snapshot), announce it, and mark the tab waiting.
+                        if let Ok(mut map) = pending.lock() {
+                            map.insert(
+                                approval.id.clone(),
+                                Pending { approval: approval.clone(), input },
+                            );
+                        }
+                        let _ = approval_tx.send(approval);
+                        let _ = status_tx.send(Status::WaitingInput);
                     }
-                    let _ = approval_tx.send(approval);
-                    let _ = status_tx.send(Status::WaitingInput);
                 }
                 Dispatch::Commands(names) => {
                     // Annotate each command with the provider's description (built-in map + custom
@@ -709,6 +753,11 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
         }
         _ => Dispatch::None,
     }
+}
+
+/// Whether a tool is a file edit (auto-allowed in `acceptEdits` mode). Covers Claude's edit tools.
+fn is_edit_tool(name: &str) -> bool {
+    matches!(name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Update")
 }
 
 /// Renders a `can_use_tool` request as a `ToolApproval` by reusing the provider's transcript parser:

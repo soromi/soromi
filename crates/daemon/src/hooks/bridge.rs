@@ -129,7 +129,13 @@ pub fn deliver(invocation: &Invocation) {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 
+    // Only report for a process Soromi launched: `SOROMI_SESSION` is the marker. Our hooks live in a
+    // possibly-shared Claude config (`~/.claude`), so other apps' Claude runs trigger them too — but
+    // without our session they're not ours to notify about. Bail silently.
     let session = std::env::var("SOROMI_SESSION").unwrap_or_default();
+    if session.is_empty() {
+        return;
+    }
     if let Ok(mut stream) = UnixStream::connect(super::socket_path()) {
         let line = serde_json::json!({
             "cue": invocation.cue,

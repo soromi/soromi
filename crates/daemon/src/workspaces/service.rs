@@ -550,8 +550,7 @@ impl WorkspaceService {
             spec.permission_mode = mode;
         }
         if let Some(chat) = self.manager.get_chat(session_id) {
-            let flag = mode.as_flag().to_string();
-            tokio::spawn(async move { chat.set_permission_mode(&flag).await });
+            tokio::spawn(async move { chat.set_permission_mode(mode).await });
         }
         self.persist();
         self.emit_change();
@@ -1211,8 +1210,17 @@ impl WorkspaceService {
             let cwd = cwd.clone();
             let env = env.clone();
             let id = session.id.clone();
+            let permission_mode = session.permission_mode;
             let spawned = self.manager.ensure_chat(&session.id, move || {
-                StreamJsonSession::spawn(provider, &program, &chat_args, &cwd, Some(&env), seed)
+                StreamJsonSession::spawn(
+                    provider,
+                    &program,
+                    &chat_args,
+                    &cwd,
+                    Some(&env),
+                    seed,
+                    permission_mode,
+                )
             });
             if let Ok(sess) = spawned {
                 self.watch_chat(workspace, &id, &sess);

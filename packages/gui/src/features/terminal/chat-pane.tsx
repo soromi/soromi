@@ -98,6 +98,7 @@ export function ChatPane({
         contextTokens={summary?.context_tokens ?? null}
         contextLimit={contextLimit}
         onCommand={(command) => transport.send({ type: 'chat-command', session, command })}
+        draftKey={session}
         canLoadEarlier={canLoadEarlier}
         onLoadEarlier={() =>
           transport.send({
