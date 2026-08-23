@@ -76,7 +76,11 @@ fn parse_user(value: &Value) -> Vec<ChatEvent> {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 let result = truncate(&result_text(block.get("content")), MAX_BODY);
-                events.push(ChatEvent::ToolResult { id, ok, text: result });
+                events.push(ChatEvent::ToolResult {
+                    id,
+                    ok,
+                    text: result,
+                });
             }
             Some("text") => {
                 if let Some(chunk) = block.get("text").and_then(Value::as_str) {
@@ -115,7 +119,10 @@ fn file_from_block(block: &Value) -> Option<ChatFile> {
         return None;
     }
     Some(ChatFile {
-        media_type: source.get("media_type").and_then(Value::as_str)?.to_string(),
+        media_type: source
+            .get("media_type")
+            .and_then(Value::as_str)?
+            .to_string(),
         data: source.get("data").and_then(Value::as_str)?.to_string(),
         filename: None,
     })
@@ -155,7 +162,9 @@ fn tag_inner<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
 /// Renders a logged slash-command message (`<command-name>/model</command-name>` plus optional
 /// `<command-args>`) as its invocation, e.g. `/model opus`. `None` if it isn't a command message.
 fn command_invocation(text: &str) -> Option<String> {
-    let name = tag_inner(text, "command-name")?.trim().trim_start_matches('/');
+    let name = tag_inner(text, "command-name")?
+        .trim()
+        .trim_start_matches('/');
     if name.is_empty() {
         return None;
     }
@@ -389,7 +398,10 @@ mod tests {
             parse_line(
                 r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":"hi"}}"#
             ),
-            vec![ChatEvent::User { text: "hi".into(), files: Vec::new() }]
+            vec![ChatEvent::User {
+                text: "hi".into(),
+                files: Vec::new()
+            }]
         );
     }
 

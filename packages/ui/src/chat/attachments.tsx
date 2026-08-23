@@ -48,11 +48,59 @@ export type FileKind = 'image' | 'pdf' | 'code' | 'text' | 'audio' | 'video' | '
 // Extensions worth recognizing when the MIME type is missing or generic (agents often send
 // `application/octet-stream` for source files).
 const CODE_EXTENSIONS = new Set([
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'rs', 'go', 'py', 'rb', 'java', 'kt', 'swift', 'c', 'h',
-  'cc', 'cpp', 'hpp', 'cs', 'php', 'sh', 'bash', 'zsh', 'sql', 'html', 'css', 'scss', 'vue', 'svelte',
-  'json', 'yaml', 'yml', 'toml', 'xml', 'lua', 'dart', 'ex', 'exs', 'scala', 'clj',
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'rs',
+  'go',
+  'py',
+  'rb',
+  'java',
+  'kt',
+  'swift',
+  'c',
+  'h',
+  'cc',
+  'cpp',
+  'hpp',
+  'cs',
+  'php',
+  'sh',
+  'bash',
+  'zsh',
+  'sql',
+  'html',
+  'css',
+  'scss',
+  'vue',
+  'svelte',
+  'json',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'lua',
+  'dart',
+  'ex',
+  'exs',
+  'scala',
+  'clj',
 ])
-const TEXT_EXTENSIONS = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'env', 'ini', 'cfg', 'conf'])
+const TEXT_EXTENSIONS = new Set([
+  'txt',
+  'md',
+  'mdx',
+  'log',
+  'csv',
+  'tsv',
+  'env',
+  'ini',
+  'cfg',
+  'conf',
+])
 const ARCHIVE_EXTENSIONS = new Set(['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'])
 
 function extensionOf(filename?: string): string {
@@ -120,7 +168,10 @@ function decodeText(base64: string): string {
 }
 
 /** Icon + accent per kind — the visual language that tells formats apart at a glance. */
-const KIND_META: Record<Exclude<FileKind, 'image'>, { icon: ComponentType<{ className?: string }>; accent: string }> = {
+const KIND_META: Record<
+  Exclude<FileKind, 'image'>,
+  { icon: ComponentType<{ className?: string }>; accent: string }
+> = {
   pdf: { icon: FileText, accent: 'text-[#e08585]' },
   code: { icon: FileCode, accent: 'text-[var(--soromi-accent)]' },
   text: { icon: FileText, accent: 'text-[#8fa2c4]' },
@@ -156,7 +207,9 @@ export function FilePreview({ file }: { file: ChatFile }) {
       <div className="flex items-center gap-2">
         <Icon className={`h-4 w-4 flex-none ${accent}`} />
         <span className="min-w-0 truncate text-[12.5px] text-[var(--soromi-text-dim)]">{name}</span>
-        {size && <span className="flex-none text-[11px] text-[var(--soromi-text-faint)]">{size}</span>}
+        {size && (
+          <span className="flex-none text-[11px] text-[var(--soromi-text-faint)]">{size}</span>
+        )}
       </div>
       {snippet && (
         <pre className="max-h-24 max-w-[360px] overflow-hidden whitespace-pre-wrap break-words rounded-md bg-[var(--soromi-bg-hover)] px-2 py-1.5 text-[11.5px] leading-[1.45] text-[var(--soromi-text-faint)] [font-family:var(--soromi-font-mono)]">

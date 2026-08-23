@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noSvgWithoutTitle: decorative glyphs — aria-hidden is set via the shared `iconProps` spread, which biome can't see through.
 // Small stroked glyphs for the Settings left-nav and the appearance toggle (inline so there are no
 // icon assets to hunt for). 18px by default; the sun/moon override to 16px.
 

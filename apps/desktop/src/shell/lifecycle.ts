@@ -2,10 +2,10 @@
 // window's close handler, the daemon's exit handler, and the quit IPC all coordinate through this so
 // closing the window keeps the daemon alive but a real quit tears everything down.
 
-let quitting = false;
+let quitting = false
 
-export const isQuitting = (): boolean => quitting;
+export const isQuitting = (): boolean => quitting
 
 export const markQuitting = (): void => {
-  quitting = true;
-};
+  quitting = true
+}

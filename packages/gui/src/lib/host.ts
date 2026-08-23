@@ -12,9 +12,7 @@ type ElectronHost = {
   openExternal: (url: string) => void
   revealInFinder: (path: string) => void
   focusWindow: () => Promise<void>
-  onNotificationClick: (
-    handler: (workspace: string | null, session: string | null) => void,
-  ) => void
+  onNotificationClick: (handler: (workspace: string | null, session: string | null) => void) => void
   showNotification: (
     title: string,
     body: string,

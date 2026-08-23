@@ -3,14 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  cn,
-} from '@soromi/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -132,7 +125,7 @@ function CreateSpaceForm() {
       </div>
 
       <div className="flex flex-col gap-2.5">
-        <label className={LABEL}>Folders</label>
+        <span className={LABEL}>Folders</span>
         {folderInputs.map((folder, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
           <div key={index} className="flex items-center gap-2.5">
@@ -141,10 +134,7 @@ function CreateSpaceForm() {
                 <FolderIcon />
               </span>
               <input
-                className={cn(
-                  FIELD,
-                  'pl-[38px] text-[13px] [font-family:var(--soromi-font-mono)]',
-                )}
+                className={cn(FIELD, 'pl-[38px] text-[13px] [font-family:var(--soromi-font-mono)]')}
                 placeholder="/path/to/folder"
                 value={folder}
                 onChange={(event) => updateFolder(index, event.target.value)}
@@ -210,7 +200,7 @@ function CreateSpaceForm() {
 
       <div className="grid grid-cols-2 gap-5">
         <div className="flex flex-col gap-2">
-          <label className={LABEL}>Agent</label>
+          <span className={LABEL}>Agent</span>
           <Select value={agent} onValueChange={(value) => value && setAgent(value)}>
             <SelectTrigger className={TRIGGER}>
               <SelectValue>
@@ -230,7 +220,7 @@ function CreateSpaceForm() {
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-3">
-            <label className={LABEL}>Account</label>
+            <span className={LABEL}>Account</span>
             <button
               type="button"
               className="cursor-pointer appearance-none border-none bg-transparent font-semibold text-[13px] text-[var(--soromi-accent)] hover:underline"
@@ -274,8 +264,8 @@ function CreateSpaceForm() {
         disabled={!root}
         className="cursor-pointer appearance-none border-none bg-transparent text-center font-semibold text-[14px] text-[var(--soromi-accent)] hover:underline disabled:cursor-not-allowed disabled:text-[var(--soromi-text-faint)] disabled:no-underline"
       >
-        Import a <span className="[font-family:var(--soromi-font-mono)]">soromi.space.json</span> from
-        this folder
+        Import a <span className="[font-family:var(--soromi-font-mono)]">soromi.space.json</span>{' '}
+        from this folder
       </button>
     </div>
   )

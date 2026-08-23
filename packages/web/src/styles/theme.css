@@ -32,6 +32,8 @@ body {
    full width goes to terminal columns. Overrides the desktop-oriented 12px scrollbar styling in
    the shared terminal surface. */
 .xterm-viewport::-webkit-scrollbar {
+  /* biome-ignore lint/complexity/noImportantStyles: intentional override of the shared terminal scrollbar on touch. */
   width: 0 !important;
+  /* biome-ignore lint/complexity/noImportantStyles: intentional override of the shared terminal scrollbar on touch. */
   height: 0 !important;
 }

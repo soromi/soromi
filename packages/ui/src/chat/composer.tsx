@@ -1,22 +1,9 @@
-import { Paperclip } from 'lucide-react'
-import {
-  type MouseEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { Paperclip, Square } from 'lucide-react'
+import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 //Components
-import {
-  InputGroup,
-  InputGroupAddon,
-} from '../components/ui/input-group'
-import {
-  PromptInputButton,
-  PromptInputSubmit,
-} from '../components/ai-elements/prompt-input'
+import { InputGroup, InputGroupAddon } from '../components/ui/input-group'
+import { PromptInputButton, PromptInputSubmit } from '../components/ai-elements/prompt-input'
 import { ModelSelect } from './model-select'
 import { PermissionSelect } from './permission-select'
 import { RichTextInput } from './rich-input'
@@ -91,7 +78,6 @@ export function Composer({
   const hasContent = !empty
 
   // Restore this session's saved draft on mount (a chat switch remounts the pane).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: restore once per session mount.
   useEffect(() => {
     const draft = draftKey ? drafts.get(draftKey) : undefined
     if (draft && draft.length > 0) richRef.current?.loadDraft(draft)
@@ -110,14 +96,19 @@ export function Composer({
     if (draftKey) drafts.delete(draftKey)
   }
 
-  // While the agent is working, an empty composer's button interrupts the turn; with content typed it
-  // stays a send button so the message steers the turn instead. Idle, it's always a plain submit.
-  const stopMode = working && !hasContent
-  const onSubmitButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+  const onSendClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault()
-    if (stopMode) onStop?.()
-    else submit()
+    submit()
   }
+  const onStopClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    onStop?.()
+  }
+  // The Stop button is shown whenever the agent is working — a persistent cancel that's also the
+  // clearest "it's busy" signal right where you're typing (the transcript's working indicator is easy
+  // to miss). Send stays available so a typed follow-up can still steer the running turn.
+  const showStop = working && !!onStop
+  const showSend = !working || hasContent
 
   return (
     <div ref={slash.containerRef} className="relative">
@@ -148,11 +139,13 @@ export function Composer({
         <InputGroupAddon align="block-end" className="justify-between gap-1">
           <div className="flex flex-1 items-center gap-1">
             <PromptInputButton
+              size="icon-xs"
+              className="rounded-md"
               onClick={() => richRef.current?.openFileDialog()}
               title="Attach files"
               disabled={disabled}
             >
-              <Paperclip />
+              <Paperclip className="size-4" />
             </PromptInputButton>
             {onModel && <ModelSelect model={model} effort={effort} onChange={onModel} />}
             {onPermissionMode && (
@@ -168,11 +161,27 @@ export function Composer({
               </span>
             )}
           </div>
-          <PromptInputSubmit
-            status={stopMode ? 'streaming' : 'ready'}
-            onClick={onSubmitButtonClick}
-            disabled={disabled}
-          />
+          <div className="flex items-center gap-1">
+            {showStop && (
+              <button
+                type="button"
+                onClick={onStopClick}
+                title="Stop the agent (Esc)"
+                className="flex size-6 flex-none cursor-pointer appearance-none items-center justify-center rounded-md border border-[var(--soromi-border)] bg-transparent text-[var(--soromi-text-dim)] transition-colors hover:border-[#e08585] hover:text-[#e08585]"
+              >
+                <Square className="size-3 fill-current" />
+              </button>
+            )}
+            {showSend && (
+              <PromptInputSubmit
+                size="icon-xs"
+                className="rounded-md"
+                status="ready"
+                onClick={onSendClick}
+                disabled={disabled || !hasContent}
+              />
+            )}
+          </div>
         </InputGroupAddon>
       </InputGroup>
     </div>

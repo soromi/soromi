@@ -1,7 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use soromi_protocol::{AgentUsage, ChatEvent, Status};
+use soromi_protocol::{AgentUsage, ChatEvent, SlashCommand, Status};
 
 use super::{Provider, UsageAuthState};
 
@@ -134,6 +134,16 @@ impl Provider for Claude {
     fn describe_command(&self, name: &str, cwd: &Path) -> Option<String> {
         commands::describe(name, cwd)
     }
+
+    fn default_commands(&self, cwd: &Path) -> Vec<SlashCommand> {
+        commands::defaults(cwd)
+            .into_iter()
+            .map(|name| SlashCommand {
+                description: commands::describe(&name, cwd),
+                name,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -179,11 +189,19 @@ mod tests {
 
     #[test]
     fn headless_args_request_bidirectional_stream_json() {
-        let args = Claude.headless_stream_json_args().expect("claude has a headless mode");
+        let args = Claude
+            .headless_stream_json_args()
+            .expect("claude has a headless mode");
         // Non-interactive, stream-json both directions, with partial (streaming) messages.
         assert!(args.contains(&"-p".to_string()));
-        assert!(args.windows(2).any(|w| w == ["--input-format", "stream-json"]));
-        assert!(args.windows(2).any(|w| w == ["--output-format", "stream-json"]));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--input-format", "stream-json"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--output-format", "stream-json"])
+        );
         assert!(args.contains(&"--include-partial-messages".to_string()));
     }
 }

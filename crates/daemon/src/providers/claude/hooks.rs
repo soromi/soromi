@@ -132,6 +132,11 @@ mod tests {
         assert!(stop.iter().any(|e| e["hooks"][0]["args"][0] == "hook"));
         assert_eq!(root["hooks"]["Notification"].as_array().unwrap().len(), 1);
         // The stale PermissionRequest hook is gone.
-        assert!(root["hooks"]["PermissionRequest"].as_array().unwrap().is_empty());
+        assert!(
+            root["hooks"]["PermissionRequest"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 }

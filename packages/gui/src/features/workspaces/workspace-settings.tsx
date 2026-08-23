@@ -61,7 +61,6 @@ const NAV = [
   { id: 'danger', label: 'Danger zone', icon: <WarningIcon />, danger: true },
 ]
 
-
 /** Full-page workspace settings: section nav, folders, agent accounts, instructions, danger zone. */
 export function WorkspaceSettings({ workspace }: { workspace: string }) {
   const transport = useTransport()
@@ -396,7 +395,9 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
               <div className="overflow-hidden rounded-[14px] border border-[rgb(224_133_133/0.28)] bg-[rgb(224_133_133/0.05)]">
                 <div className="flex items-center justify-between gap-4 border-[rgb(224_133_133/0.18)] border-b px-[18px] py-4">
                   <div className="min-w-0">
-                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">Export workspace</div>
+                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">
+                      Export workspace
+                    </div>
                     <div className="mt-0.5 text-[12.5px] text-[var(--soromi-text-faint)]">
                       Write <span className={MONO}>soromi.space.json</span> to the workspace root.
                     </div>
@@ -411,7 +412,9 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                 </div>
                 <div className="flex items-center justify-between gap-4 px-[18px] py-4">
                   <div className="min-w-0">
-                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">Delete workspace</div>
+                    <div className="text-[13.5px] text-[var(--soromi-text-dim)]">
+                      Delete workspace
+                    </div>
                     <div className="mt-0.5 text-[12.5px] text-[var(--soromi-text-faint)]">
                       Removes it and stops its agents. This can't be undone.
                     </div>

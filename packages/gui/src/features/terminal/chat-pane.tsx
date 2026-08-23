@@ -85,9 +85,7 @@ export function ChatPane({
           transport.send({ type: 'chat-approval-response', session, id, allow })
         }
         permissionMode={permissionMode}
-        onPermissionMode={(mode) =>
-          transport.send({ type: 'chat-permission-mode', session, mode })
-        }
+        onPermissionMode={(mode) => transport.send({ type: 'chat-permission-mode', session, mode })}
         model={summary?.model ?? null}
         effort={summary?.effort ?? null}
         onModel={(model, effort) =>

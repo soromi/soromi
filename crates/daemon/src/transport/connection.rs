@@ -150,11 +150,7 @@ impl Connection {
                     tokio::spawn(async move { chat.interrupt().await });
                 }
             }
-            ClientMessage::ChatApprovalResponse {
-                session,
-                id,
-                allow,
-            } => {
+            ClientMessage::ChatApprovalResponse { session, id, allow } => {
                 // Allow/deny a pending tool approval — the same control gate as driving the agent.
                 if self.hub.is_controller(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
@@ -333,7 +329,9 @@ impl Connection {
             ClientMessage::SetFocused { focused } => self.hub.set_focused(focused),
             // The Electron shell renders banners itself: forward notifications to it as `Notify`
             // messages (while it stays subscribed, the daemon skips the OS notifier).
-            ClientMessage::NotificationsNative { enabled } => self.set_notifications_native(enabled),
+            ClientMessage::NotificationsNative { enabled } => {
+                self.set_notifications_native(enabled)
+            }
             ClientMessage::Attach { session } => self.attach(&session),
             ClientMessage::Input { session, data } => {
                 // Only the controlling viewport drives the terminal.

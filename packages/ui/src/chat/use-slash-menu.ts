@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 //Types
 import type { SlashCommand } from '@soromi/protocol'
@@ -57,12 +57,15 @@ export function useSlashMenu(
   const open = matches.length > 0 && !dismissed
   const selectedIndex = Math.min(selected, Math.max(0, matches.length - 1))
 
-  const apply = (command: SlashCommand) => {
-    // Trailing space so the user can type arguments right after the command.
-    write(`/${command.name} `)
-    setValue(`/${command.name} `)
-    setDismissed(true)
-  }
+  const apply = useCallback(
+    (command: SlashCommand) => {
+      // Trailing space so the user can type arguments right after the command.
+      write(`/${command.name} `)
+      setValue(`/${command.name} `)
+      setDismissed(true)
+    },
+    [write],
+  )
 
   // Navigation must run before the textarea's own key handling (its Enter submits the form), so we
   // intercept in the capture phase on the container and stop the event when we consume it.
@@ -86,7 +89,7 @@ export function useSlashMenu(
     }
     node.addEventListener('keydown', onKeyDown, true)
     return () => node.removeEventListener('keydown', onKeyDown, true)
-  }, [open, matches, selectedIndex])
+  }, [open, matches, selectedIndex, apply])
 
   return {
     containerRef,

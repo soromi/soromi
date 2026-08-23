@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use soromi_protocol::{
-    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode, PermissionMode,
-    ProviderConfig, ServerMessage, SessionMode, SessionSummary, SlashCommand, Status, SubAgent,
-    WorkspaceSummary,
+    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
+    PermissionMode, ProviderConfig, ServerMessage, SessionMode, SessionSummary, SlashCommand,
+    Status, SubAgent, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {

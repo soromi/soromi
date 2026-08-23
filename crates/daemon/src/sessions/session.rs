@@ -409,6 +409,7 @@ impl Drop for Session {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
     provider: Option<&'static dyn Provider>,

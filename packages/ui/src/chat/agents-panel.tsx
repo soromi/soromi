@@ -56,13 +56,7 @@ const Chevron = ({ open }: { open: boolean }) => (
  * live sub-agents (`Task` calls). Collapsed by default; expands to a list of each sub-agent with its
  * elapsed time. `onStop` interrupts the turn (stopping the background work).
  */
-export function AgentsPanel({
-  subagents,
-  onStop,
-}: {
-  subagents: SubAgent[]
-  onStop?: () => void
-}) {
+export function AgentsPanel({ subagents, onStop }: { subagents: SubAgent[]; onStop?: () => void }) {
   const [open, setOpen] = useState(false)
   const now = useNowSeconds(subagents.length > 0)
 
@@ -103,10 +97,7 @@ export function AgentsPanel({
               className="flex items-center gap-3 py-2.5"
             >
               <span
-                className={cn(
-                  'h-2 w-2 flex-none rounded-full',
-                  DOT[agent.status] ?? DOT.thinking,
-                )}
+                className={cn('h-2 w-2 flex-none rounded-full', DOT[agent.status] ?? DOT.thinking)}
               />
               <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--soromi-text)]">
                 {agent.name}

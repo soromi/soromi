@@ -94,7 +94,14 @@ function readFile(file: File): Promise<ChatFile> {
  * `image-2`, …). `getMessage` walks the nodes in order to produce the sent text + ordered files.
  */
 export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(function RichTextInput(
-  { placeholder, disabled, className, accept = 'image/*,application/pdf,text/*', onChange, onSubmit },
+  {
+    placeholder,
+    disabled,
+    className,
+    accept = 'image/*,application/pdf,text/*',
+    onChange,
+    onSubmit,
+  },
   ref,
 ) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -106,9 +113,12 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
   // Last caret position seen inside the editor, so async file reads still insert where the user was.
   const savedRange = useRef<Range | null>(null)
   const [isEmpty, setIsEmpty] = useState(true)
-  const [preview, setPreview] = useState<{ file: ChatFile; rect: DOMRect } | null>(null)
+  const [preview, setPreview] = useState<{ id: string; file: ChatFile; rect: DOMRect } | null>(null)
 
-  const newId = () => `att-${(seqRef.current += 1)}`
+  const newId = useCallback(() => {
+    seqRef.current += 1
+    return `att-${seqRef.current}`
+  }, [])
 
   // ---- serialization -------------------------------------------------------
 
@@ -163,7 +173,8 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
       if (!id) continue
       present.add(id)
       const kind = (chip.dataset.kind as ChipKind) ?? 'file'
-      const index = (counts[kind] += 1)
+      counts[kind] += 1
+      const index = counts[kind]
       chip.dataset.index = String(index)
       const label = chip.querySelector('[data-chip-label]')
       if (label) label.textContent = `${kind}-${index}`
@@ -172,6 +183,9 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
     for (const id of filesRef.current.keys()) {
       if (!present.has(id)) filesRef.current.delete(id)
     }
+    // Dismiss a hover preview whose chip was removed (e.g. sent/deleted) — no pointerout fires when a
+    // chip is torn out programmatically, so the popup would otherwise stay stuck on screen.
+    setPreview((current) => (current && !present.has(current.id) ? null : current))
     const message = getMessage()
     const empty = message.text.length === 0 && message.files.length === 0
     setIsEmpty(empty)
@@ -256,7 +270,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
           /* a file that fails to read is simply skipped */
         })
     },
-    [buildChip, insertNodes, reconcile],
+    [buildChip, insertNodes, newId, reconcile],
   )
 
   // ---- draft persistence ---------------------------------------------------
@@ -320,7 +334,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
       }
       reconcile()
     },
-    [buildChip, reconcile],
+    [buildChip, newId, reconcile],
   )
 
   // ---- imperative handle ---------------------------------------------------
@@ -333,6 +347,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
         if (editorRef.current) editorRef.current.textContent = ''
         filesRef.current.clear()
         savedRange.current = null
+        setPreview(null)
         reconcile()
       },
       addFiles,
@@ -427,7 +442,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
   const showPreview = (chip: HTMLElement) => {
     const id = chip.dataset.attId
     const file = id ? filesRef.current.get(id) : undefined
-    if (file) setPreview({ file, rect: chip.getBoundingClientRect() })
+    if (id && file) setPreview({ id, file, rect: chip.getBoundingClientRect() })
   }
   const onPointerOver = (event: PointerEvent<HTMLDivElement>) => {
     const chip = chipFrom(event.target)
@@ -454,9 +469,11 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
         aria-label="Attach files"
         onChange={onFileInputChange}
       />
+      {/* biome-ignore lint/a11y/useSemanticElements: a contenteditable rich editor (inline chips) can't be a native input/textarea. */}
       <div
         ref={editorRef}
         role="textbox"
+        tabIndex={0}
         aria-multiline="true"
         aria-label="Message"
         contentEditable={!disabled}
@@ -466,6 +483,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
         onPaste={onPaste}
         onPointerOver={onPointerOver}
         onPointerOut={onPointerOut}
+        onPointerLeave={() => setPreview(null)}
         onClick={onClick}
         className={[
           'relative max-h-48 min-h-[3.5rem] w-full overflow-y-auto whitespace-pre-wrap break-words px-3.5 py-3 text-[14px] leading-[1.5] outline-none',
@@ -477,10 +495,7 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
           .join(' ')}
       />
       {preview &&
-        createPortal(
-          <ChipPreview file={preview.file} rect={preview.rect} />,
-          document.body,
-        )}
+        createPortal(<ChipPreview file={preview.file} rect={preview.rect} />, document.body)}
     </div>
   )
 })

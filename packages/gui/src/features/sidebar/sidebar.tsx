@@ -368,27 +368,27 @@ export function Sidebar() {
       {searchOpen && (
         <div className="flex-none px-3 pb-3">
           <div className="flex items-center gap-2 rounded-lg border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-app)] px-[9px]">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#565656"
-            strokeWidth="1.9"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="flex-none"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M21 21l-4.3-4.3" />
-          </svg>
-          <input
-            value={wsQuery}
-            onChange={(e) => setWsQuery(e.currentTarget.value)}
-            placeholder="Jump to workspace"
-            className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#565656]"
-          />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#565656"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="flex-none"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+            <input
+              value={wsQuery}
+              onChange={(e) => setWsQuery(e.currentTarget.value)}
+              placeholder="Jump to workspace"
+              className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#565656]"
+            />
           </div>
         </div>
       )}
@@ -516,7 +516,9 @@ function TopBar() {
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setAboutOpen(true)}>About Soromi</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openExternal(REPO_URL)}>Help &amp; docs</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openExternal(REPO_URL)}>
+            Help &amp; docs
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={openSettings}>
             Settings

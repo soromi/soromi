@@ -101,7 +101,9 @@ export function ModelSelect({
                 <Check className="h-3 w-3 text-[var(--soromi-accent)]" />
               )}
             </span>
-            <span className="text-[11px] text-[var(--soromi-text-faint)]">{option.description}</span>
+            <span className="text-[11px] text-[var(--soromi-text-faint)]">
+              {option.description}
+            </span>
           </DropdownMenuItem>
         ))}
 

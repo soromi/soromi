@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::{AgentUsage, ChatEvent, Status};
+use soromi_protocol::{AgentUsage, ChatEvent, SlashCommand, Status};
 
 pub mod claude;
 pub mod codex;
@@ -111,7 +111,12 @@ pub trait Provider: Send + Sync {
     /// The on-disk transcript for a conversation id, if this provider keeps one. Used to seed the
     /// headless chat backend with the prior conversation on resume (the CLI doesn't replay it on
     /// stdout). `None` means the provider has no readable transcript.
-    fn transcript_path(&self, _config_dir: &Path, _cwd: &str, _id: &str) -> Option<std::path::PathBuf> {
+    fn transcript_path(
+        &self,
+        _config_dir: &Path,
+        _cwd: &str,
+        _id: &str,
+    ) -> Option<std::path::PathBuf> {
         None
     }
 
@@ -160,6 +165,14 @@ pub trait Provider: Send + Sync {
     /// the provider surfaces no descriptions (the menu shows the bare command name).
     fn describe_command(&self, _name: &str, _cwd: &Path) -> Option<String> {
         None
+    }
+
+    /// The slash commands to expose *before* the agent's own list arrives. Claude only sends its
+    /// `system/init` (the full command list) after the first turn, so without a seed the chat `/`
+    /// menu is empty until you've sent a message. This is that seed — the built-in commands plus any
+    /// project/user custom ones — replaced by the real list once the agent reports it. Default: none.
+    fn default_commands(&self, _cwd: &Path) -> Vec<SlashCommand> {
+        Vec::new()
     }
 }
 

@@ -168,7 +168,15 @@ impl WorkspaceService {
     /// a missing/unreadable transcript is simply skipped (that tab keeps the "New session" subtitle).
     fn seed_restored_activity(&self) {
         // Snapshot what we need under the lock, then do the file reads without holding it.
-        let sessions: Vec<(String, String, String, String, Vec<String>, Vec<AgentAccount>)> = {
+        #[allow(clippy::type_complexity)]
+        let sessions: Vec<(
+            String,
+            String,
+            String,
+            String,
+            Vec<String>,
+            Vec<AgentAccount>,
+        )> = {
             let metadata = self.metadata.lock().unwrap();
             metadata
                 .iter()
@@ -188,7 +196,9 @@ impl WorkspaceService {
         };
 
         for (id, agent, convo_id, root, folders, accounts) in sessions {
-            let full_command = parse_agent_command(&agent).map(|p| p.command).unwrap_or_default();
+            let full_command = parse_agent_command(&agent)
+                .map(|p| p.command)
+                .unwrap_or_default();
             let Some(provider) = crate::providers::provider(basename(&full_command)) else {
                 continue;
             };
@@ -709,17 +719,18 @@ impl WorkspaceService {
                             // Live activity wins; otherwise a restored tab shows its last transcript
                             // activity so it doesn't read as "New session".
                             activity: live.as_ref().and_then(|s| s.activity()).or_else(|| {
-                                self.restored_activity.lock().unwrap().get(&session.id).cloned()
+                                self.restored_activity
+                                    .lock()
+                                    .unwrap()
+                                    .get(&session.id)
+                                    .cloned()
                             }),
                             mode: session.mode,
                             permission_mode: session.permission_mode,
                             model: session.model.clone(),
                             effort: session.effort.clone(),
                             context_tokens: live_chat.as_ref().and_then(|s| s.context_tokens()),
-                            commands: live_chat
-                                .as_ref()
-                                .map(|s| s.commands())
-                                .unwrap_or_default(),
+                            commands: live_chat.as_ref().map(|s| s.commands()).unwrap_or_default(),
                         }
                     })
                     .collect();
@@ -1273,13 +1284,12 @@ impl WorkspaceService {
                         let _ = change_tx.send(());
 
                         // Notify on entering an attention state, unless muted or the user is here.
-                        if let Some(cue) = cue_for(status) {
-                            if !notifications.is_muted(&workspace)
-                                && !focused.load(Ordering::Relaxed)
-                            {
-                                sound.play(cue);
-                                notifications.fire(&workspace, Some(&session_id), cue_text(cue));
-                            }
+                        if let Some(cue) = cue_for(status)
+                            && !notifications.is_muted(&workspace)
+                            && !focused.load(Ordering::Relaxed)
+                        {
+                            sound.play(cue);
+                            notifications.fire(&workspace, Some(&session_id), cue_text(cue));
                         }
                     }
                     // The running sub-agents changed (a Task spawned or finished): re-broadcast so the
@@ -1465,19 +1475,25 @@ fn read_transcript_seed(
 /// A short "last activity" for a restored session's subtitle, from the tail of its transcript: the
 /// last thing the agent said (its first line, trimmed) or, failing that, the last tool it ran.
 /// Parses from the end and stops at the first renderable event, so it reads only a few lines.
-fn last_transcript_activity(path: &Path, provider: &dyn crate::providers::Provider) -> Option<String> {
+fn last_transcript_activity(
+    path: &Path,
+    provider: &dyn crate::providers::Provider,
+) -> Option<String> {
     use soromi_protocol::ChatEvent;
     let contents = fs::read_to_string(path).ok()?;
     for line in contents.lines().rev() {
         for event in provider.parse_transcript_line(line).into_iter().rev() {
             match event {
                 ChatEvent::Assistant { text } => {
-                    let summary = truncate_chars(text.trim().lines().next().unwrap_or("").trim(), 60);
+                    let summary =
+                        truncate_chars(text.trim().lines().next().unwrap_or("").trim(), 60);
                     if !summary.is_empty() {
                         return Some(summary);
                     }
                 }
-                ChatEvent::Tool { name, path, body, .. } => {
+                ChatEvent::Tool {
+                    name, path, body, ..
+                } => {
                     return Some(tool_activity(&name, path.as_deref(), body.as_deref()));
                 }
                 _ => {}
@@ -1491,7 +1507,10 @@ fn last_transcript_activity(path: &Path, provider: &dyn crate::providers::Provid
 fn tool_activity(name: &str, path: Option<&str>, body: Option<&str>) -> String {
     let file = || path.and_then(|p| p.rsplit('/').next()).unwrap_or("a file");
     match name {
-        "Bash" => format!("Ran {}", truncate_chars(body.and_then(|b| b.lines().next()).unwrap_or("").trim(), 40)),
+        "Bash" => format!(
+            "Ran {}",
+            truncate_chars(body.and_then(|b| b.lines().next()).unwrap_or("").trim(), 40)
+        ),
         "Edit" | "MultiEdit" => format!("Edited {}", file()),
         "Write" => format!("Wrote {}", file()),
         "Read" => format!("Read {}", file()),

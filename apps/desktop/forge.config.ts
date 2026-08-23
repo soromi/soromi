@@ -1,49 +1,35 @@
-import { execFileSync } from "node:child_process";
-import { join } from "node:path";
-import type { ForgeConfig } from "@electron-forge/shared-types";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
-import { MakerZIP } from "@electron-forge/maker-zip";
-import { MakerDeb } from "@electron-forge/maker-deb";
-import { MakerRpm } from "@electron-forge/maker-rpm";
-import { VitePlugin } from "@electron-forge/plugin-vite";
-import { FusesPlugin } from "@electron-forge/plugin-fuses";
-import { FuseV1Options, FuseVersion } from "@electron/fuses";
+import type { ForgeConfig } from '@electron-forge/shared-types'
+import { MakerSquirrel } from '@electron-forge/maker-squirrel'
+import { MakerZIP } from '@electron-forge/maker-zip'
+import { MakerDeb } from '@electron-forge/maker-deb'
+import { MakerRpm } from '@electron-forge/maker-rpm'
+import { VitePlugin } from '@electron-forge/plugin-vite'
+import { FusesPlugin } from '@electron-forge/plugin-fuses'
+import { FuseV1Options, FuseVersion } from '@electron/fuses'
 
 const config: ForgeConfig = {
   packagerConfig: {
-    name: "Soromi",
-    appBundleId: "io.soromi.desktop",
-    icon: "icons/icon",
+    name: 'Soromi',
+    appBundleId: 'dev.soromi.app',
+    icon: 'icons/icon',
     asar: true,
     // Bundled beside the app (Contents/Resources): the standalone daemon binary the shell spawns,
     // and the built frontend the shell serves. Build them first: `pnpm build:daemon:release` and
     // `pnpm build:gui`. Loaded from `process.resourcesPath` in `main.ts` when packaged.
-    extraResource: [
-      "../../target/release/soromi-daemon",
-      "../../packages/gui/dist",
-    ],
-  },
-  rebuildConfig: {},
-  hooks: {
-    // Ad-hoc sign the bundle after the fuses plugin flips fuses (which invalidates any earlier
-    // signature). A signed bundle is what lets macOS render our native notifications with the Soromi
-    // icon. Can't use `osxSign` — it runs before fuses, so the flip breaks it.
-    postPackage: async (_forgeConfig, options) => {
-      if (options.platform !== "darwin") return;
-
-      for (const dir of options.outputPaths) {
-        const app = join(dir, "Soromi.app");
-        execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], {
-          stdio: "inherit",
-        });
-      }
+    extraResource: ['../../target/release/soromi-daemon', '../../packages/gui/dist'],
+    osxSign: {},
+    osxNotarize: {
+      appleId: process.env.APPLE_ID as string,
+      appleIdPassword: process.env.APPLE_PASSWORD as string,
+      teamId: process.env.APPLE_TEAM_ID as string,
     },
   },
+  rebuildConfig: {},
   makers: [
-    new MakerSquirrel({ setupIcon: "icons/icon.ico" }),
-    new MakerZIP({}, ["darwin"]),
-    new MakerRpm({ options: { icon: "icons/icon.png" } }),
-    new MakerDeb({ options: { icon: "icons/icon.png" } }),
+    new MakerSquirrel({ setupIcon: 'icons/icon.ico' }),
+    new MakerZIP({}, ['darwin']),
+    new MakerRpm({ options: { icon: 'icons/icon.png' } }),
+    new MakerDeb({ options: { icon: 'icons/icon.png' } }),
   ],
   plugins: [
     new VitePlugin({
@@ -52,14 +38,14 @@ const config: ForgeConfig = {
       // so gui keeps its own Vite config (React, Tailwind, workspace aliases) untouched.
       build: [
         {
-          entry: "src/main.ts",
-          config: "vite.main.config.ts",
-          target: "main",
+          entry: 'src/main.ts',
+          config: 'vite.main.config.ts',
+          target: 'main',
         },
         {
-          entry: "src/preload.ts",
-          config: "vite.preload.config.ts",
-          target: "preload",
+          entry: 'src/preload.ts',
+          config: 'vite.preload.config.ts',
+          target: 'preload',
         },
       ],
       renderer: [],
@@ -78,6 +64,6 @@ const config: ForgeConfig = {
       [FuseV1Options.OnlyLoadAppFromAsar]: false,
     }),
   ],
-};
+}
 
-export default config;
+export default config

@@ -16,7 +16,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{broadcast, watch};
 use tokio::task::AbortHandle;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use soromi_protocol::{
     ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval,
@@ -59,14 +59,20 @@ pub struct StreamJsonSession {
     interrupted: Arc<AtomicBool>,
     // Sub-agents (`Task` calls) running this turn, keyed by tool id. Mirrors the PTY session's
     // tracking so a chat tab can show "N agents working in the background" over its composer.
+    // Kept to co-own the state/senders alongside the reader task (which drives them via clones); read
+    // from `self` only through the `_rx` receivers, so the fields themselves are otherwise unused.
+    #[allow(dead_code)]
     active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    #[allow(dead_code)]
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     subagents_rx: watch::Receiver<Vec<SubAgent>>,
     // The provider's slash commands ("actions"), captured once from the `system/init` frame. Empty
     // for providers that don't expose them (the capability signal for the chat `/` menu).
+    #[allow(dead_code)]
     commands_tx: Arc<watch::Sender<Vec<SlashCommand>>>,
     commands_rx: watch::Receiver<Vec<SlashCommand>>,
     // Tokens the conversation currently occupies (last turn's prompt + cache), for the context meter.
+    #[allow(dead_code)]
     context_tx: Arc<watch::Sender<Option<u32>>>,
     context_rx: watch::Receiver<Option<u32>>,
     // The permission mode we enforce on `can_use_tool` requests: the CLI routes every tool here (our
@@ -131,7 +137,10 @@ impl StreamJsonSession {
         let active_subagents = Arc::new(Mutex::new(Vec::new()));
         let (subagents_tx, subagents_rx) = watch::channel(Vec::new());
         let subagents_tx = Arc::new(subagents_tx);
-        let (commands_tx, commands_rx) = watch::channel(Vec::new());
+        // Seed the `/` menu with the provider's built-in commands so it works before the first turn —
+        // Claude only reports its full list in `system/init`, which it emits only after a turn is sent.
+        // The real list (with plugin/MCP commands) replaces this once it arrives.
+        let (commands_tx, commands_rx) = watch::channel(provider.default_commands(Path::new(cwd)));
         let commands_tx = Arc::new(commands_tx);
         let (context_tx, context_rx) = watch::channel(None);
         let context_tx = Arc::new(context_tx);
@@ -220,8 +229,8 @@ impl StreamJsonSession {
             }
             Value::Array(blocks)
         };
-        let envelope =
-            json!({ "type": "user", "message": { "role": "user", "content": content } }).to_string();
+        let envelope = json!({ "type": "user", "message": { "role": "user", "content": content } })
+            .to_string();
         {
             let mut stdin = self.stdin.lock().await;
             let _ = stdin.write_all(envelope.as_bytes()).await;
@@ -298,7 +307,8 @@ impl StreamJsonSession {
     /// Sent as commands, not recorded in the chat log — they change session state, not the transcript.
     /// `model` `None` resets to the provider default.
     pub async fn set_model(&self, model: Option<&str>, effort: Option<&str>) {
-        self.send_command(&format!("/model {}", model.unwrap_or("default"))).await;
+        self.send_command(&format!("/model {}", model.unwrap_or("default")))
+            .await;
         if let Some(effort) = effort {
             self.send_command(&format!("/effort {effort}")).await;
         }
@@ -459,6 +469,7 @@ impl Drop for StreamJsonSession {
 }
 
 /// Follows the child's stdout, classifying each JSON frame and publishing the results.
+#[allow(clippy::too_many_arguments)]
 fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     stdout: R,
     provider: &'static dyn Provider,
@@ -524,11 +535,11 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     }
                     // Update the running sub-agent set (a `Task` starts one, its result ends it) so the
                     // chat tab can show them over the composer. Only republish on a real change.
-                    if let Ok(mut active) = active_subagents.lock() {
-                        if track_subagents(&mut active, &events) {
-                            let list = active.iter().map(|(_, agent)| agent.clone()).collect();
-                            let _ = subagents_tx.send(list);
-                        }
+                    if let Ok(mut active) = active_subagents.lock()
+                        && track_subagents(&mut active, &events)
+                    {
+                        let list = active.iter().map(|(_, agent)| agent.clone()).collect();
+                        let _ = subagents_tx.send(list);
                     }
                     for event in events {
                         let _ = chat_tx.send(event);
@@ -576,7 +587,10 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         if let Ok(mut map) = pending.lock() {
                             map.insert(
                                 approval.id.clone(),
-                                Pending { approval: approval.clone(), input },
+                                Pending {
+                                    approval: approval.clone(),
+                                    input,
+                                },
                             );
                         }
                         let _ = approval_tx.send(approval);
@@ -631,7 +645,9 @@ fn file_block(file: &ChatFile) -> Value {
 /// Decodes standard base64 (the data-URL payload) to UTF-8 text, or `None` if it isn't valid text.
 fn base64_text(data: &str) -> Option<String> {
     use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
     String::from_utf8(bytes).ok()
 }
 
@@ -704,8 +720,12 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
         }
         // Compaction ran (context freed up), auto when the window filled or from `/compact`. Surface
         // it as a system notice so the conversation shows what happened.
-        Some("system") if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") => {
-            let auto = value.pointer("/compact_metadata/trigger").and_then(Value::as_str)
+        Some("system")
+            if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
+        {
+            let auto = value
+                .pointer("/compact_metadata/trigger")
+                .and_then(Value::as_str)
                 == Some("auto");
             let text = if auto {
                 "Context was full — automatically compacted to free space".to_string()
@@ -734,7 +754,8 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
         // A tool needs approval (`--permission-prompt-tool stdio`). Other control requests (the CLI's
         // reply to our `initialize`, etc.) are ignored.
         Some("control_request")
-            if value.pointer("/request/subtype").and_then(Value::as_str) == Some("can_use_tool") =>
+            if value.pointer("/request/subtype").and_then(Value::as_str)
+                == Some("can_use_tool") =>
         {
             let request_id = value
                 .get("request_id")
@@ -744,8 +765,14 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
                 .pointer("/request/tool_name")
                 .and_then(Value::as_str)
                 .unwrap_or("tool");
-            let input = value.pointer("/request/input").cloned().unwrap_or(Value::Null);
-            Dispatch::Approval(build_approval(provider, request_id, tool_name, &input), input)
+            let input = value
+                .pointer("/request/input")
+                .cloned()
+                .unwrap_or(Value::Null);
+            Dispatch::Approval(
+                build_approval(provider, request_id, tool_name, &input),
+                input,
+            )
         }
         _ => Dispatch::None,
     }
@@ -753,7 +780,10 @@ fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
 
 /// Whether a tool is a file edit (auto-allowed in `acceptEdits` mode). Covers Claude's edit tools.
 fn is_edit_tool(name: &str) -> bool {
-    matches!(name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Update")
+    matches!(
+        name,
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Update"
+    )
 }
 
 /// Renders a `can_use_tool` request as a `ToolApproval` by reusing the provider's transcript parser:
@@ -852,7 +882,10 @@ mod tests {
     #[test]
     fn system_stream_event_and_junk_frames_are_ignored() {
         assert!(matches!(
-            classify(r#"{"type":"system","subtype":"init","session_id":"s"}"#, claude()),
+            classify(
+                r#"{"type":"system","subtype":"init","session_id":"s"}"#,
+                claude()
+            ),
             Dispatch::None
         ));
         assert!(matches!(

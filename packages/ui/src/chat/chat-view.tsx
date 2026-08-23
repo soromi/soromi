@@ -13,7 +13,14 @@ import { WorkingIndicator } from './working-indicator'
 import { buildRows } from './rows'
 
 //Types
-import type { ChatEvent, ChatFile, PermissionMode, SlashCommand, SubAgent, ToolApproval } from '@soromi/protocol'
+import type {
+  ChatEvent,
+  ChatFile,
+  PermissionMode,
+  SlashCommand,
+  SubAgent,
+  ToolApproval,
+} from '@soromi/protocol'
 
 export interface ChatViewProps {
   /** The parsed transcript / stream events, newest last. */
@@ -179,6 +186,7 @@ export function ChatView({
     stick.current = distance < 60
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only — the observer reads live refs, not props/state.
   useEffect(() => {
     const content = contentRef.current
     if (!content) return

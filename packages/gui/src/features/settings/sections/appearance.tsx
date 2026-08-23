@@ -20,7 +20,9 @@ export function AppearanceSection() {
       <div className={SECTION_HEAD}>
         <div>
           <h2 className={H2}>Appearance</h2>
-          <p className={DESC}>Switch between light and dark. You can also toggle from the sidebar.</p>
+          <p className={DESC}>
+            Switch between light and dark. You can also toggle from the sidebar.
+          </p>
         </div>
       </div>
       <button

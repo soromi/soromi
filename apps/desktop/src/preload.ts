@@ -5,28 +5,28 @@
 //   - `window.__SOROMI_ELECTRON__` — the native platform calls `packages/gui/src/lib/host.ts` routes
 //     to when running under Electron. Each maps to an IPC handler in `main.ts`.
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron'
 
 /** Reads a `--name=value` argument passed via the window's `webPreferences.additionalArguments`. */
 function arg(name: string): string {
-  const prefix = `--${name}=`;
-  const found = process.argv.find((value) => value.startsWith(prefix));
-  return found ? found.slice(prefix.length) : '';
+  const prefix = `--${name}=`
+  const found = process.argv.find((value) => value.startsWith(prefix))
+  return found ? found.slice(prefix.length) : ''
 }
 
-contextBridge.exposeInMainWorld('__SOROMI_DAEMON_URL__', arg('soromi-daemon-url'));
-contextBridge.exposeInMainWorld('__SOROMI_VERSION__', arg('soromi-version'));
+contextBridge.exposeInMainWorld('__SOROMI_DAEMON_URL__', arg('soromi-daemon-url'))
+contextBridge.exposeInMainWorld('__SOROMI_VERSION__', arg('soromi-version'))
 
 contextBridge.exposeInMainWorld('__SOROMI_ELECTRON__', {
   quit: (): void => {
-    void ipcRenderer.invoke('quit');
+    void ipcRenderer.invoke('quit')
   },
   pickFolder: (title: string): Promise<string | null> => ipcRenderer.invoke('pick-folder', title),
   openExternal: (url: string): void => {
-    void ipcRenderer.invoke('open-external', url);
+    void ipcRenderer.invoke('open-external', url)
   },
   revealInFinder: (target: string): void => {
-    void ipcRenderer.invoke('reveal', target);
+    void ipcRenderer.invoke('reveal', target)
   },
   focusWindow: (): Promise<void> => ipcRenderer.invoke('focus-window'),
   showNotification: (
@@ -35,13 +35,13 @@ contextBridge.exposeInMainWorld('__SOROMI_ELECTRON__', {
     workspace: string | null,
     session: string | null,
   ): void => {
-    void ipcRenderer.invoke('notify', { title, body, workspace, session });
+    void ipcRenderer.invoke('notify', { title, body, workspace, session })
   },
   onNotificationClick: (
     handler: (workspace: string | null, session: string | null) => void,
   ): void => {
     ipcRenderer.on('notification-click', (_event, workspace, session) =>
       handler(workspace, session),
-    );
+    )
   },
-});
+})
