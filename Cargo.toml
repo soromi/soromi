@@ -5,4 +5,4 @@ members = ["crates/protocol", "crates/daemon"]
 # Single source of truth for the crate versions — kept in lockstep with the JS packages / app version
 # by `cargo release version` (run from `pnpm version-packages`). Crates set `version.workspace = true`.
 [workspace.package]
-version = "0.1.1"
+version = "1.0.0"

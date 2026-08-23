@@ -1,7 +1,7 @@
 {
   "name": "@soromi/desktop",
   "productName": "Soromi",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "The Soromi desktop app (Electron): a native shell that spawns the soromi-daemon and renders the shared gui.",
   "main": ".vite/build/main.js",
   "private": true,
