@@ -1,0 +1,45 @@
+name: Version
+
+# On every push to main, Changesets opens/updates a "Version Packages" PR that consumes the pending
+# changesets: it bumps every @soromi/* package + writes changelogs, and `cargo release version` (run
+# from `version-packages`) applies the same version to the Rust crates (Cargo.toml + Cargo.lock).
+# Merge that PR, then tag `vX.Y.Z` yourself — the Release workflow (release.yml) fires on `v*`.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # cargo-release applies the changeset-chosen version to the Rust crates during `version-packages`.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-release
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create / update the version PR
+        uses: changesets/action@v1
+        with:
+          version: pnpm run version-packages
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

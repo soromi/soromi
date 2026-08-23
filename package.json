@@ -1,6 +1,5 @@
 {
   "name": "soromi",
-  "version": "0.1.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.11.0",
@@ -24,11 +23,13 @@
     "dev:relay": "pnpm --filter @soromi/relay dev",
     "app:mac": "pnpm --filter @soromi/desktop package",
     "gen:protocol": "cargo test -p soromi-protocol --features ts",
-    "release": "bash scripts/release.sh",
+    "changeset": "changeset",
+    "version-packages": "changeset version && cargo release version $(node -p \"require('./apps/desktop/package.json').version\") --workspace --execute --no-confirm",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",
+    "@changesets/cli": "^2.27.1",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
