@@ -1,6 +1,7 @@
 import { memo } from 'react'
 
 //Components
+import { MessageAttachments } from './attachments'
 import { Markdown } from './markdown'
 import { Reasoning } from './reasoning'
 import { ToolCall } from './tool-call'
@@ -39,8 +40,9 @@ export const ChatRow = memo(function ChatRow({ row }: { row: Row }) {
   }
   if (row.kind === 'user') {
     return (
-      <div className="max-w-[85%] self-end rounded-2xl bg-[var(--soromi-bg-active)] px-3.5 py-2">
-        <Markdown>{row.text}</Markdown>
+      <div className="flex max-w-[85%] flex-col gap-2 self-end rounded-2xl bg-[var(--soromi-bg-active)] px-3.5 py-2">
+        <MessageAttachments files={row.files} />
+        {row.text && <Markdown>{row.text}</Markdown>}
       </div>
     )
   }

@@ -14,7 +14,7 @@ import { UsageWidget } from './usage-widget'
 /** The bottom status bar: usage + devices on the left, and the Terminal/Chat view toggle on the right. */
 export function StatusBar() {
   return (
-    <div className="z-[var(--z-status-bar)] flex h-[34px] flex-none items-center gap-1 bg-[var(--soromi-bg-shell)] px-6">
+    <div className="z-[var(--z-status-bar)] flex h-[28px] flex-none items-center gap-1 bg-[var(--soromi-bg-shell)] px-6">
       <UsageWidget />
       <DevicesWidget />
       <div className="flex-1" />

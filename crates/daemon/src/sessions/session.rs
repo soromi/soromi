@@ -702,6 +702,7 @@ mod tests {
             &mut active,
             &[ChatEvent::User {
                 text: "now do the next thing".into(),
+                files: Vec::new(),
             }],
         ));
         assert!(active.is_empty());
@@ -814,7 +815,7 @@ mod tests {
             if session
                 .chat_snapshot()
                 .iter()
-                .any(|event| matches!(event, ChatEvent::User { text } if text == "hi"))
+                .any(|event| matches!(event, ChatEvent::User { text, .. } if text == "hi"))
             {
                 found = true;
                 break;

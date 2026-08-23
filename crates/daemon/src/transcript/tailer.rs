@@ -87,8 +87,8 @@ mod tests {
         assert_eq!(
             collected,
             vec![
-                ChatEvent::User { text: "a".into() },
-                ChatEvent::User { text: "b".into() },
+                ChatEvent::User { text: "a".into(), files: Vec::new() },
+                ChatEvent::User { text: "b".into(), files: Vec::new() },
             ]
         );
         // The unterminated line stays buffered for the next read.

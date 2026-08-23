@@ -1,54 +1,36 @@
 import { Paperclip } from 'lucide-react'
-import { type MouseEvent, type ReactNode, useEffect } from 'react'
+import {
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 //Components
 import {
-  PromptInput,
-  PromptInputAttachment,
-  PromptInputAttachments,
-  PromptInputBody,
+  InputGroup,
+  InputGroupAddon,
+} from '../components/ui/input-group'
+import {
   PromptInputButton,
-  PromptInputFooter,
   PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  usePromptInputAttachments,
 } from '../components/ai-elements/prompt-input'
 import { ModelSelect } from './model-select'
 import { PermissionSelect } from './permission-select'
+import { RichTextInput } from './rich-input'
 import { SlashMenu } from './slash-menu'
 import { useSlashMenu } from './use-slash-menu'
 
 //Types
-import type { PromptInputMessage } from '../components/ai-elements/prompt-input'
+import type { RichDraft, RichInputHandle } from './rich-input'
 import type { ChatFile, PermissionMode, SlashCommand } from '@soromi/protocol'
 
-// Unsent composer text per session, kept outside React (the daemon owns the session, not the UI).
-// Switching chats unmounts the pane, so this preserves your draft across the remount, restoring it
-// when you come back and clearing it once the message is sent.
-const drafts = new Map<string, string>()
-
-/** Writes a value into the uncontrolled textarea so React/PromptInput see it, moving the caret last. */
-function writeTextarea(el: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  setter?.call(el, value)
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-  el.setSelectionRange(value.length, value.length)
-}
-
-/**
- * Attach button: opens the file picker directly from the click (a plain button, not a dropdown), so
- * WKWebView keeps the user gesture it needs to show the native picker. Reads files in-webview via the
- * `<input type="file">` + FileReader the PromptInput manages — no fs plugin or OS permission needed.
- */
-function AddFilesButton() {
-  const attachments = usePromptInputAttachments()
-  return (
-    <PromptInputButton onClick={() => attachments.openFileDialog()} title="Attach files">
-      <Paperclip />
-    </PromptInputButton>
-  )
-}
+// Unsent composer content per session, kept outside React (the daemon owns the session, not the UI).
+// Switching chats unmounts the pane, so this preserves your draft — text *and* inline attachment chips
+// — across the remount, restoring it when you come back and clearing it once the message is sent.
+const drafts = new Map<string, RichDraft>()
 
 export interface ComposerProps {
   disabled: boolean
@@ -68,16 +50,17 @@ export interface ComposerProps {
    * this session runs under. Absent hides the badge. */
   account?: string
   accountIcon?: ReactNode
-  /** Keys the unsent-text draft (the session id), so it's preserved across switching chats. */
+  /** Keys the unsent draft (the session id), so it's preserved across switching chats. */
   draftKey?: string
   /** Placeholder shown while the composer is disabled (defaults to the "take control" hint). */
   disabledLabel?: string
 }
 
 /**
- * The chat input: a native-form PromptInput (self-managed textarea + attachments) with a `/` command
- * menu, a permission-mode dropdown, and a send/stop button. Sending is injected via `onSend`; the
- * `/` menu behavior lives in `useSlashMenu` and its look in `SlashMenu`.
+ * The chat input: a rich contenteditable editor (`RichTextInput`) where attached images become atomic
+ * inline `[image-N]` chips in the prompt text (hover to preview), plus a `/` command menu, a model and
+ * permission dropdown, and a send/stop button. Sending is injected via `onSend`; the `/` menu behavior
+ * lives in `useSlashMenu` and its look in `SlashMenu`.
  */
 export function Composer({
   disabled,
@@ -96,51 +79,44 @@ export function Composer({
   draftKey,
   disabledLabel = 'Take control to reply',
 }: ComposerProps) {
+  const richRef = useRef<RichInputHandle>(null)
+  const [empty, setEmpty] = useState(true)
+
+  // The `/` menu writes the picked command back into the editor via this stable callback.
+  const write = useCallback((value: string) => richRef.current?.setText(value), [])
   // The `/` command menu (state + keyboard) lives in this hook; it also tracks the composer text.
   // Gated off while a turn runs so a follow-up starting with "/" isn't hijacked.
-  const slash = useSlashMenu(commands, !working)
-  // With text, the button sends a follow-up (steers the turn); empty while working it stops.
-  const hasText = slash.value.trim().length > 0
+  const slash = useSlashMenu(commands, !working, write)
+  // With content, the button sends a follow-up (steers the turn); empty while working it stops.
+  const hasContent = !empty
 
   // Restore this session's saved draft on mount (a chat switch remounts the pane).
   // biome-ignore lint/correctness/useExhaustiveDependencies: restore once per session mount.
   useEffect(() => {
     const draft = draftKey ? drafts.get(draftKey) : undefined
-    const el = slash.containerRef.current?.querySelector('textarea')
-    if (draft && el) writeTextarea(el, draft)
+    if (draft && draft.length > 0) richRef.current?.loadDraft(draft)
   }, [draftKey])
 
-  // The real PromptInput self-manages the textarea + attachments (native form) and resets after
-  // submit. We read out the text and turn each file's data URL into base64 `data` for the agent.
-  const submit = (message: PromptInputMessage) => {
+  const submit = () => {
+    if (disabled) return
+    const message = richRef.current?.getMessage() ?? { text: '', files: [] }
     const text = message.text.trim()
-    const files: ChatFile[] = (message.files ?? [])
-      .map((file) => {
-        const url = file.url ?? ''
-        const comma = url.indexOf(',')
-        return {
-          mediaType: file.mediaType ?? 'application/octet-stream',
-          data: comma >= 0 ? url.slice(comma + 1) : '',
-          filename: file.filename,
-        }
-      })
-      .filter((file) => file.data)
+    if (!text && message.files.length === 0) return
+    // Sending while the agent is working steers the current turn (the daemon queues the message on the
+    // agent's stdin) — it does not interrupt.
+    onSend(text, message.files)
     slash.reset()
+    richRef.current?.clear()
     if (draftKey) drafts.delete(draftKey)
-    if ((!text && files.length === 0) || disabled) return
-    // Sending while the agent is working steers the current turn (the daemon queues the message on
-    // the agent's stdin) — it does not interrupt. An empty submit while working can't reach here.
-    onSend(text, files)
   }
 
-  // While the agent is working, an empty composer's button interrupts the turn; with text typed it
+  // While the agent is working, an empty composer's button interrupts the turn; with content typed it
   // stays a send button so the message steers the turn instead. Idle, it's always a plain submit.
-  const stopMode = working && !hasText
+  const stopMode = working && !hasContent
   const onSubmitButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
-    if (stopMode) {
-      event.preventDefault()
-      onStop?.()
-    }
+    event.preventDefault()
+    if (stopMode) onStop?.()
+    else submit()
   }
 
   return (
@@ -153,29 +129,31 @@ export function Composer({
           onHover={slash.setSelected}
         />
       )}
-      <PromptInput onSubmit={submit} accept="image/*,application/pdf,text/*" multiple>
-        <PromptInputBody>
-          <PromptInputAttachments>
-            {(attachment) => <PromptInputAttachment data={attachment} />}
-          </PromptInputAttachments>
-          <PromptInputTextarea
-            placeholder={
-              disabled ? disabledLabel : working ? 'Send a follow-up…' : placeholder
+      <InputGroup className="!h-auto flex-col items-stretch overflow-hidden">
+        <RichTextInput
+          ref={richRef}
+          disabled={disabled}
+          placeholder={disabled ? disabledLabel : working ? 'Send a follow-up…' : placeholder}
+          onSubmit={submit}
+          onChange={({ text, empty: isEmpty }) => {
+            setEmpty(isEmpty)
+            slash.handleChange(text)
+            if (draftKey) {
+              const draft = richRef.current?.toDraft() ?? []
+              if (draft.length > 0) drafts.set(draftKey, draft)
+              else drafts.delete(draftKey)
             }
-            disabled={disabled}
-            onChange={(event) => {
-              const next = event.currentTarget.value
-              slash.handleChange(next)
-              if (draftKey) {
-                if (next) drafts.set(draftKey, next)
-                else drafts.delete(draftKey)
-              }
-            }}
-          />
-        </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools>
-            <AddFilesButton />
+          }}
+        />
+        <InputGroupAddon align="block-end" className="justify-between gap-1">
+          <div className="flex flex-1 items-center gap-1">
+            <PromptInputButton
+              onClick={() => richRef.current?.openFileDialog()}
+              title="Attach files"
+              disabled={disabled}
+            >
+              <Paperclip />
+            </PromptInputButton>
             {onModel && <ModelSelect model={model} effort={effort} onChange={onModel} />}
             {onPermissionMode && (
               <PermissionSelect mode={permissionMode} onChange={onPermissionMode} />
@@ -189,14 +167,14 @@ export function Composer({
                 {account}
               </span>
             )}
-          </PromptInputTools>
+          </div>
           <PromptInputSubmit
             status={stopMode ? 'streaming' : 'ready'}
             onClick={onSubmitButtonClick}
             disabled={disabled}
           />
-        </PromptInputFooter>
-      </PromptInput>
+        </InputGroupAddon>
+      </InputGroup>
     </div>
   )
 }

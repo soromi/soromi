@@ -1,6 +1,6 @@
 //Types
 import type { ToolItem, ToolResult } from './tool-call'
-import type { ChatEvent } from '@soromi/protocol'
+import type { ChatEvent, ChatFile } from '@soromi/protocol'
 
 // Consecutive tool calls at or above this count collapse into one expandable group; fewer render
 // inline so a quick 1-2 step read still shows at a glance.
@@ -8,7 +8,8 @@ const GROUP_MIN = 3
 
 /** One rendered line of the conversation: a text bubble, a single tool card, or a folded tool group. */
 export type Row =
-  | { key: string; kind: 'user' | 'assistant' | 'thinking' | 'notice'; text: string }
+  | { key: string; kind: 'user'; text: string; files: ChatFile[] }
+  | { key: string; kind: 'assistant' | 'thinking' | 'notice'; text: string }
   | { key: string; kind: 'tool'; tool: ToolItem }
   | { key: string; kind: 'tool-group'; tools: ToolItem[] }
 
@@ -66,7 +67,11 @@ export function buildRows(events: ChatEvent[]): Row[] {
       return
     }
     flush()
-    rows.push({ key, kind: event.kind, text: event.text })
+    if (event.kind === 'user') {
+      rows.push({ key, kind: 'user', text: event.text, files: event.files ?? [] })
+    } else {
+      rows.push({ key, kind: event.kind, text: event.text })
+    }
   })
   flush()
   return rows

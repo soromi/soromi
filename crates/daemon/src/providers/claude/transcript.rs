@@ -4,7 +4,7 @@
 //! a reflowing chat and the sidebar can show per-tab activity and sub-agents.
 
 use serde_json::Value;
-use soromi_protocol::ChatEvent;
+use soromi_protocol::{ChatEvent, ChatFile};
 
 /// Long tool bodies and results are clipped so a single transcript line can't flood the wire.
 const MAX_BODY: usize = 4000;
@@ -19,6 +19,17 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
 }
 
 fn parse_value(value: &Value) -> Vec<ChatEvent> {
+    // A sub-agent's (Task/Agent) own conversation is interleaved into the stream/transcript, tagged
+    // `isSidechain: true` (transcript) or with a non-null `parent_tool_use_id` (stream). Those belong
+    // to the sub-agent, not the main thread — skip them so they don't render as chat bubbles. The
+    // sub-agent still surfaces via the main thread's `Agent` tool call (and the agents-working panel).
+    if value.get("isSidechain").and_then(Value::as_bool) == Some(true)
+        || value
+            .get("parent_tool_use_id")
+            .is_some_and(|id| !id.is_null())
+    {
+        return Vec::new();
+    }
     match value.get("type").and_then(Value::as_str) {
         Some("user") => parse_user(value),
         Some("assistant") => parse_assistant(value),
@@ -42,31 +53,72 @@ fn parse_user(value: &Value) -> Vec<ChatEvent> {
         return vec![ChatEvent::Notice { text }];
     }
 
-    // A plain prompt is a string; tool results come back as an array of blocks.
+    // A plain prompt is a string; tool results / a prompt-with-attachments come as an array of blocks.
     if let Some(text) = content.as_str() {
         return user_text(text).into_iter().collect();
     }
 
-    content
-        .as_array()
-        .map(|blocks| blocks.iter().filter_map(parse_user_block).collect())
-        .unwrap_or_default()
+    let Some(blocks) = content.as_array() else {
+        return Vec::new();
+    };
+
+    // Tool-result messages map block-by-block; a prompt (text + image/document blocks) folds into one
+    // `User` event carrying its attachments, so the bubble can show inline thumbnails.
+    let mut events = Vec::new();
+    let mut text = String::new();
+    let mut files = Vec::new();
+    for block in blocks {
+        match block.get("type").and_then(Value::as_str) {
+            Some("tool_result") => {
+                let id = str_field(block, "tool_use_id");
+                let ok = !block
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let result = truncate(&result_text(block.get("content")), MAX_BODY);
+                events.push(ChatEvent::ToolResult { id, ok, text: result });
+            }
+            Some("text") => {
+                if let Some(chunk) = block.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(chunk);
+                }
+            }
+            Some("image") | Some("document") => {
+                if let Some(file) = file_from_block(block) {
+                    files.push(file);
+                }
+            }
+            _ => {}
+        }
+    }
+    // Emit the prompt (if any) ahead of tool results; a message is one or the other, so they don't mix.
+    let trimmed = text.trim();
+    if !trimmed.is_empty() || !files.is_empty() {
+        events.insert(
+            0,
+            ChatEvent::User {
+                text: trimmed.to_string(),
+                files,
+            },
+        );
+    }
+    events
 }
 
-fn parse_user_block(block: &Value) -> Option<ChatEvent> {
-    match block.get("type").and_then(Value::as_str) {
-        Some("tool_result") => {
-            let id = str_field(block, "tool_use_id");
-            let ok = !block
-                .get("is_error")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let text = truncate(&result_text(block.get("content")), MAX_BODY);
-            Some(ChatEvent::ToolResult { id, ok, text })
-        }
-        Some("text") => user_text(block.get("text").and_then(Value::as_str).unwrap_or("")),
-        _ => None,
+/// A base64 image/document content block as a `ChatFile` (for inline attachment thumbnails).
+fn file_from_block(block: &Value) -> Option<ChatFile> {
+    let source = block.get("source")?;
+    if source.get("type").and_then(Value::as_str) != Some("base64") {
+        return None;
     }
+    Some(ChatFile {
+        media_type: source.get("media_type").and_then(Value::as_str)?.to_string(),
+        data: source.get("data").and_then(Value::as_str)?.to_string(),
+        filename: None,
+    })
 }
 
 fn user_text(text: &str) -> Option<ChatEvent> {
@@ -89,6 +141,7 @@ fn user_text(text: &str) -> Option<ChatEvent> {
     }
     Some(ChatEvent::User {
         text: text.to_string(),
+        files: Vec::new(),
     })
 }
 
@@ -284,7 +337,8 @@ mod tests {
         assert_eq!(
             events,
             vec![ChatEvent::User {
-                text: "hello".into()
+                text: "hello".into(),
+                files: Vec::new(),
             }]
         );
     }
@@ -315,6 +369,27 @@ mod tests {
             vec![ChatEvent::Notice {
                 text: "Set model to Opus 5".into()
             }]
+        );
+    }
+
+    #[test]
+    fn sub_agent_sidechain_messages_are_skipped() {
+        // Transcript marker.
+        assert!(parse_line(
+            r#"{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"inner"}]}}"#
+        )
+        .is_empty());
+        // Stream marker (a non-null parent_tool_use_id).
+        assert!(parse_line(
+            r#"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":"the sub-agent prompt"}}"#
+        )
+        .is_empty());
+        // A normal message (parent_tool_use_id null) still parses.
+        assert_eq!(
+            parse_line(
+                r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":"hi"}}"#
+            ),
+            vec![ChatEvent::User { text: "hi".into(), files: Vec::new() }]
         );
     }
 

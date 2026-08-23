@@ -252,7 +252,7 @@ export function ChatView({
           <ContextBanner
             tokens={contextTokens}
             limit={contextLimit}
-            busy={working || commandPending !== null}
+            busy={commandPending !== null}
             pending={commandPending}
             onCompact={() => runCommand('/compact')}
             onClear={() => runCommand('/clear')}

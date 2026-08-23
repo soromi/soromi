@@ -1,5 +1,8 @@
 import { useState } from 'react'
 
+//Components
+import { ConfirmDialog } from '../components/ui/alert-dialog'
+
 const Spinner = () => (
   <svg
     width="14"
@@ -39,6 +42,7 @@ export function ContextBanner({
   onClear: () => void
 }) {
   const [dismissed, setDismissed] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const pct = Math.min(100, Math.round((tokens / limit) * 100))
 
   if (pct < 80 || dismissed) return null
@@ -61,12 +65,24 @@ export function ContextBanner({
       <button
         type="button"
         disabled={busy}
-        onClick={onClear}
+        onClick={() => setConfirmClear(true)}
         className="flex-none inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border border-[var(--soromi-border)] bg-transparent px-3 py-1.5 font-medium text-[13px] text-[var(--soromi-text-dim)] transition-colors hover:border-[#e08585] hover:text-[#e08585] disabled:cursor-default disabled:opacity-50"
       >
         {pending === '/clear' && <Spinner />}
         Clear
       </button>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear conversation?"
+        destructive
+        confirmLabel="Clear"
+        onConfirm={onClear}
+      >
+        This wipes the entire conversation history — the agent loses all prior context and starts
+        fresh. This can't be undone. (To just free up space, use Compact instead.)
+      </ConfirmDialog>
       <button
         type="button"
         onClick={() => setDismissed(true)}

@@ -34,7 +34,7 @@ export function AppLayout() {
   if (!ready) return <Splash />
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-[var(--soromi-bg-shell)] text-[var(--soromi-text)]">
+    <div className="fixed inset-0 flex flex-col bg-[var(--soromi-bg-shell)] pb-2 text-[var(--soromi-text)]">
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         {/* One rounded panel floating on the shell (design), inset 8px top/right/bottom. The content

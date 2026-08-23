@@ -765,8 +765,12 @@ pub struct ChatFile {
     ts(export, export_to = "../../../packages/protocol/src/generated/")
 )]
 pub enum ChatEvent {
-    /// A prompt the user sent.
-    User { text: String },
+    /// A prompt the user sent, with any attached files (images/documents) for inline thumbnails.
+    User {
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<ChatFile>,
+    },
     /// Assistant prose (markdown).
     Assistant { text: String },
     /// Assistant reasoning, shown collapsed.

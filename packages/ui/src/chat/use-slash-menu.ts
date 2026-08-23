@@ -10,18 +10,8 @@ function slashQuery(value: string): string | null {
   return match ? match[1] : null
 }
 
-/** Writes a value into the uncontrolled textarea so React/PromptInput see it, then moves the caret
- * to the end and refocuses. */
-function setTextareaValue(el: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  setter?.call(el, value)
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-  el.setSelectionRange(value.length, value.length)
-  el.focus()
-}
-
 export interface SlashMenuState {
-  /** Attach to the composer wrapper: locates the textarea and scopes key interception. */
+  /** Attach to the composer wrapper: scopes the capture-phase key interception. */
   containerRef: React.RefObject<HTMLDivElement>
   /** Current composer text (tracked here so the caller derives things like "has text"). */
   value: string
@@ -44,10 +34,15 @@ export interface SlashMenuState {
 /**
  * Drives the chat composer's `/` command menu: tracks the composer text, filters `commands` by the
  * typed query, and intercepts navigation keys (arrows / enter / tab / escape) in the capture phase so
- * they beat the textarea's own Enter-to-submit. `enabled` gates it off (e.g. while a turn runs). Pure
- * behavior; the menu's look lives in `SlashMenu`.
+ * they beat the editor's own Enter-to-submit. `enabled` gates it off (e.g. while a turn runs). `write`
+ * replaces the composer text with the picked command (editor-agnostic — the caller owns the input).
+ * Pure behavior; the menu's look lives in `SlashMenu`.
  */
-export function useSlashMenu(commands: SlashCommand[], enabled: boolean): SlashMenuState {
+export function useSlashMenu(
+  commands: SlashCommand[],
+  enabled: boolean,
+  write: (value: string) => void,
+): SlashMenuState {
   const containerRef = useRef<HTMLDivElement>(null)
   const [value, setValue] = useState('')
   const [selected, setSelected] = useState(0)
@@ -63,9 +58,9 @@ export function useSlashMenu(commands: SlashCommand[], enabled: boolean): SlashM
   const selectedIndex = Math.min(selected, Math.max(0, matches.length - 1))
 
   const apply = (command: SlashCommand) => {
-    const el = containerRef.current?.querySelector('textarea')
     // Trailing space so the user can type arguments right after the command.
-    if (el) setTextareaValue(el, `/${command.name} `)
+    write(`/${command.name} `)
+    setValue(`/${command.name} `)
     setDismissed(true)
   }
 

@@ -236,24 +236,12 @@ impl StreamJsonSession {
             }
             let _ = self.delta_tx.send(String::new());
         }
-        // Note attachments in the local bubble (the wire content has the binary; the transcript view
-        // just shows the user typed text + what they attached).
-        let recorded = if files.is_empty() {
-            text.to_string()
-        } else {
-            let names: Vec<String> = files
-                .iter()
-                .enumerate()
-                .map(|(i, f)| f.filename.clone().unwrap_or_else(|| format!("file {}", i + 1)))
-                .collect();
-            let note = format!("[attached: {}]", names.join(", "));
-            if text.is_empty() {
-                note
-            } else {
-                format!("{text}\n\n{note}")
-            }
+        // Record the prompt with its attachments so the bubble can show inline thumbnails (the wire
+        // content already carries the binary; the CLI doesn't echo the prompt back).
+        let event = ChatEvent::User {
+            text: text.to_string(),
+            files: files.to_vec(),
         };
-        let event = ChatEvent::User { text: recorded };
         if let Ok(mut log) = self.chat_log.lock() {
             log.push(event.clone());
         }
@@ -508,9 +496,10 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            // The context meter: the last turn's prompt + cached tokens are the current context size.
-            if let Some(tokens) = context_tokens_from(&line) {
-                let _ = context_tx.send(Some(tokens));
+            // The context meter: a turn's prompt + cached tokens are the current context size; a
+            // compaction frees it (reset to unknown until the next turn reports the new, smaller size).
+            if let Some(update) = context_update_from(&line) {
+                let _ = context_tx.send(update);
             }
             match classify(&line, provider) {
                 Dispatch::Chat(events) => {
@@ -522,7 +511,7 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     let events: Vec<ChatEvent> = events
                         .into_iter()
                         .map(|event| match event {
-                            ChatEvent::User { text }
+                            ChatEvent::User { text, .. }
                                 if interrupted.swap(false, Ordering::Relaxed) =>
                             {
                                 ChatEvent::Notice { text }
@@ -662,20 +651,27 @@ enum Dispatch {
     None,
 }
 
-/// The context size an `assistant` frame reports: its request's prompt tokens plus the cached tokens
-/// (`usage.input_tokens + cache_read_input_tokens + cache_creation_input_tokens`). The latest one is
-/// the conversation's current context occupancy. `None` for non-assistant frames or missing usage.
-fn context_tokens_from(line: &str) -> Option<u32> {
+/// A context-meter update from a frame: `Some(Some(n))` = the current context size (an `assistant`
+/// frame's prompt + cached tokens); `Some(None)` = a `compact_boundary` freed the context (reset until
+/// the next turn reports the new, smaller size); `None` = the frame carries nothing for the meter.
+fn context_update_from(line: &str) -> Option<Option<u32>> {
     let value: Value = serde_json::from_str(line).ok()?;
-    if value.get("type").and_then(Value::as_str) != Some("assistant") {
-        return None;
+    match value.get("type").and_then(Value::as_str) {
+        Some("assistant") => {
+            let usage = value.pointer("/message/usage")?;
+            let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+            let total = field("input_tokens")
+                + field("cache_read_input_tokens")
+                + field("cache_creation_input_tokens");
+            (total > 0).then_some(Some(total as u32))
+        }
+        Some("system")
+            if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
+        {
+            Some(None)
+        }
+        _ => None,
     }
-    let usage = value.pointer("/message/usage")?;
-    let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-    let total = field("input_tokens")
-        + field("cache_read_input_tokens")
-        + field("cache_creation_input_tokens");
-    (total > 0).then_some(total as u32)
 }
 
 /// Maps a stream-json frame to a `Dispatch`. The `assistant`/`user` frames are byte-for-byte the same
