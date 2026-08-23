@@ -7,6 +7,7 @@ name: Version
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
