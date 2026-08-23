@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-daemon"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-protocol"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
