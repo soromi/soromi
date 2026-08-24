@@ -80,6 +80,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEBUG: 'electron-forge:*,@electron/notarize*,@electron/osx-sign*,@electron/packager*'
         run: pnpm --filter @soromi/desktop make
 
       - name: Attach artifacts to the release
