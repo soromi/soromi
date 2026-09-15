@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use super::chat::ChatSession;
 use super::session::{Session, SessionOptions};
-use super::stream_json::StreamJsonSession;
 
 /// Owns the live sessions, one entry per tab, keyed by id. A tab is EITHER a PTY terminal or a
 /// headless chat (never both at once - a mode switch tears one down before spawning the other), so
@@ -10,7 +10,7 @@ use super::stream_json::StreamJsonSession;
 #[derive(Default)]
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
-    chat: Mutex<HashMap<String, Arc<StreamJsonSession>>>,
+    chat: Mutex<HashMap<String, Arc<ChatSession>>>,
 }
 
 impl SessionManager {
@@ -37,8 +37,8 @@ impl SessionManager {
     pub fn ensure_chat(
         &self,
         id: &str,
-        spawn: impl FnOnce() -> anyhow::Result<StreamJsonSession>,
-    ) -> anyhow::Result<Arc<StreamJsonSession>> {
+        spawn: impl FnOnce() -> anyhow::Result<ChatSession>,
+    ) -> anyhow::Result<Arc<ChatSession>> {
         let mut chat = self.chat.lock().unwrap();
         if let Some(existing) = chat.get(id) {
             return Ok(existing.clone());
@@ -48,7 +48,7 @@ impl SessionManager {
         Ok(session)
     }
 
-    pub fn get_chat(&self, id: &str) -> Option<Arc<StreamJsonSession>> {
+    pub fn get_chat(&self, id: &str) -> Option<Arc<ChatSession>> {
         self.chat.lock().unwrap().get(id).cloned()
     }
 

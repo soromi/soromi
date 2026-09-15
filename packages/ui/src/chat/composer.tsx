@@ -4,6 +4,7 @@ import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useSta
 //Components
 import { InputGroup, InputGroupAddon } from '../components/ui/input-group'
 import { PromptInputButton, PromptInputSubmit } from '../components/ai-elements/prompt-input'
+import { AgentSelect, type AgentOption } from './agent-select'
 import { ModelSelect } from './model-select'
 import { PermissionSelect } from './permission-select'
 import { RichTextInput } from './rich-input'
@@ -37,6 +38,13 @@ export interface ComposerProps {
    * this session runs under. Absent hides the badge. */
   account?: string
   accountIcon?: ReactNode
+  /** The agents this chat can switch to (Claude, Codex, …). With `onAgent` and more than one option,
+   * the account badge becomes a dropdown that switches the chat's agent. */
+  agentOptions?: AgentOption[]
+  /** The session's current agent (provider key), for the switcher's active state. */
+  agent?: string
+  /** Switches the chat to another agent — restarts it fresh under the new provider. */
+  onAgent?: (agent: string, account?: string) => void
   /** Keys the unsent draft (the session id), so it's preserved across switching chats. */
   draftKey?: string
   /** Placeholder shown while the composer is disabled (defaults to the "take control" hint). */
@@ -63,6 +71,9 @@ export function Composer({
   onModel,
   account,
   accountIcon,
+  agentOptions,
+  agent,
+  onAgent,
   draftKey,
   disabledLabel = 'Take control to reply',
 }: ComposerProps) {
@@ -147,18 +158,29 @@ export function Composer({
             >
               <Paperclip className="size-4" />
             </PromptInputButton>
-            {onModel && <ModelSelect model={model} effort={effort} onChange={onModel} />}
+            {onModel && (
+              <ModelSelect agent={agent} model={model} effort={effort} onChange={onModel} />
+            )}
             {onPermissionMode && (
               <PermissionSelect mode={permissionMode} onChange={onPermissionMode} />
             )}
-            {account && (
-              <span
-                title={`This session is signed in as the "${account}" account`}
-                className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--soromi-bg-hover)] px-2 py-1 font-medium text-[12px] text-[var(--soromi-text-dim)]"
-              >
-                {accountIcon}
-                {account}
-              </span>
+            {onAgent && agent ? (
+              <AgentSelect
+                agent={agent}
+                account={account}
+                options={agentOptions ?? []}
+                onChange={onAgent}
+              />
+            ) : (
+              account && (
+                <span
+                  title={`This session is signed in as the "${account}" account`}
+                  className="ml-auto flex items-center gap-1.5 rounded-md bg-[var(--soromi-bg-hover)] px-2 py-1 font-medium text-[12px] text-[var(--soromi-text-dim)]"
+                >
+                  {accountIcon}
+                  {account}
+                </span>
+              )
             )}
           </div>
           <div className="flex items-center gap-1">

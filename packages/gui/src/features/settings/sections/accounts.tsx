@@ -22,6 +22,7 @@ import {
 import { PROVIDERS } from '@/config/providers'
 
 //Icons
+import PencilSvg from '@/assets/icons/pencil.svg?react'
 import PlusSvg from '@/assets/icons/plus.svg?react'
 import TrashSvg from '@/assets/icons/trash.svg?react'
 
@@ -49,6 +50,9 @@ export function AccountsSection() {
   const [rows, setRows] = useState<ProviderRow[]>([{ provider: 'claude', configDir: '' }])
   const [formOpen, setFormOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  // The original name of the account being edited (null = the form is adding a new account). On save
+  // we upsert by name; a rename also removes the old profile.
+  const [editing, setEditing] = useState<string | null>(null)
 
   // Prepare each account's view data once, so the JSX map below only renders (no per-item logic).
   const accountRows = useMemo(
@@ -98,7 +102,27 @@ export function AccountsSection() {
     updateRow(index, { configDir: `~/.soromi/accounts/${account}/${rows[index].provider}` })
   }
 
-  const create = () => {
+  const resetForm = () => {
+    setEditing(null)
+    setName('')
+    setRows([{ provider: 'claude', configDir: '' }])
+  }
+  const startNew = () => {
+    resetForm()
+    setFormOpen(true)
+  }
+  const startEdit = (account: (typeof accountRows)[number]) => {
+    setEditing(account.name)
+    setName(account.name)
+    setRows(
+      account.providers.length > 0
+        ? account.providers.map((entry) => ({ provider: entry.provider, configDir: entry.dir }))
+        : [{ provider: 'claude', configDir: '' }],
+    )
+    setFormOpen(true)
+  }
+
+  const save = () => {
     const account = name.trim()
     if (!account) return
     const providers: AccountProfile['providers'] = {}
@@ -107,10 +131,11 @@ export function AccountsSection() {
       if (dir) providers[row.provider] = { configDir: dir }
     }
     if (Object.keys(providers).length === 0) return
+    // A rename writes to a new profile dir, so remove the old one.
+    if (editing && editing !== account) transport.send({ type: 'delete-account', name: editing })
     transport.send({ type: 'save-account', profile: { name: account, providers } })
-    setName('')
-    setRows([{ provider: 'claude', configDir: '' }])
     setFormOpen(false)
+    resetForm()
   }
 
   return (
@@ -142,6 +167,14 @@ export function AccountsSection() {
                   {account.providers.length === 1 ? 'provider' : 'providers'} connected
                 </div>
               </div>
+              <button
+                type="button"
+                className="inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-2.5 py-1.5 font-medium text-[var(--soromi-text-dim)] text-sm hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+                onClick={() => startEdit(account)}
+              >
+                <PencilSvg width={15} height={15} />
+                Edit
+              </button>
               <button
                 type="button"
                 className="inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-2.5 py-1.5 font-medium text-[#e08585] text-sm hover:bg-[rgb(224_133_133/0.1)]"
@@ -187,15 +220,21 @@ export function AccountsSection() {
         <button
           type="button"
           className="inline-flex cursor-pointer appearance-none items-center gap-2 self-start rounded-[10px] border-none bg-[var(--soromi-accent)] px-[18px] py-[11px] font-bold text-[13.5px] text-[var(--soromi-accent-on)] hover:bg-[#4bdb9a]"
-          onClick={() => setFormOpen(true)}
+          onClick={startNew}
         >
           <PlusSvg width={16} height={16} />
           Add account
         </button>
       </section>
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent title="New account" className="max-w-lg">
+      <Dialog
+        open={formOpen}
+        onOpenChange={(open) => {
+          setFormOpen(open)
+          if (!open) resetForm()
+        }}
+      >
+        <DialogContent title={editing ? 'Edit account' : 'New account'} className="max-w-lg">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="account-name">Name</Label>
@@ -259,8 +298,8 @@ export function AccountsSection() {
                 <PlusSvg width={14} height={14} />
                 Add provider
               </Button>
-              <Button onClick={create} disabled={!name.trim()}>
-                Save account
+              <Button onClick={save} disabled={!name.trim()}>
+                {editing ? 'Save changes' : 'Save account'}
               </Button>
             </div>
           </div>

@@ -9,7 +9,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use tokio::sync::{broadcast, watch};
 use tokio::task::AbortHandle;
 
-use soromi_protocol::{ChatEvent, Status, SubAgent};
+use soromi_protocol::{ChatEvent, Status, SubAgent, ToolKind};
 
 use super::decoder::Utf8Decoder;
 use super::scrollback::ScrollbackBuffer;
@@ -340,7 +340,9 @@ impl Session {
                 }
                 // Update the sub-agent set; publish the list only when it changed.
                 if let Ok(mut active) = active_subagents.lock()
-                    && track_subagents(&mut active, &events)
+                    && track_subagents(&mut active, &events, |t| {
+                        provider.is_some_and(|p| p.is_subagent_launch_ack(t))
+                    })
                 {
                     let list = active.iter().map(|(_, sub)| sub.clone()).collect();
                     let _ = subagents_tx.send(list);
@@ -487,13 +489,6 @@ fn spawn_idle_decay(
     Some(handle.abort_handle())
 }
 
-/// Claude's sub-agent spawn tool, named `Task` historically and renamed to `Agent` in Claude Code
-/// 2.1. Accept both so sub-agents surface (and aren't mistaken for the tab's own activity)
-/// regardless of the installed CLI version.
-pub(crate) fn is_subagent_tool(name: &str) -> bool {
-    name == "Task" || name == "Agent"
-}
-
 /// Current Unix time in seconds (for sub-agent start timestamps). Zero if the clock is before the
 /// epoch, which never happens in practice.
 pub(crate) fn now_secs() -> u32 {
@@ -509,7 +504,13 @@ pub(crate) fn now_secs() -> u32 {
 /// description), and its tool-result *removes* it (the card shows only what's still running, so a
 /// finished sub-agent drops off). Returns whether the set changed, so the caller only republishes on
 /// a real change.
-pub(crate) fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[ChatEvent]) -> bool {
+pub(crate) fn track_subagents(
+    active: &mut Vec<(String, SubAgent)>,
+    events: &[ChatEvent],
+    // Whether a sub-agent result is only a launch ack (background agent still running), not a
+    // completion — provider-specific, so the caller supplies it (see `Provider::is_subagent_launch_ack`).
+    is_launch_ack: impl Fn(&str) -> bool,
+) -> bool {
     let mut changed = false;
     for event in events {
         match event {
@@ -520,7 +521,12 @@ pub(crate) fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[Ch
                     changed = true;
                 }
             }
-            ChatEvent::Tool { id, name, body, .. } if is_subagent_tool(name) => {
+            ChatEvent::Tool {
+                id,
+                body,
+                tool_kind: ToolKind::Agent,
+                ..
+            } => {
                 let name = body.clone().unwrap_or_else(|| "sub-agent".to_string());
                 active.push((
                     id.clone(),
@@ -532,8 +538,10 @@ pub(crate) fn track_subagents(active: &mut Vec<(String, SubAgent)>, events: &[Ch
                 ));
                 changed = true;
             }
-            // The sub-agent finished (or errored): it's no longer running, so drop it from the list.
-            ChatEvent::ToolResult { id, .. } => {
+            // The sub-agent finished (or errored): drop it. But a *background* ("async") sub-agent's
+            // result is only a launch ack — it's still running — so keep it (the panel is exactly for
+            // these background agents; it's cleared on the next fresh turn instead).
+            ChatEvent::ToolResult { id, text, .. } if !is_launch_ack(text) => {
                 let before = active.len();
                 active.retain(|(tool_id, _)| tool_id != id);
                 changed |= active.len() != before;
@@ -563,14 +571,15 @@ fn track_activity(pending: &mut Vec<(String, String)>, events: &[ChatEvent]) -> 
                 name,
                 path,
                 body,
-            } if !is_subagent_tool(name) => {
+                tool_kind,
+            } if *tool_kind != ToolKind::Agent => {
                 // Keep only the most recent tool: the gray line shows one thing at a time, and we
                 // deliberately hold on to it after the tool finishes so it stays visible while the
                 // agent thinks between calls ("Unravelling…"). Only a new user prompt clears it.
                 pending.clear();
                 pending.push((
                     id.clone(),
-                    activity_label(name, path.as_deref(), body.as_deref()),
+                    activity_label(*tool_kind, name, path.as_deref(), body.as_deref()),
                 ));
                 changed = true;
             }
@@ -581,7 +590,8 @@ fn track_activity(pending: &mut Vec<(String, String)>, events: &[ChatEvent]) -> 
 }
 
 /// A short, human label for what a tool call is doing ("Editing config.ts", "Running pnpm test").
-fn activity_label(name: &str, path: Option<&str>, body: Option<&str>) -> String {
+/// Keyed off the provider-agnostic [`ToolKind`]; `name` is the fallback label for uncategorized tools.
+fn activity_label(kind: ToolKind, name: &str, path: Option<&str>, body: Option<&str>) -> String {
     let file = || {
         path.map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
             .filter(|f| !f.is_empty())
@@ -594,20 +604,20 @@ fn activity_label(name: &str, path: Option<&str>, body: Option<&str>) -> String 
             s
         }
     };
-    match name {
-        "Bash" => body
+    match kind {
+        ToolKind::Run => body
             .map(|b| format!("Running {}", clip(b)))
             .unwrap_or_else(|| "Running command".to_string()),
-        "Edit" | "MultiEdit" | "Write" => file()
+        ToolKind::Edit | ToolKind::Write => file()
             .map(|f| format!("Editing {f}"))
             .unwrap_or_else(|| "Editing files".to_string()),
-        "Read" => file()
+        ToolKind::Read => file()
             .map(|f| format!("Reading {f}"))
             .unwrap_or_else(|| "Reading files".to_string()),
-        "Grep" | "Glob" => body
+        ToolKind::Search => body
             .map(|p| format!("Searching {}", clip(p)))
             .unwrap_or_else(|| "Searching".to_string()),
-        other => other.to_string(),
+        _ => name.to_string(),
     }
 }
 
@@ -656,14 +666,17 @@ mod tests {
                     name: "Task".into(),
                     path: None,
                     body: Some("Map v1 to v2".into()),
+                    tool_kind: ToolKind::Agent,
                 },
                 ChatEvent::Tool {
                     id: "t2".into(),
                     name: "Task".into(),
                     path: None,
                     body: Some("Rewrite encoder".into()),
+                    tool_kind: ToolKind::Agent,
                 },
             ],
+            |_| false,
         ));
         assert_eq!(
             labels(&active),
@@ -681,7 +694,9 @@ mod tests {
                 name: "Bash".into(),
                 path: None,
                 body: Some("ls".into()),
-            }]
+                tool_kind: ToolKind::Run,
+            }],
+            |_| false,
         ));
 
         // One sub-agent finishes: it drops off the list (the card shows only what's still running).
@@ -692,6 +707,7 @@ mod tests {
                 ok: true,
                 text: "done".into(),
             }],
+            |_| false,
         ));
         assert_eq!(
             labels(&active),
@@ -705,6 +721,7 @@ mod tests {
                 text: "now do the next thing".into(),
                 files: Vec::new(),
             }],
+            |_| false,
         ));
         assert!(active.is_empty());
     }
@@ -720,7 +737,9 @@ mod tests {
                 name: "Agent".into(),
                 path: None,
                 body: Some("Find gift card features".into()),
+                tool_kind: ToolKind::Agent,
             }],
+            |_| false,
         ));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].1.name, "Find gift card features");
@@ -735,6 +754,7 @@ mod tests {
                 name: "Agent".into(),
                 path: None,
                 body: Some("Find gift card features".into()),
+                tool_kind: ToolKind::Agent,
             }],
         ));
         assert!(pending.is_empty());
@@ -889,5 +909,70 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(found, "snapshot was {:?}", session.snapshot());
+    }
+}
+
+#[cfg(test)]
+mod subagent_lifecycle {
+    use super::*;
+    use crate::providers::Provider;
+    use crate::providers::claude::Claude;
+
+    /// The real Claude launch-ack predicate, so these tests exercise the actual provider behavior.
+    fn ack(text: &str) -> bool {
+        Claude.is_subagent_launch_ack(text)
+    }
+
+    fn tool(id: &str) -> ChatEvent {
+        ChatEvent::Tool {
+            id: id.into(),
+            name: "Task".into(),
+            path: None,
+            body: Some("Explore RN app architecture".into()),
+            tool_kind: ToolKind::Agent,
+        }
+    }
+    fn result(id: &str, text: &str) -> ChatEvent {
+        ChatEvent::ToolResult {
+            id: id.into(),
+            ok: true,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn async_launch_ack_keeps_the_agent_running() {
+        let mut active = Vec::new();
+        track_subagents(&mut active, &[tool("t1")], ack);
+        assert_eq!(active.len(), 1, "the Task use adds a sub-agent");
+        // The launch ack must NOT drop it — the background agent is still working.
+        track_subagents(
+            &mut active,
+            &[result(
+                "t1",
+                "Async agent launched successfully. (internal)",
+            )],
+            ack,
+        );
+        assert_eq!(
+            active.len(),
+            1,
+            "the launch ack should not remove a background sub-agent"
+        );
+    }
+
+    #[test]
+    fn a_real_result_removes_a_synchronous_subagent() {
+        let mut active = Vec::new();
+        track_subagents(&mut active, &[tool("t2")], ack);
+        track_subagents(
+            &mut active,
+            &[result("t2", "Here are my findings: ...")],
+            ack,
+        );
+        assert!(
+            active.is_empty(),
+            "a real completion result removes the sub-agent"
+        );
     }
 }

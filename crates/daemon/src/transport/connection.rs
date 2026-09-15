@@ -7,8 +7,8 @@ use tokio::task::JoinHandle;
 
 use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
+use crate::sessions::chat::ChatSession;
 use crate::sessions::session::Session;
-use crate::sessions::stream_json::StreamJsonSession;
 use crate::workspaces::service::{CreateSpaceInput, WorkspaceService};
 
 /// Chat messages sent per page: the recent tail on attach, and each "Load earlier" step.
@@ -199,6 +199,16 @@ impl Connection {
                     self.hub.switch_mode(&session, mode);
                 }
             }
+            ClientMessage::SetSessionAgent {
+                session,
+                agent,
+                account,
+            } => {
+                // Restarts the session under a different agent (fresh conversation). Gated by control.
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.set_session_agent(&session, agent, account);
+                }
+            }
             ClientMessage::RenameSession { session, title } => {
                 self.hub.rename_session(&session, title)
             }
@@ -241,6 +251,16 @@ impl Connection {
                     binary: file.binary,
                 });
             }
+            ClientMessage::WriteFile {
+                workspace,
+                path,
+                content,
+            } => match self.hub.write_file(&workspace, &path, &content) {
+                Ok(()) => self.send(ServerMessage::FileSaved { workspace, path }),
+                Err(error) => self.send(ServerMessage::Error {
+                    message: format!("couldn't save {path}: {error}"),
+                }),
+            },
             ClientMessage::ListSkills { session } => {
                 let skills = self.hub.list_skills(&session);
                 self.send(ServerMessage::SkillList { session, skills });
@@ -425,6 +445,9 @@ impl Connection {
         if let Some(previous) = self.attached.remove(session_id) {
             previous.abort();
         }
+        // Restored tabs are spawned lazily: the first attach starts the backend from its persisted
+        // spec (a no-op if it's already live), so opening a tab is what launches its agent.
+        self.hub.ensure_session(session_id);
         // A tab is either a PTY terminal or a headless chat; attach whichever exists.
         if let Some(session) = self.hub.get(session_id) {
             self.attach_pty(session_id, &session);
@@ -497,7 +520,7 @@ impl Connection {
 
     /// Attaches a headless chat session: sends its status + transcript-so-far, then streams status and
     /// new chat events. No terminal output/scrollback - the chat view renders from the events.
-    fn attach_chat(&mut self, session_id: &str, session: &StreamJsonSession) {
+    fn attach_chat(&mut self, session_id: &str, session: &ChatSession) {
         self.send(ServerMessage::Status {
             session: session_id.to_string(),
             status: session.status(),

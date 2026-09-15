@@ -426,6 +426,17 @@ pub enum ClientMessage {
         session: String,
         mode: SessionMode,
     },
+    /// Changes a tab's agent (e.g. Claude -> Codex). The daemon rebinds the tab to the new agent's
+    /// account and restarts its backend. Providers don't share a transcript, so the conversation
+    /// starts fresh under the new agent. `account` binds the agent the first time it's used in the
+    /// workspace (like `OpenSession`); optional when already bound.
+    SetSessionAgent {
+        session: String,
+        agent: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        account: Option<String>,
+    },
     /// Renames a tab. An empty `title` clears the custom name (back to the account label).
     RenameSession {
         session: String,
@@ -463,6 +474,13 @@ pub enum ClientMessage {
     ReadFile {
         workspace: String,
         path: String,
+    },
+    /// Save an edited file back to disk (the file editor). Path is workspace-relative and validated
+    /// against the workspace root, like `ReadFile`. The daemon replies with `FileSaved` or `Error`.
+    WriteFile {
+        workspace: String,
+        path: String,
+        content: String,
     },
     ListSkills {
         session: String,
@@ -617,6 +635,11 @@ pub enum ServerMessage {
         truncated: bool,
         binary: bool,
     },
+    /// A `WriteFile` succeeded — the editor clears its unsaved state for this file.
+    FileSaved {
+        workspace: String,
+        path: String,
+    },
     SkillList {
         session: String,
         skills: Vec<Skill>,
@@ -714,7 +737,9 @@ pub enum ServerMessage {
 
 /// A tool call awaiting approval in the headless chat (`--permission-prompt-tool stdio`). `id` is the
 /// CLI's control-request id we answer with; `name` / `path` / `body` render it like a tool card so
-/// the user sees what they're approving.
+/// the user sees what they're approving. `kind` is the provider-agnostic category (a plan approval
+/// renders its own review UI; edits are auto-approved under "accept edits") so the UI never matches a
+/// provider's tool name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -731,6 +756,8 @@ pub struct ToolApproval {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub body: Option<String>,
+    #[serde(default)]
+    pub kind: ToolKind,
 }
 
 /// A file pasted or attached to a chat turn: base64 `data` plus its MIME type. Images and PDFs go to
@@ -748,6 +775,40 @@ pub struct ChatFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub filename: Option<String>,
+}
+
+/// The provider-agnostic category of a tool call, assigned by each provider from its own raw tool
+/// names (Claude's `Edit`/`Bash`/`Task`, Codex's `apply_patch`/`shell`, …). Everything downstream —
+/// the tool card's icon, the activity line's verb, "is this an edit / a sub-agent / a plan" — keys
+/// off this instead of matching one provider's tool names, so a new provider only maps its names to
+/// these kinds (see `Provider::tool_kind`) and inherits the same output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum ToolKind {
+    /// Edits an existing file (Claude `Edit`/`MultiEdit`/`NotebookEdit`/`Update`).
+    Edit,
+    /// Writes/creates a whole file (Claude `Write`).
+    Write,
+    /// Runs a shell command (Claude `Bash`).
+    Run,
+    /// Reads a file (Claude `Read`).
+    Read,
+    /// Searches the codebase (Claude `Grep`/`Glob`).
+    Search,
+    /// Spawns a sub-agent (Claude `Task`/`Agent`).
+    Agent,
+    /// Loads a skill (Claude `Skill`).
+    Skill,
+    /// Proposes a plan / exits plan mode (Claude `ExitPlanMode`).
+    Plan,
+    /// Anything else.
+    #[default]
+    Other,
 }
 
 /// One structured entry from an agent's on-disk transcript, rendered by the mobile "chat" viewport
@@ -776,7 +837,8 @@ pub enum ChatEvent {
     /// Assistant reasoning, shown collapsed.
     Thinking { text: String },
     /// A tool the assistant invoked. `path` is the file it touched (if any); `body` is a renderable
-    /// summary (a shell command, a diff, or short JSON).
+    /// summary (a shell command, a diff, or short JSON). `kind` is the provider-agnostic category the
+    /// provider assigned to the raw tool name, so the UI and activity labels never match tool names.
     Tool {
         id: String,
         name: String,
@@ -786,6 +848,9 @@ pub enum ChatEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         body: Option<String>,
+        // Not named `kind`: the enum is internally tagged `kind`, so the tool's category is `toolKind`.
+        #[serde(default)]
+        tool_kind: ToolKind,
     },
     /// The result of a tool call, tied to it by `id`.
     ToolResult { id: String, ok: bool, text: String },

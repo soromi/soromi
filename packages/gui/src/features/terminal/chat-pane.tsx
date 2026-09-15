@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 //Packages
 import { useClientStore } from '@soromi/client'
 import { cn } from '@soromi/ui'
-import { ChatView } from '@soromi/ui/chat'
+import { ChatView, contextLimitFor } from '@soromi/ui/chat'
 
 //Components
+import { agentOptionsFor } from '@/shared/agent-options'
 import { ProviderIcon } from '@/shared/provider-icon'
 
 //Types
@@ -35,15 +36,23 @@ export function ChatPane({
   const approvals = useClientStore((s) => s.chatApproval[session])
   const canLoadEarlier = useClientStore((s) => s.chatEarlier[session] ?? false)
   const inControl = useClientStore((s) => s.controlHolder === null)
-  const summary = useClientStore((s) =>
-    s.workspaces.flatMap((w) => w.sessions).find((x) => x.id === session),
+  const workspace = useClientStore((s) =>
+    s.workspaces.find((w) => w.sessions.some((x) => x.id === session)),
+  )
+  const summary = workspace?.sessions.find((x) => x.id === session)
+  // The agents this chat can switch to: only *this* workspace's real bound agents (phantom bindings
+  // filtered out via the profiles) — never accounts from other workspaces. To use another provider,
+  // bind it to this workspace in its settings. `list-accounts` (fired by the sidebar) loads profiles.
+  const accounts = useClientStore((s) => s.accounts)
+  const agentOptions = useMemo(
+    () => agentOptionsFor(workspace?.accounts ?? [], accounts ?? [], false),
+    [workspace?.accounts, accounts],
   )
   // The agent is mid-turn while its status is "thinking" — drives the live working indicator.
   const working = summary?.status === 'thinking'
   const permissionMode = summary?.permissionMode ?? 'default'
-  // The model's context window, for the "context filling up" banner. The 1M-context Opus models
-  // (our Default/Opus) get 1M; the rest the standard 200k.
-  const contextLimit = summary?.model == null || summary.model === 'opus' ? 1_000_000 : 200_000
+  // The model's context window, for the "context filling up" banner — from the provider's catalog.
+  const contextLimit = contextLimitFor(summary?.agent, summary?.model ?? null)
 
   // Record the turn's start once (kept across remounts), and clear it when the turn ends, so the
   // working clock counts from when the agent actually started — not from when this pane last mounted.
@@ -93,6 +102,11 @@ export function ChatPane({
         }
         account={summary?.account}
         accountIcon={summary?.agent ? <ProviderIcon provider={summary.agent} /> : undefined}
+        agent={summary?.agent}
+        agentOptions={agentOptions}
+        onAgent={(agent, account) =>
+          transport.send({ type: 'set-session-agent', session, agent, account })
+        }
         contextTokens={summary?.context_tokens ?? null}
         contextLimit={contextLimit}
         onCommand={(command) => transport.send({ type: 'chat-command', session, command })}

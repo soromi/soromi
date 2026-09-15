@@ -42,7 +42,14 @@ export const ChatRow = memo(function ChatRow({ row }: { row: Row }) {
     return (
       <div className="flex max-w-[85%] flex-col gap-2 self-end rounded-2xl bg-[var(--soromi-bg-active)] px-3.5 py-2">
         <MessageAttachments files={row.files} />
-        {row.text && <Markdown>{row.text}</Markdown>}
+        {/* Verbatim, not markdown: a prompt is shown exactly as typed. Rendering it as markdown drops
+            raw HTML (no rehype-raw), so a message that's all HTML/JS — a pasted `<script>` snippet —
+            would render as an empty bubble. Plain text keeps every character and never disappears. */}
+        {row.text && (
+          <div className="whitespace-pre-wrap break-words text-[12.5px] text-[var(--soromi-text)] leading-[1.55] [overflow-wrap:anywhere]">
+            {row.text}
+          </div>
+        )}
       </div>
     )
   }

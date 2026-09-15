@@ -18,11 +18,15 @@ const config: ForgeConfig = {
     // `pnpm build:gui`. Loaded from `process.resourcesPath` in `main.ts` when packaged.
     extraResource: ['../../target/release/soromi-daemon', '../../packages/gui/dist'],
     osxSign: {},
-    osxNotarize: {
-      appleId: process.env.APPLE_ID as string,
-      appleIdPassword: process.env.APPLE_PASSWORD as string,
-      teamId: process.env.APPLE_TEAM_ID as string,
-    },
+    // CI passes the app-specific password via env (APPLE_ID set); locally we notarize from the
+    // `soromi-notary` keychain profile (`xcrun notarytool store-credentials`), so no secrets are needed.
+    osxNotarize: process.env.APPLE_ID
+      ? {
+          appleId: process.env.APPLE_ID as string,
+          appleIdPassword: process.env.APPLE_PASSWORD as string,
+          teamId: process.env.APPLE_TEAM_ID as string,
+        }
+      : { keychainProfile: 'soromi-notary' },
   },
   rebuildConfig: {},
   makers: [

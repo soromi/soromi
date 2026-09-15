@@ -16,13 +16,13 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{broadcast, watch};
 use tokio::task::AbortHandle;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use soromi_protocol::{
-    ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval,
+    ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval, ToolKind,
 };
 
-use crate::providers::Provider;
+use crate::providers::{ChatFrame, Provider};
 use crate::sessions::session::track_subagents;
 
 const CHAT_CAPACITY: usize = 512;
@@ -59,11 +59,9 @@ pub struct StreamJsonSession {
     interrupted: Arc<AtomicBool>,
     // Sub-agents (`Task` calls) running this turn, keyed by tool id. Mirrors the PTY session's
     // tracking so a chat tab can show "N agents working in the background" over its composer.
-    // Kept to co-own the state/senders alongside the reader task (which drives them via clones); read
-    // from `self` only through the `_rx` receivers, so the fields themselves are otherwise unused.
-    #[allow(dead_code)]
+    // Shared with the reader task (which drives them via clones); `send_turn` also clears them to
+    // reset the panel on a fresh turn.
     active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
-    #[allow(dead_code)]
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     subagents_rx: watch::Receiver<Vec<SubAgent>>,
     // The provider's slash commands ("actions"), captured once from the `system/init` frame. Empty
@@ -79,6 +77,9 @@ pub struct StreamJsonSession {
     // `--permission-prompt-tool`), so bypass / auto-accept are applied on our side (the CLI's live
     // `set_permission_mode` doesn't reliably switch into bypass). Shared with the reader.
     permission_mode: Arc<Mutex<PermissionMode>>,
+    // This session's provider, so live controls (model/effort commands, permission flag, attachment
+    // blocks) use the provider's own vocabulary rather than hardcoding Claude's here.
+    provider: &'static dyn Provider,
     reader: Option<AbortHandle>,
 }
 
@@ -181,7 +182,6 @@ impl StreamJsonSession {
             context_tx.clone(),
             permission_mode.clone(),
             stdin.clone(),
-            PathBuf::from(cwd),
         );
 
         Ok(Self {
@@ -205,6 +205,7 @@ impl StreamJsonSession {
             context_tx,
             context_rx,
             permission_mode,
+            provider,
             reader: Some(reader),
         })
     }
@@ -213,9 +214,9 @@ impl StreamJsonSession {
     /// records the message locally (the CLI does not echo the user's prompt back on stdout, so the
     /// chat view would otherwise never show it). `files` are pasted/attached images and documents.
     ///
-    /// Sending while the agent is already working *steers* the turn: the CLI queues the message on
-    /// its stdin and folds it into the running turn rather than starting a new one. We keep any
-    /// in-flight streaming partial in that case (only a fresh turn drops it).
+    /// Sending while the agent is already working *steers* the turn: the CLI queues the message and
+    /// folds it into the running turn (or runs it as the next turn). We keep any in-flight streaming
+    /// partial in that case (only a fresh turn drops it).
     pub async fn send_turn(&self, text: &str, files: &[ChatFile]) {
         let steering = !matches!(self.status(), Status::Idle);
         // With no attachments a plain string content is simplest; otherwise a content-block array
@@ -225,7 +226,9 @@ impl StreamJsonSession {
         } else {
             let mut blocks = vec![json!({ "type": "text", "text": text })];
             for file in files {
-                blocks.push(file_block(file));
+                if let Some(block) = self.provider.attachment_block(file) {
+                    blocks.push(block);
+                }
             }
             Value::Array(blocks)
         };
@@ -244,6 +247,13 @@ impl StreamJsonSession {
                 partial.clear();
             }
             let _ = self.delta_tx.send(String::new());
+            // Reset the background sub-agent panel — the last turn's agents don't belong to this one.
+            if let Ok(mut active) = self.active_subagents.lock()
+                && !active.is_empty()
+            {
+                active.clear();
+                let _ = self.subagents_tx.send(Vec::new());
+            }
         }
         // Record the prompt with its attachments so the bubble can show inline thumbnails (the wire
         // content already carries the binary; the CLI doesn't echo the prompt back).
@@ -269,10 +279,16 @@ impl StreamJsonSession {
             "request": { "subtype": "interrupt" },
         })
         .to_string();
-        let mut stdin = self.stdin.lock().await;
-        let _ = stdin.write_all(request.as_bytes()).await;
-        let _ = stdin.write_all(b"\n").await;
-        let _ = stdin.flush().await;
+        {
+            let mut stdin = self.stdin.lock().await;
+            let _ = stdin.write_all(request.as_bytes()).await;
+            let _ = stdin.write_all(b"\n").await;
+            let _ = stdin.flush().await;
+        }
+        // Settle to Idle now, so Stop is a guaranteed escape hatch even if there's no live turn to
+        // interrupt (nothing would emit a settling `result`). If a turn really was running, the CLI
+        // stops it; any frames that still arrive restore "working" until it actually halts.
+        let _ = self.status_tx.send(Status::Idle);
     }
 
     /// Answers a pending tool approval: writes the `control_response` the CLI is blocked on. `allow`
@@ -307,10 +323,8 @@ impl StreamJsonSession {
     /// Sent as commands, not recorded in the chat log — they change session state, not the transcript.
     /// `model` `None` resets to the provider default.
     pub async fn set_model(&self, model: Option<&str>, effort: Option<&str>) {
-        self.send_command(&format!("/model {}", model.unwrap_or("default")))
-            .await;
-        if let Some(effort) = effort {
-            self.send_command(&format!("/effort {effort}")).await;
+        for command in self.provider.model_commands(model, effort) {
+            self.send_command(&command).await;
         }
     }
 
@@ -336,7 +350,7 @@ impl StreamJsonSession {
         let request = json!({
             "type": "control_request",
             "request_id": format!("mode-{}", SEQ.fetch_add(1, Ordering::Relaxed)),
-            "request": { "subtype": "set_permission_mode", "mode": mode.as_flag() },
+            "request": { "subtype": "set_permission_mode", "mode": self.provider.permission_flag(mode) },
         })
         .to_string();
         let mut stdin = self.stdin.lock().await;
@@ -487,7 +501,6 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     context_tx: Arc<watch::Sender<Option<u32>>>,
     permission_mode: Arc<Mutex<PermissionMode>>,
     stdin: Arc<tokio::sync::Mutex<ChildStdin>>,
-    cwd: PathBuf,
 ) -> AbortHandle {
     // Clears the streaming partial and tells viewers the live message is gone (committed / ended).
     let clear_partial = {
@@ -504,16 +517,33 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
         }
     };
 
+    // Empties the "agents working in the background" panel. Called when the turn stops actively
+    // thinking (settles Idle, or pauses for a plan/tool approval): background sub-agents shown then are
+    // stale — the ones that fed a plan are done, and any still running re-appear on their next frame.
+    let clear_subagents = {
+        let active_subagents = active_subagents.clone();
+        let subagents_tx = subagents_tx.clone();
+        move || {
+            if let Ok(mut active) = active_subagents.lock()
+                && !active.is_empty()
+            {
+                active.clear();
+                let _ = subagents_tx.send(Vec::new());
+            }
+        }
+    };
+
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             // The context meter: a turn's prompt + cached tokens are the current context size; a
             // compaction frees it (reset to unknown until the next turn reports the new, smaller size).
-            if let Some(update) = context_update_from(&line) {
+            // The provider owns which of its frames/fields carry this.
+            if let Some(update) = provider.context_tokens(&line) {
                 let _ = context_tx.send(update);
             }
-            match classify(&line, provider) {
-                Dispatch::Chat(events) => {
+            match provider.parse_chat_frame(&line) {
+                ChatFrame::Events(events) => {
                     // The complete frame commits the message; drop the streaming stand-in.
                     clear_partial();
                     // Right after an interrupt, the CLI reports the stop as a `user` message — surface
@@ -530,13 +560,25 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                             other => other,
                         })
                         .collect();
+                    // An agent frame (assistant text, a tool call/result, reasoning) means work is
+                    // happening: restore Thinking if a prior turn's `result` left us Idle after a
+                    // mid-turn steer, so the "thinking" indicator doesn't vanish while it keeps going.
+                    if matches!(*status_tx.borrow(), Status::Idle)
+                        && events.iter().any(|e| {
+                            !matches!(e, ChatEvent::Notice { .. } | ChatEvent::User { .. })
+                        })
+                    {
+                        let _ = status_tx.send(Status::Thinking);
+                    }
                     if let Ok(mut log) = chat_log.lock() {
                         log.extend(events.iter().cloned());
                     }
                     // Update the running sub-agent set (a `Task` starts one, its result ends it) so the
                     // chat tab can show them over the composer. Only republish on a real change.
                     if let Ok(mut active) = active_subagents.lock()
-                        && track_subagents(&mut active, &events)
+                        && track_subagents(&mut active, &events, |t| {
+                            provider.is_subagent_launch_ack(t)
+                        })
                     {
                         let list = active.iter().map(|(_, agent)| agent.clone()).collect();
                         let _ = subagents_tx.send(list);
@@ -545,27 +587,40 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         let _ = chat_tx.send(event);
                     }
                 }
-                Dispatch::Delta(text) => {
+                ChatFrame::Delta(text) => {
+                    // Streaming tokens mean the agent is generating: restore Thinking if a prior
+                    // turn's `result` dropped us to Idle (e.g. after a mid-turn steer).
+                    if matches!(*status_tx.borrow(), Status::Idle) {
+                        let _ = status_tx.send(Status::Thinking);
+                    }
                     if let Ok(mut buffer) = partial.lock() {
                         buffer.push_str(&text);
                         let _ = delta_tx.send(buffer.clone());
                     }
                 }
-                Dispatch::Status(status) => {
+                ChatFrame::Status(status) => {
                     if matches!(status, Status::Idle) {
                         clear_partial();
                         // Turn ended; don't let a never-delivered interrupt marker leak to the next.
                         interrupted.store(false, Ordering::Relaxed);
+                        // The turn is over: clear any lingering "agents working" entries.
+                        clear_subagents();
                     }
+                    // Every turn ends with exactly one `result`, so this always settles the status —
+                    // it can never get stuck on "working". A follow-up sent mid-turn that the CLI runs
+                    // as a *separate* next turn briefly shows Idle in the gap, then its frames restore
+                    // Thinking (below); a folded follow-up just settles here when the whole turn ends.
                     let _ = status_tx.send(status);
                 }
-                Dispatch::Approval(approval, input) => {
+                ChatFrame::Approval(approval, input) => {
                     // Enforce the permission mode on our side (the CLI routes every tool here): bypass
                     // allows everything, auto-accept allows edits. Otherwise surface it to the user.
                     let mode = permission_mode.lock().map(|m| *m).unwrap_or_default();
                     let auto_allow = match mode {
                         PermissionMode::BypassPermissions => true,
-                        PermissionMode::AcceptEdits => is_edit_tool(&approval.name),
+                        PermissionMode::AcceptEdits => {
+                            matches!(approval.kind, ToolKind::Edit | ToolKind::Write)
+                        }
                         _ => false,
                     };
                     if auto_allow {
@@ -595,21 +650,17 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         }
                         let _ = approval_tx.send(approval);
                         let _ = status_tx.send(Status::WaitingInput);
+                        // Paused for the user (a plan/tool approval): the background sub-agents that
+                        // led here are done, so don't keep showing them as "working".
+                        clear_subagents();
                     }
                 }
-                Dispatch::Commands(names) => {
-                    // Annotate each command with the provider's description (built-in map + custom
-                    // frontmatter), then publish once — the set is fixed for the session.
-                    let list: Vec<SlashCommand> = names
-                        .into_iter()
-                        .map(|name| SlashCommand {
-                            description: provider.describe_command(&name, &cwd),
-                            name,
-                        })
-                        .collect();
+                ChatFrame::Commands(list) => {
+                    // The provider already annotated each command — publish once (the set is fixed).
                     let _ = commands_tx.send(list);
                 }
-                Dispatch::None => {}
+                // Claude captures its conversation id via the session-start hook, not a chat frame.
+                ChatFrame::SessionId(_) | ChatFrame::Ignore => {}
             }
         }
         // Stdout closed: the turn/process ended. Fall back to idle.
@@ -619,224 +670,27 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     .abort_handle()
 }
 
-/// One attached file as a Claude content block: images and PDFs carry their base64 directly; a text
-/// file is decoded and inlined (labelled with its name); anything else falls back to a note.
-fn file_block(file: &ChatFile) -> Value {
-    if file.media_type.starts_with("image/") {
-        return json!({
-            "type": "image",
-            "source": { "type": "base64", "media_type": file.media_type, "data": file.data },
-        });
-    }
-    if file.media_type == "application/pdf" {
-        return json!({
-            "type": "document",
-            "source": { "type": "base64", "media_type": "application/pdf", "data": file.data },
-        });
-    }
-    // Text (or unknown): try to decode the base64 and inline it as text.
-    let name = file.filename.clone().unwrap_or_else(|| "file".to_string());
-    let text = base64_text(&file.data)
-        .map(|body| format!("[File: {name}]\n{body}"))
-        .unwrap_or_else(|| format!("[Attached {name} ({})]", file.media_type));
-    json!({ "type": "text", "text": text })
-}
-
-/// Decodes standard base64 (the data-URL payload) to UTF-8 text, or `None` if it isn't valid text.
-fn base64_text(data: &str) -> Option<String> {
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .ok()?;
-    String::from_utf8(bytes).ok()
-}
-
-/// What one stdout frame means to us.
-enum Dispatch {
-    /// Conversation content (assistant text/tool-use, or a tool result) — parsed to chat events.
-    Chat(Vec<ChatEvent>),
-    /// A streaming token: more text for the assistant message currently being written.
-    Delta(String),
-    /// A turn lifecycle change — the derived status.
-    Status(Status),
-    /// A `can_use_tool` request: the tool to show, plus its original input (echoed back on allow).
-    Approval(ToolApproval, Value),
-    /// The provider's available slash commands (names, no `/`), from the `system/init` frame.
-    Commands(Vec<String>),
-    /// Nothing we surface (`system`, other control frames, non-text stream events).
-    None,
-}
-
-/// A context-meter update from a frame: `Some(Some(n))` = the current context size (an `assistant`
-/// frame's prompt + cached tokens); `Some(None)` = a `compact_boundary` freed the context (reset until
-/// the next turn reports the new, smaller size); `None` = the frame carries nothing for the meter.
-fn context_update_from(line: &str) -> Option<Option<u32>> {
-    let value: Value = serde_json::from_str(line).ok()?;
-    match value.get("type").and_then(Value::as_str) {
-        Some("assistant") => {
-            let usage = value.pointer("/message/usage")?;
-            let field = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-            let total = field("input_tokens")
-                + field("cache_read_input_tokens")
-                + field("cache_creation_input_tokens");
-            (total > 0).then_some(Some(total as u32))
-        }
-        Some("system")
-            if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
-        {
-            Some(None)
-        }
-        _ => None,
-    }
-}
-
-/// Maps a stream-json frame to a `Dispatch`. The `assistant`/`user` frames are byte-for-byte the same
-/// shape as transcript lines, so the provider's transcript parser handles them directly; `result`
-/// ends the turn. Everything else is ignored for now (forward-compatible: unknown `type`s are safe).
-fn classify(line: &str, provider: &'static dyn Provider) -> Dispatch {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return Dispatch::None;
-    };
-    match value.get("type").and_then(Value::as_str) {
-        Some("assistant") | Some("user") => {
-            let events = provider.parse_transcript_line(line);
-            if events.is_empty() {
-                Dispatch::None
-            } else {
-                Dispatch::Chat(events)
-            }
-        }
-        // The session's opening frame lists the provider's available slash commands ("actions"). Only
-        // Claude emits it, so it doubles as the capability signal for the chat `/` menu.
-        Some("system") if value.get("subtype").and_then(Value::as_str) == Some("init") => {
-            match value.get("slash_commands").and_then(Value::as_array) {
-                Some(list) => Dispatch::Commands(
-                    list.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect(),
-                ),
-                None => Dispatch::None,
-            }
-        }
-        // Compaction ran (context freed up), auto when the window filled or from `/compact`. Surface
-        // it as a system notice so the conversation shows what happened.
-        Some("system")
-            if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
-        {
-            let auto = value
-                .pointer("/compact_metadata/trigger")
-                .and_then(Value::as_str)
-                == Some("auto");
-            let text = if auto {
-                "Context was full — automatically compacted to free space".to_string()
-            } else {
-                "Conversation compacted to free up context".to_string()
-            };
-            Dispatch::Chat(vec![ChatEvent::Notice { text }])
-        }
-        // A turn finished; the agent is idle waiting for the next message.
-        Some("result") => Dispatch::Status(Status::Idle),
-        // Streaming token deltas (`--include-partial-messages`). Surface assistant `text_delta` as
-        // live partial text; the complete `assistant` frame commits it. Other events (message
-        // start/stop, thinking) are ignored — print mode rarely emits reasoning text.
-        Some("stream_event") => {
-            let delta = value.pointer("/event/delta");
-            match delta.and_then(|d| d.get("type")).and_then(Value::as_str) {
-                Some("text_delta") => delta
-                    .and_then(|d| d.get("text"))
-                    .and_then(Value::as_str)
-                    .filter(|text| !text.is_empty())
-                    .map(|text| Dispatch::Delta(text.to_string()))
-                    .unwrap_or(Dispatch::None),
-                _ => Dispatch::None,
-            }
-        }
-        // A tool needs approval (`--permission-prompt-tool stdio`). Other control requests (the CLI's
-        // reply to our `initialize`, etc.) are ignored.
-        Some("control_request")
-            if value.pointer("/request/subtype").and_then(Value::as_str)
-                == Some("can_use_tool") =>
-        {
-            let request_id = value
-                .get("request_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let tool_name = value
-                .pointer("/request/tool_name")
-                .and_then(Value::as_str)
-                .unwrap_or("tool");
-            let input = value
-                .pointer("/request/input")
-                .cloned()
-                .unwrap_or(Value::Null);
-            Dispatch::Approval(
-                build_approval(provider, request_id, tool_name, &input),
-                input,
-            )
-        }
-        _ => Dispatch::None,
-    }
-}
-
-/// Whether a tool is a file edit (auto-allowed in `acceptEdits` mode). Covers Claude's edit tools.
-fn is_edit_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Update"
-    )
-}
-
-/// Renders a `can_use_tool` request as a `ToolApproval` by reusing the provider's transcript parser:
-/// a `tool_use` block has the same shape here, so we get the same name / path / body a tool card shows.
-fn build_approval(
-    provider: &dyn Provider,
-    request_id: &str,
-    tool_name: &str,
-    input: &Value,
-) -> ToolApproval {
-    let synthetic = json!({
-        "type": "assistant",
-        "message": { "role": "assistant", "content": [
-            { "type": "tool_use", "id": request_id, "name": tool_name, "input": input },
-        ]},
-    })
-    .to_string();
-    let (path, body) = provider
-        .parse_transcript_line(&synthetic)
-        .into_iter()
-        .find_map(|event| match event {
-            ChatEvent::Tool { path, body, .. } => Some((path, body)),
-            _ => None,
-        })
-        .unwrap_or((None, None));
-    ToolApproval {
-        id: request_id.to_string(),
-        name: tool_name.to_string(),
-        path,
-        body,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::ChatFrame;
 
     fn claude() -> &'static dyn Provider {
         crate::providers::provider("claude").expect("claude provider")
     }
 
-    fn events(dispatch: Dispatch) -> Vec<ChatEvent> {
-        match dispatch {
-            Dispatch::Chat(events) => events,
+    fn events(frame: ChatFrame) -> Vec<ChatEvent> {
+        match frame {
+            ChatFrame::Events(events) => events,
             _ => Vec::new(),
         }
     }
 
     #[test]
-    fn classifies_an_assistant_text_frame_as_a_chat_event() {
+    fn parses_an_assistant_text_frame_as_a_chat_event() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}"#;
         assert_eq!(
-            events(classify(line, claude())),
+            events(claude().parse_chat_frame(line)),
             vec![ChatEvent::Assistant {
                 text: "hello".into()
             }]
@@ -844,24 +698,25 @@ mod tests {
     }
 
     #[test]
-    fn classifies_an_assistant_tool_use_frame() {
+    fn parses_an_assistant_tool_use_frame() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
         assert_eq!(
-            events(classify(line, claude())),
+            events(claude().parse_chat_frame(line)),
             vec![ChatEvent::Tool {
                 id: "t1".into(),
                 name: "Bash".into(),
                 path: None,
                 body: Some("ls".into()),
+                tool_kind: ToolKind::Run,
             }]
         );
     }
 
     #[test]
-    fn classifies_a_user_tool_result_frame() {
+    fn parses_a_user_tool_result_frame() {
         let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"out","is_error":false}]}}"#;
         assert_eq!(
-            events(classify(line, claude())),
+            events(claude().parse_chat_frame(line)),
             vec![ChatEvent::ToolResult {
                 id: "t1".into(),
                 ok: true,
@@ -874,36 +729,38 @@ mod tests {
     fn a_result_frame_ends_the_turn_as_idle() {
         let line = r#"{"type":"result","subtype":"success","session_id":"s","result":"done"}"#;
         assert!(matches!(
-            classify(line, claude()),
-            Dispatch::Status(Status::Idle)
+            claude().parse_chat_frame(line),
+            ChatFrame::Status(Status::Idle)
         ));
     }
 
     #[test]
-    fn system_stream_event_and_junk_frames_are_ignored() {
+    fn system_init_without_commands_and_junk_frames_are_ignored() {
         assert!(matches!(
-            classify(
-                r#"{"type":"system","subtype":"init","session_id":"s"}"#,
-                claude()
-            ),
-            Dispatch::None
+            claude().parse_chat_frame(r#"{"type":"system","subtype":"init","session_id":"s"}"#),
+            ChatFrame::Ignore
         ));
         assert!(matches!(
-            classify(
-                r#"{"type":"stream_event","event":{"type":"content_block_delta"}}"#,
-                claude()
+            claude().parse_chat_frame(
+                r#"{"type":"stream_event","event":{"type":"content_block_delta"}}"#
             ),
-            Dispatch::None
+            ChatFrame::Ignore
         ));
-        assert!(matches!(classify("not json", claude()), Dispatch::None));
+        assert!(matches!(
+            claude().parse_chat_frame("not json"),
+            ChatFrame::Ignore
+        ));
     }
 
     #[test]
     fn a_text_delta_stream_event_streams_as_a_delta() {
         let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}}"#;
-        assert!(matches!(classify(line, claude()), Dispatch::Delta(text) if text == "Hel"));
+        assert!(matches!(claude().parse_chat_frame(line), ChatFrame::Delta(text) if text == "Hel"));
         // A thinking delta (or any non-text delta) is not surfaced.
         let thinking = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hmm"}}}"#;
-        assert!(matches!(classify(thinking, claude()), Dispatch::None));
+        assert!(matches!(
+            claude().parse_chat_frame(thinking),
+            ChatFrame::Ignore
+        ));
     }
 }

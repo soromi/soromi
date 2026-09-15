@@ -1,10 +1,12 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use soromi_protocol::{AgentUsage, ChatEvent, SlashCommand, Status};
+use serde_json::Value;
+use soromi_protocol::{AgentUsage, ChatEvent, ChatFile, PermissionMode, SlashCommand, Status};
 
 use super::{Provider, UsageAuthState};
 
+mod chat;
 mod commands;
 mod hooks;
 mod status;
@@ -55,6 +57,11 @@ impl Provider for Claude {
         // ids are). Lets us `--resume <id>` later from either backend without discovering the id.
         args.push("--session-id".to_string());
         args.push(id.to_string());
+    }
+
+    fn can_pin_session_id(&self) -> bool {
+        // Claude pins the conversation to our `session.id` via `--session-id` above.
+        true
     }
 
     fn headless_stream_json_args(&self) -> Option<Vec<String>> {
@@ -129,6 +136,49 @@ impl Provider for Claude {
 
     fn parse_transcript_line(&self, line: &str) -> Vec<ChatEvent> {
         transcript::parse_line(line)
+    }
+
+    fn is_subagent_launch_ack(&self, text: &str) -> bool {
+        // A background `Task` returns this the instant it starts; the real output comes later.
+        text.contains("Async agent launched")
+    }
+
+    fn plan_approval_body(&self, tool_name: &str, input: &serde_json::Value) -> Option<String> {
+        // Claude proposes a plan by asking to run `ExitPlanMode`; its `plan` input is the plan itself.
+        (tool_name == "ExitPlanMode")
+            .then(|| {
+                input
+                    .get("plan")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .flatten()
+    }
+
+    fn model_commands(&self, model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+        // Claude changes model/effort live by sending these as ordinary user messages.
+        let mut commands = vec![format!("/model {}", model.unwrap_or("default"))];
+        if let Some(effort) = effort {
+            commands.push(format!("/effort {effort}"));
+        }
+        commands
+    }
+
+    fn permission_flag(&self, mode: PermissionMode) -> Option<String> {
+        // Claude's `--permission-mode` values (also the live `set_permission_mode` control arg).
+        Some(mode.as_flag().to_string())
+    }
+
+    fn context_tokens(&self, line: &str) -> Option<Option<u32>> {
+        chat::context_tokens(line)
+    }
+
+    fn parse_chat_frame(&self, line: &str) -> super::ChatFrame {
+        chat::parse_chat_frame(self, line)
+    }
+
+    fn attachment_block(&self, file: &ChatFile) -> Option<Value> {
+        Some(chat::attachment_block(file))
     }
 
     fn describe_command(&self, name: &str, cwd: &Path) -> Option<String> {

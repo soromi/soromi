@@ -15,9 +15,6 @@ import { AppearanceSection } from './sections/appearance'
 import { NotificationsSection } from './sections/notifications'
 import { RemoteSettings } from './remote-settings'
 
-//Icons
-import SettingsSvg from '@/assets/icons/settings.svg?react'
-
 type SettingsSection = 'accounts' | 'appearance' | 'notifications' | 'remote' | 'about'
 
 /**
@@ -29,7 +26,6 @@ export function Settings() {
 
   return (
     <OverlayShell
-      icon={<SettingsSvg width={18} height={18} />}
       title="Settings"
       nav={
         <OverlayNav label="Settings">

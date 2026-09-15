@@ -7,17 +7,14 @@ import { useAppStore } from '@/stores/app-store'
 //Utils
 import { isMac } from '@/lib/platform'
 
-//Icons
-import CloseSvg from '@/assets/icons/close.svg?react'
-
 //Types
 import type { ReactNode } from 'react'
 
 /**
- * Chrome for an overlay screen: a thin header (icon + title, plus optional `extra`) on the darkest
- * shell, with a close button that pops the top overlay. When a `nav` is provided the body becomes a
- * two-pane layout — the nav sits on the bare shell and the children are wrapped in an inset, rounded,
- * shadowed content panel (Settings / Workspace settings). Without a nav the children fill the shell.
+ * Chrome for an overlay screen: a thin header led by a **back** button (which pops the overlay),
+ * then an icon + title, plus optional `extra` on the right. When a `nav` is provided the body becomes
+ * a two-pane layout — the nav sits on the bare shell and the children are wrapped in an inset,
+ * rounded, shadowed content panel (Settings / Workspace settings). Without a nav the children fill it.
  */
 export function OverlayShell({
   icon,
@@ -40,9 +37,29 @@ export function OverlayShell({
         className={cn(
           'flex h-[41px] flex-shrink-0 items-center gap-2.5 pr-3',
           // Clear the macOS traffic lights, like the sidebar's top bar.
-          isMac ? 'pl-[76px]' : 'pl-3',
+          isMac ? 'pl-[76px]' : 'pl-2',
         )}
       >
+        <button
+          type="button"
+          className="inline-flex h-[30px] w-[30px] flex-none cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
+          onClick={popOverlay}
+          title="Back"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 5l-7 7 7 7" />
+          </svg>
+        </button>
         {icon && (
           <span className="inline-flex items-center text-[var(--soromi-text-dim)]">{icon}</span>
         )}
@@ -51,16 +68,8 @@ export function OverlayShell({
             {title}
           </span>
         )}
-        {extra}
         <span className="flex-1" />
-        <button
-          type="button"
-          className="inline-flex h-[30px] w-[30px] cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
-          onClick={popOverlay}
-          title="Close"
-        >
-          <CloseSvg width={18} height={18} />
-        </button>
+        {extra}
       </div>
       {nav ? (
         <div className="flex min-h-0 flex-1">

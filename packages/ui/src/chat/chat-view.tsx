@@ -1,6 +1,15 @@
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 //Components
+import type { AgentOption } from './agent-select'
 import { AgentsPanel } from './agents-panel'
 import { Approval } from './approval'
 import { ChatRow } from './chat-row'
@@ -11,6 +20,11 @@ import { WorkingIndicator } from './working-indicator'
 
 //Logic
 import { buildRows } from './rows'
+
+// An in-flight `/compact` or `/clear`, per session (keyed by the session id). Kept outside React so
+// it survives a chat switch, which unmounts the pane: coming back to a still-compacting chat shows
+// the spinner again, not the fresh "compact now" banner. Cleared once the turn settles.
+const pendingCommands = new Map<string, '/compact' | '/clear'>()
 
 //Types
 import type {
@@ -66,6 +80,11 @@ export interface ChatViewProps {
    * provider login is active. `accountIcon` is the app-rendered provider glyph. */
   account?: string
   accountIcon?: ReactNode
+  /** The session's agent (provider key) and the agents it can switch to, for the composer's agent
+   * badge. With `onAgent` + more than one option the badge becomes a switcher. */
+  agent?: string
+  agentOptions?: AgentOption[]
+  onAgent?: (agent: string, account?: string) => void
   /** Context-window usage: current tokens and the model's limit, for the "context filling up" banner. */
   contextTokens?: number | null
   contextLimit?: number
@@ -109,6 +128,9 @@ export function ChatView({
   onModel,
   account,
   accountIcon,
+  agent,
+  agentOptions,
+  onAgent,
   contextTokens,
   contextLimit = 200_000,
   onCommand,
@@ -121,10 +143,22 @@ export function ChatView({
 
   // A context command (`/compact` / `/clear`) in flight: disables the banner actions + the composer
   // and shows a spinner until the turn settles, so it can't be double-triggered (compaction is slow).
-  const [commandPending, setCommandPending] = useState<'/compact' | '/clear' | null>(null)
+  // Seeded from (and mirrored to) `pendingCommands` so it survives switching chats mid-compaction.
+  const [commandPending, setCommandPendingState] = useState<'/compact' | '/clear' | null>(() =>
+    draftKey ? (pendingCommands.get(draftKey) ?? null) : null,
+  )
+  const setCommandPending = useCallback(
+    (value: '/compact' | '/clear' | null) => {
+      setCommandPendingState(value)
+      if (!draftKey) return
+      if (value) pendingCommands.set(draftKey, value)
+      else pendingCommands.delete(draftKey)
+    },
+    [draftKey],
+  )
   useEffect(() => {
     if (!working) setCommandPending(null)
-  }, [working])
+  }, [working, setCommandPending])
   const runCommand = onCommand
     ? (command: '/compact' | '/clear') => {
         setCommandPending(command)
@@ -215,13 +249,15 @@ export function ChatView({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto [-webkit-overflow-scrolling:touch]"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch]"
       >
         {/* A centered reading column (like Synara), so lines don't stretch edge-to-edge on a wide
-            window. The scroll container stays full width so the scrollbar sits at the window edge. */}
+            window. The scroll container stays full width so the scrollbar sits at the window edge.
+            `min-w-0` lets the column shrink so a long unbreakable token wraps instead of forcing a
+            horizontal scrollbar — wide blocks (code) scroll inside their own container instead. */}
         <div
           ref={contentRef}
-          className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-2 px-4 py-4"
+          className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col gap-2 px-4 py-4"
         >
           {rows.length === 0 && !working && emptyLabel ? (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-[var(--soromi-text-faint)] leading-[1.5]">
@@ -288,6 +324,9 @@ export function ChatView({
           onModel={onModel}
           account={account}
           accountIcon={accountIcon}
+          agent={agent}
+          agentOptions={agentOptions}
+          onAgent={onAgent}
           draftKey={draftKey}
         />
       </div>

@@ -149,10 +149,12 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     setFolderPaths(initialFolders)
   }
   const save = () => {
-    const next: AgentAccount[] = agents.map((agent) => ({
-      id: bindings[agent] ?? 'personal',
-      agent,
-    }))
+    // Only persist real bindings: an agent whose selected account actually configures that provider.
+    // The rows default every unconfigured provider to "personal"; without this filter, saving any
+    // change (a folder, the name) would bind every provider to a phantom account it can't run under.
+    const next: AgentAccount[] = agents
+      .map((agent) => ({ id: bindings[agent] ?? 'personal', agent }))
+      .filter((b) => accounts.find((a) => a.name === b.id)?.providers?.[b.agent] != null)
     const { root, folders } = deriveRootAndFolders(folderPaths)
 
     transport.send({
@@ -200,15 +202,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <OverlayShell
-      title={
-        <span className="flex items-center gap-2">
-          <span className="text-[var(--soromi-text-dim)]">Workspace settings</span>
-          <span className="text-[var(--soromi-text-faint)]">/</span>
-          <span className="text-[var(--soromi-text)]">{workspace}</span>
-        </span>
-      }
-    >
+    <OverlayShell title={workspace}>
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-[212px] flex-none flex-col gap-[3px] px-3.5 py-5">
           <div className="px-3 pb-2.5 font-semibold text-[11px] text-[var(--soromi-text-faint)] uppercase tracking-[0.1em]">

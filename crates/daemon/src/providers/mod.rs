@@ -1,12 +1,38 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::{AgentUsage, ChatEvent, SlashCommand, Status};
+use serde_json::Value;
+use soromi_protocol::{
+    AgentUsage, ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, ToolApproval,
+};
 
 pub mod claude;
 pub mod codex;
 pub mod grok;
 pub mod usage;
+
+/// What one line of a provider's headless chat output means, in provider-agnostic terms. Each
+/// provider parses its own wire format (Claude's stream-json frames, Codex's `exec --json` events)
+/// into these, and the daemon's chat session pumps them onto its channels without knowing either
+/// format — so a provider owns *all* of its chat logic and the session is just plumbing.
+pub enum ChatFrame {
+    /// Conversation content (assistant prose, reasoning, tool calls/results, a system notice).
+    Events(Vec<ChatEvent>),
+    /// A streaming token appended to the assistant message being written.
+    Delta(String),
+    /// A turn-lifecycle change (typically `Idle` when a turn ends).
+    Status(Status),
+    /// A tool is awaiting approval; the daemon parks it (with the raw `input` to echo back on allow)
+    /// and asks the user.
+    Approval(ToolApproval, Value),
+    /// The provider's available slash commands (from its session-init frame).
+    Commands(Vec<SlashCommand>),
+    /// The provider's own conversation id, captured so a later turn/launch can resume it. (The
+    /// per-line context size stays on `context_tokens`, since one frame can carry content *and* it.)
+    SessionId(String),
+    /// Nothing to surface.
+    Ignore,
+}
 
 /// What a provider needs to fetch its plan usage: the endpoint, the bearer token, and any extra
 /// headers (account id, beta opt-ins). Built fresh from the account's credentials each call, so a
@@ -93,6 +119,15 @@ pub trait Provider: Send + Sync {
     /// simply starts fresh with its own generated one.
     fn apply_session_id(&self, _args: &mut Vec<String>, _id: &str) {}
 
+    /// Whether the provider can pin a *caller-chosen* conversation id (via `apply_session_id`). When
+    /// it can (Claude's `--session-id`), Soromi's `session.id` is itself a valid conversation id, so a
+    /// tab resumes by it even before any id is captured. When it can't (Codex only issues its own
+    /// ids), Soromi's `session.id` is meaningless to the agent — so resume is attempted *only* with an
+    /// id the agent actually issued (captured into `resume_id`), never our `session.id`. Default: no.
+    fn can_pin_session_id(&self) -> bool {
+        false
+    }
+
     /// Base args that put this provider into headless `stream-json` mode (the "chat" backend), or
     /// `None` if it has no such mode. The caller appends the shared bits (session-id/resume, add-dir,
     /// system prompt) with the same methods the terminal launch uses. Approvals and model/effort are
@@ -158,6 +193,78 @@ pub trait Provider: Send + Sync {
     /// the provider has no transcript format Soromi reads, so nothing is surfaced.
     fn parse_transcript_line(&self, _line: &str) -> Vec<ChatEvent> {
         Vec::new()
+    }
+
+    /// Whether a sub-agent tool-result is just a *launch* acknowledgement for a background ("async")
+    /// sub-agent rather than its completion. Such an agent keeps running after the ack, so the tracker
+    /// must not drop it from the "agents working" panel. Provider-specific wording; default: no such
+    /// concept, so every result is treated as a real completion.
+    fn is_subagent_launch_ack(&self, _text: &str) -> bool {
+        false
+    }
+
+    /// If a tool approval is really the agent asking to leave "plan mode" and start executing (not a
+    /// tool to run), the full plan text to show for review — else `None`. The session layer stays
+    /// provider-agnostic: it tags such an approval as a `"plan"` kind so every provider's plan renders
+    /// the same, and only the provider knows which of its tools means this (Claude's `ExitPlanMode`).
+    /// Default: the provider has no plan-mode concept.
+    fn plan_approval_body(&self, _tool_name: &str, _input: &serde_json::Value) -> Option<String> {
+        None
+    }
+
+    /// The messages that change the model + reasoning effort live in the headless chat (Claude sends
+    /// `/model <alias>` and `/effort <level>` as user messages). Provider-specific syntax; the session
+    /// writes each verbatim. Default: the provider can't switch model live, so nothing is sent.
+    fn model_commands(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The provider's flag value for a permission mode (Claude's `--permission-mode` takes
+    /// `default`/`acceptEdits`/`bypassPermissions`/`plan`), used both as a launch flag and in the live
+    /// `set_permission_mode` control request. Default: the provider has no permission modes.
+    fn permission_flag(&self, _mode: PermissionMode) -> Option<String> {
+        None
+    }
+
+    /// The current context size from one stream-json frame, for the context meter: `Some(Some(n))` a
+    /// new prompt+cache token count, `Some(None)` a reset (a compaction freed the window), `None` the
+    /// frame carries nothing. Provider-specific usage fields. Default: no context reporting.
+    fn context_tokens(&self, _line: &str) -> Option<Option<u32>> {
+        None
+    }
+
+    /// One attached file (image / PDF / text) as this provider's outgoing user-message content block
+    /// (Claude's Anthropic image/document/text blocks). Default: the provider takes no attachments.
+    fn attachment_block(&self, _file: &ChatFile) -> Option<Value> {
+        None
+    }
+
+    /// Parses one line of this provider's headless chat output into a provider-agnostic [`ChatFrame`]
+    /// (Claude's stream-json frames, Codex's `exec --json` events). This is where *all* of a provider's
+    /// chat parsing lives; the daemon session just pumps the frames. Default: nothing surfaced.
+    fn parse_chat_frame(&self, _line: &str) -> ChatFrame {
+        ChatFrame::Ignore
+    }
+
+    /// For a provider whose chat runs **one process per turn** (Codex's `codex exec`), the command
+    /// args for a turn: the prompt, the resume id (its own captured session id, if any), and the
+    /// model/effort/permission choices. `None` means the provider isn't driven per-turn (Claude runs
+    /// one persistent process instead — see `headless_stream_json_args`). `program` comes separately.
+    fn chat_turn_command(
+        &self,
+        _prompt: &str,
+        _resume_id: Option<&str>,
+        _model: Option<&str>,
+        _effort: Option<&str>,
+        _permission: PermissionMode,
+    ) -> Option<Vec<String>> {
+        None
+    }
+
+    /// Whether this provider's headless chat is driven one process per turn (Codex) rather than one
+    /// persistent stream-json process (Claude). The daemon picks the matching session pump.
+    fn chat_is_per_turn(&self) -> bool {
+        false
     }
 
     /// A one-line description for a slash command ("action") this provider exposes, or `None` if

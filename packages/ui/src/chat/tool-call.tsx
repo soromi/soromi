@@ -1,14 +1,19 @@
 import {
   Bot,
   ChevronRight,
+  ClipboardList,
   FileText,
   Pencil,
   Search,
+  Sparkles,
   SquarePen,
   SquareTerminal,
   Wrench,
 } from 'lucide-react'
 import { type ComponentType, useState } from 'react'
+
+//Types
+import type { ToolKind } from '@soromi/protocol'
 
 //Utils
 import { cn } from '../lib/utils'
@@ -19,8 +24,10 @@ export interface ToolResult {
 }
 
 export interface ToolCallProps {
-  /** The tool name (`Bash`, `Edit`, `Read`, `Agent`, …). */
+  /** The tool name (`Bash`, `Edit`, `Read`, `Agent`, …) — only the fallback label for `other` tools. */
   name: string
+  /** The provider-agnostic category (from the daemon): picks the icon + verb, never the tool name. */
+  kind: ToolKind
   /** The file the tool touched, shown inline in the header. */
   path?: string
   /** A one-glance summary of the call: a command, a diff, written content, a query. */
@@ -33,11 +40,9 @@ export interface ToolCallProps {
 export type ToolItem = ToolCallProps
 
 /** The past-tense verb that leads a tool row (`Edited`, `Ran`, `Read`, …). Used by group summaries. */
-export function toolVerb(name: string): string {
-  return verbFor(kindOf(name), name)
+export function toolVerb(kind: ToolKind, name: string): string {
+  return verbFor(kind, name)
 }
-
-type Kind = 'edit' | 'write' | 'bash' | 'read' | 'search' | 'agent' | 'other'
 
 // The mono panel shared by diffs, written content, and command output.
 const PANEL =
@@ -50,8 +55,7 @@ const PANEL =
  * (a shell command's output, a read) stay tucked behind the row and expand on click. Pairs a
  * transcript `tool` event with its matching `tool-result` so a call and its output read as one step.
  */
-export function ToolCall({ name, path, body, result }: ToolCallProps) {
-  const kind = kindOf(name)
+export function ToolCall({ name, kind, path, body, result }: ToolCallProps) {
   const Icon = iconFor(kind)
   const diff = kind === 'edit' && body ? toDiff(body) : null
   const stat = diff ? countStat(diff) : null
@@ -61,8 +65,12 @@ export function ToolCall({ name, path, body, result }: ToolCallProps) {
   const opensByDefault = kind === 'edit' || kind === 'write' || (result != null && !result.ok)
   const [open, setOpen] = useState(opensByDefault)
 
-  const target = kind === 'bash' ? firstLine(body) : (baseName(path) ?? firstLine(body))
-  const hasBody = Boolean(diff || (kind === 'write' && body) || (kind === 'bash' && body) || result)
+  const target = kind === 'run' ? firstLine(body) : (baseName(path) ?? firstLine(body))
+  // A skill row is a clean marker (icon + name); its "Launching skill …" result is noise, so the
+  // row stays a non-expandable one-liner rather than hiding that behind a chevron.
+  const hasBody =
+    kind !== 'skill' &&
+    Boolean(diff || (kind === 'write' && body) || (kind === 'run' && body) || result)
 
   const state: State = result ? (result.ok ? 'done' : 'error') : 'running'
 
@@ -120,7 +128,7 @@ export function ToolCall({ name, path, body, result }: ToolCallProps) {
             </pre>
           ) : kind === 'write' && body ? (
             <pre className={cn(PANEL, 'text-[var(--soromi-text-dim)]')}>{body}</pre>
-          ) : kind === 'bash' && body ? (
+          ) : kind === 'run' && body ? (
             <pre className={cn(PANEL, 'text-[var(--soromi-text-dim)]')}>{`$ ${body}`}</pre>
           ) : null}
 
@@ -155,36 +163,14 @@ function StatusDot({ state }: { state: State }) {
   return <span className={cn('h-[6px] w-[6px] flex-none rounded-full', color)} />
 }
 
-function kindOf(name: string): Kind {
-  switch (name) {
-    case 'Edit':
-    case 'MultiEdit':
-      return 'edit'
-    case 'Write':
-      return 'write'
-    case 'Bash':
-      return 'bash'
-    case 'Read':
-      return 'read'
-    case 'Grep':
-    case 'Glob':
-      return 'search'
-    case 'Task':
-    case 'Agent':
-      return 'agent'
-    default:
-      return 'other'
-  }
-}
-
 /** The muted verb that leads the row (past tense, like a work log). */
-function verbFor(kind: Kind, name: string): string {
+function verbFor(kind: ToolKind, name: string): string {
   switch (kind) {
     case 'edit':
       return 'Edited'
     case 'write':
       return 'Wrote'
-    case 'bash':
+    case 'run':
       return 'Ran'
     case 'read':
       return 'Read'
@@ -192,18 +178,22 @@ function verbFor(kind: Kind, name: string): string {
       return 'Searched'
     case 'agent':
       return 'Agent'
+    case 'skill':
+      return 'Skill'
+    case 'plan':
+      return 'Plan'
     default:
       return name
   }
 }
 
-function iconFor(kind: Kind): ComponentType<{ className?: string }> {
+function iconFor(kind: ToolKind): ComponentType<{ className?: string }> {
   switch (kind) {
     case 'edit':
       return Pencil
     case 'write':
       return SquarePen
-    case 'bash':
+    case 'run':
       return SquareTerminal
     case 'read':
       return FileText
@@ -211,6 +201,10 @@ function iconFor(kind: Kind): ComponentType<{ className?: string }> {
       return Search
     case 'agent':
       return Bot
+    case 'skill':
+      return Sparkles
+    case 'plan':
+      return ClipboardList
     default:
       return Wrench
   }

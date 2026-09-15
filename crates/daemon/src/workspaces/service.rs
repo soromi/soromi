@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use soromi_protocol::{
     AgentAccount, DirEntry, KeepAwakeMode, PermissionMode, SessionMode, SessionSummary, Status,
-    WorkspaceSummary,
+    ToolKind, WorkspaceSummary,
 };
 use tokio::sync::broadcast;
 
@@ -15,11 +15,13 @@ use crate::accounts::loader::{accounts_dir, load_account_profile};
 use crate::accounts::resolver::{expand_home, resolve_launch_env};
 use crate::files::directory::list_directory;
 use crate::files::paths::resolve_within;
-use crate::files::reader::{FileRead, read_file_within};
+use crate::files::reader::{FileRead, read_file_within, write_file_within};
 use crate::files::watcher::DirectoryWatcher;
 use crate::home::soromi_home;
 use crate::keep_awake::controller::KeepAwakeController;
 use crate::notifications::controller::NotificationController;
+use crate::sessions::chat::ChatSession;
+use crate::sessions::exec_chat::ExecChatSession;
 use crate::sessions::manager::SessionManager;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::sessions::stream_json::StreamJsonSession;
@@ -148,7 +150,10 @@ impl WorkspaceService {
                 dirty = true;
                 space.folders = kept;
             }
-            service.spawn_space(space);
+            // Lazy restore: register the tabs (so the sidebar shows them with their last activity),
+            // but don't spawn a `claude` process per tab. Each backend is started on first attach
+            // (`ensure_session`) - opening one tab shouldn't launch every other tab's agent.
+            service.register_space(space);
         }
         // Persist once if any space was migrated or had folders that no longer exist on disk.
         if dirty {
@@ -542,6 +547,65 @@ impl WorkspaceService {
         self.emit_change();
     }
 
+    /// Switches a tab to a different agent (e.g. Claude -> Codex). Rebinds the tab's `agent`, records
+    /// the account binding for that agent if the workspace lacks one, and restarts the backend under
+    /// the new agent. Providers don't share a transcript, so the conversation starts fresh: the
+    /// pinned resume id and the provider-specific model/effort are cleared.
+    pub fn set_session_agent(&self, session_id: &str, agent: String, account: Option<String>) {
+        let ctx = {
+            let mut metadata = self.metadata.lock().unwrap();
+            let mut found = None;
+            for (name, meta) in metadata.iter_mut() {
+                let Some(spec) = meta.sessions.iter_mut().find(|s| s.id == session_id) else {
+                    continue;
+                };
+                if spec.agent == agent {
+                    return; // already this agent
+                }
+                spec.agent = agent.clone();
+                // A different provider can't resume this conversation, and its model/effort aliases
+                // differ - start clean rather than carry over an invalid combination.
+                spec.resume_id = None;
+                spec.model = None;
+                spec.effort = None;
+                // Record the account binding for the new agent, so `start_session` (and later tabs)
+                // resolve it - exactly as `open_session` binds an agent the first time it's used.
+                if let Some(id) = account.clone()
+                    && !meta.accounts.iter().any(|a| a.agent == agent)
+                {
+                    meta.accounts.push(AgentAccount {
+                        id,
+                        agent: agent.clone(),
+                    });
+                }
+                found = Some((
+                    name.clone(),
+                    spec.clone(),
+                    meta.root.clone(),
+                    meta.folders.clone(),
+                    meta.accounts.clone(),
+                    meta.instructions.clone(),
+                ));
+                break;
+            }
+            found
+        };
+        let Some((workspace, spec, root, folders, accounts, instructions)) = ctx else {
+            return;
+        };
+        self.manager.dispose(session_id);
+        self.start_session(
+            &workspace,
+            &root,
+            &folders,
+            &accounts,
+            instructions.as_deref(),
+            &spec,
+        );
+        self.persist();
+        self.emit_change();
+    }
+
     /// Sets a chat tab's permission mode (the composer dropdown): persists it for the next launch and,
     /// if the headless session is running, applies it live over the control channel.
     pub fn set_permission_mode(&self, session_id: &str, mode: PermissionMode) {
@@ -682,7 +746,7 @@ impl WorkspaceService {
     }
 
     /// Returns a live headless chat session by its id.
-    pub fn get_chat(&self, id: &str) -> Option<Arc<StreamJsonSession>> {
+    pub fn get_chat(&self, id: &str) -> Option<Arc<ChatSession>> {
         self.manager.get_chat(id)
     }
 
@@ -776,6 +840,22 @@ impl WorkspaceService {
                 binary: false,
             },
         }
+    }
+
+    /// Saves an edited file back to disk (the file editor), guarding against path escapes.
+    pub fn write_file(&self, workspace: &str, path: &str, content: &str) -> anyhow::Result<()> {
+        let root = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(name, _)| name == workspace)
+                .map(|(_, meta)| meta.root.clone())
+        };
+        let Some(root) = root else {
+            anyhow::bail!("workspace not found: {workspace}");
+        };
+        write_file_within(Path::new(&root), path, content)?;
+        Ok(())
     }
 
     /// Lists the slash commands and skills available to a session's agent (Claude only for now).
@@ -1066,6 +1146,13 @@ impl WorkspaceService {
                 session,
             ));
         }
+        self.register_space(space);
+        warning
+    }
+
+    /// Records a space's metadata (name, folders, accounts, tabs) without spawning any of its
+    /// sessions. Used by the lazy startup restore; `spawn_space` calls it after starting the tabs.
+    fn register_space(&self, space: PersistedSpace) {
         self.metadata.lock().unwrap().push((
             space.name,
             WorkspaceMeta {
@@ -1076,7 +1163,45 @@ impl WorkspaceService {
                 instructions: space.instructions,
             },
         ));
-        warning
+    }
+
+    /// Starts a restored tab's backend the first time it's attached (lazy restore). Restored tabs
+    /// are registered without a running process; this spawns one on demand from the tab's persisted
+    /// spec. A no-op when the session is already live (or unknown), so re-attaching is cheap.
+    pub fn ensure_session(&self, session_id: &str) {
+        if self.manager.get(session_id).is_some() || self.manager.get_chat(session_id).is_some() {
+            return;
+        }
+        let ctx = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata.iter().find_map(|(name, meta)| {
+                meta.sessions
+                    .iter()
+                    .find(|s| s.id == session_id)
+                    .map(|spec| {
+                        (
+                            name.clone(),
+                            spec.clone(),
+                            meta.root.clone(),
+                            meta.folders.clone(),
+                            meta.accounts.clone(),
+                            meta.instructions.clone(),
+                        )
+                    })
+            })
+        };
+        let Some((workspace, spec, root, folders, accounts, instructions)) = ctx else {
+            return;
+        };
+        self.start_session(
+            &workspace,
+            &root,
+            &folders,
+            &accounts,
+            instructions.as_deref(),
+            &spec,
+        );
+        self.emit_change();
     }
 
     /// Starts (or restarts) one session's PTY, keyed by its id, and wires its status watcher.
@@ -1128,7 +1253,12 @@ impl WorkspaceService {
                 .clone()
                 .unwrap_or_else(|| session.id.clone());
             let config_dir = provider_config_dir(&account, provider);
-            if provider.resume_available(&config_dir, &cwd, &convo_id) {
+            // Only resume an id the agent would recognize: a captured `resume_id`, or our `session.id`
+            // when the provider pinned it. A provider that can't pin (Codex) must not be handed our
+            // `session.id` — it was never a conversation there, so `resume <that>` errors; start fresh
+            // and let its first turn's hook capture the real id for next time.
+            let resumable = session.resume_id.is_some() || provider.can_pin_session_id();
+            if resumable && provider.resume_available(&config_dir, &cwd, &convo_id) {
                 provider.apply_resume(&mut args, &convo_id);
             } else {
                 provider.apply_session_id(&mut args, &convo_id);
@@ -1181,9 +1311,43 @@ impl WorkspaceService {
             let _ = provider.install_hooks(&config_dir);
         }
 
-        // Headless "chat" mode: drive the agent over stream-json instead of a PTY. Needs a provider
-        // with a headless command; otherwise fall through to the terminal. The headless base flags go
-        // in front of the shared args (add-dir / system-prompt / session-id/resume built above).
+        // Headless "chat" mode, per-turn backend (Codex): each turn is its own `codex exec` process,
+        // so there's no persistent launch here — the session builds each turn's command from the
+        // provider. Runs before the stream-json branch since Codex has no `headless_stream_json_args`.
+        if session.mode == SessionMode::Chat
+            && let Some(provider) = provider
+            && provider.chat_is_per_turn()
+        {
+            let program = parsed.command.clone();
+            let resume_id = session.resume_id.clone();
+            let cwd = cwd.clone();
+            let env = env.clone();
+            let id = session.id.clone();
+            let permission_mode = session.permission_mode;
+            let model = session.model.clone();
+            let effort = session.effort.clone();
+            let spawned = self.manager.ensure_chat(&session.id, move || {
+                Ok(ChatSession::Exec(ExecChatSession::spawn(
+                    provider,
+                    &program,
+                    &cwd,
+                    Some(&env),
+                    Vec::new(),
+                    resume_id,
+                    permission_mode,
+                    model,
+                    effort,
+                )?))
+            });
+            if let Ok(sess) = spawned {
+                self.watch_chat(workspace, &id, &sess);
+            }
+            return warning;
+        }
+
+        // Headless "chat" mode, persistent stream-json backend (Claude): one long-lived process. The
+        // base flags go in front of the shared args (add-dir / system-prompt / session-id/resume).
+        // A provider with neither backend falls through to the terminal.
         if session.mode == SessionMode::Chat
             && let Some(provider) = provider
             && let Some(base) = provider.headless_stream_json_args()
@@ -1191,8 +1355,10 @@ impl WorkspaceService {
             let mut chat_args = base;
             // The persisted permission mode (the composer dropdown's choice) — the initial
             // `--permission-mode`; changed live thereafter via `set_permission_mode`.
-            chat_args.push("--permission-mode".to_string());
-            chat_args.push(session.permission_mode.as_flag().to_string());
+            if let Some(flag) = provider.permission_flag(session.permission_mode) {
+                chat_args.push("--permission-mode".to_string());
+                chat_args.push(flag);
+            }
             // The persisted model + effort (the composer's model dropdown), changed live thereafter
             // via `set_model`. Absent = the provider default.
             if let Some(model) = &session.model {
@@ -1223,7 +1389,7 @@ impl WorkspaceService {
             let id = session.id.clone();
             let permission_mode = session.permission_mode;
             let spawned = self.manager.ensure_chat(&session.id, move || {
-                StreamJsonSession::spawn(
+                Ok(ChatSession::StreamJson(StreamJsonSession::spawn(
                     provider,
                     &program,
                     &chat_args,
@@ -1231,7 +1397,7 @@ impl WorkspaceService {
                     Some(&env),
                     seed,
                     permission_mode,
-                )
+                )?))
             });
             if let Ok(sess) = spawned {
                 self.watch_chat(workspace, &id, &sess);
@@ -1262,7 +1428,7 @@ impl WorkspaceService {
     /// therefore the notification source for chat — when the agent reaches an attention state
     /// (a permission prompt or a question) it plays the cue and fires the banner, gated on mute and
     /// focus exactly like the hook path.
-    fn watch_chat(&self, workspace: &str, session_id: &str, session: &StreamJsonSession) {
+    fn watch_chat(&self, workspace: &str, session_id: &str, session: &ChatSession) {
         let mut status_rx = session.subscribe_status();
         let mut subagents_rx = session.subscribe_subagents();
         let mut commands_rx = session.subscribe_commands();
@@ -1492,9 +1658,18 @@ fn last_transcript_activity(
                     }
                 }
                 ChatEvent::Tool {
-                    name, path, body, ..
+                    name,
+                    path,
+                    body,
+                    tool_kind,
+                    ..
                 } => {
-                    return Some(tool_activity(&name, path.as_deref(), body.as_deref()));
+                    return Some(tool_activity(
+                        tool_kind,
+                        &name,
+                        path.as_deref(),
+                        body.as_deref(),
+                    ));
                 }
                 _ => {}
             }
@@ -1503,18 +1678,19 @@ fn last_transcript_activity(
     None
 }
 
-/// A one-line label for a tool call (used as a restored session's last-activity subtitle).
-fn tool_activity(name: &str, path: Option<&str>, body: Option<&str>) -> String {
+/// A one-line label for a tool call (used as a restored session's last-activity subtitle). Keyed off
+/// the provider-agnostic [`ToolKind`]; `name` is the fallback label for uncategorized tools.
+fn tool_activity(kind: ToolKind, name: &str, path: Option<&str>, body: Option<&str>) -> String {
     let file = || path.and_then(|p| p.rsplit('/').next()).unwrap_or("a file");
-    match name {
-        "Bash" => format!(
+    match kind {
+        ToolKind::Run => format!(
             "Ran {}",
             truncate_chars(body.and_then(|b| b.lines().next()).unwrap_or("").trim(), 40)
         ),
-        "Edit" | "MultiEdit" => format!("Edited {}", file()),
-        "Write" => format!("Wrote {}", file()),
-        "Read" => format!("Read {}", file()),
-        other => other.to_string(),
+        ToolKind::Edit => format!("Edited {}", file()),
+        ToolKind::Write => format!("Wrote {}", file()),
+        ToolKind::Read => format!("Read {}", file()),
+        _ => name.to_string(),
     }
 }
 
@@ -1941,6 +2117,77 @@ mod tests {
         assert_eq!(restored.summaries()[0].sessions.len(), 1);
 
         restored.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn restored_tabs_spawn_lazily_on_first_attach() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let hub = service();
+        hub.create_space(CreateSpaceInput {
+            name: "kazomi".into(),
+            root: root.path().to_string_lossy().into_owned(),
+            agent: "/bin/cat".into(),
+            account: "personal".into(),
+            folders: None,
+        })
+        .unwrap();
+        let session = hub.summaries()[0].sessions[0].id.clone();
+        hub.dispose();
+
+        // A fresh service restores the tab (it shows in the sidebar) but does NOT spawn its process.
+        let restored = service();
+        assert_eq!(restored.summaries()[0].sessions.len(), 1);
+        assert!(restored.get(&session).is_none(), "restore must not spawn");
+
+        // The first attach (via ensure_session) spawns the backend; a second call is a no-op.
+        restored.ensure_session(&session);
+        assert!(restored.get(&session).is_some(), "attach must spawn");
+        restored.ensure_session(&session);
+        assert!(restored.get(&session).is_some());
+
+        restored.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn set_session_agent_rebinds_the_tab_and_records_the_binding() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let hub = service();
+        hub.create_space(CreateSpaceInput {
+            name: "kazomi".into(),
+            root: root.path().to_string_lossy().into_owned(),
+            agent: "/bin/cat".into(),
+            account: "personal".into(),
+            folders: None,
+        })
+        .unwrap();
+        let session = hub.summaries()[0].sessions[0].id.clone();
+
+        // Switch the tab to a different agent on a different account.
+        hub.set_session_agent(&session, "/bin/echo".into(), Some("work".into()));
+
+        let summary = &hub.summaries()[0];
+        let spec = summary.sessions.iter().find(|s| s.id == session).unwrap();
+        assert_eq!(spec.agent, "/bin/echo");
+        // The account resolves via the new binding the switch recorded on the workspace.
+        assert_eq!(spec.account, "work");
+        assert!(
+            summary
+                .accounts
+                .iter()
+                .any(|a| a.agent == "/bin/echo" && a.id == "work")
+        );
+
+        hub.dispose();
         crate::home::set_soromi_home(None);
     }
 

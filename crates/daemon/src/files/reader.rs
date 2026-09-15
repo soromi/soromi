@@ -34,6 +34,20 @@ pub fn read_file_within(root: &Path, path: &str) -> FileRead {
     }
 }
 
+/// Writes `content` to a file within a workspace, guarding against path escapes (same containment
+/// check `read_file_within` uses). Overwrites an existing file; errors if the path escapes the root,
+/// the parent doesn't exist, or the write fails. The editor only saves files it first read (so the
+/// parent exists), and truncated/binary files are never editable.
+pub fn write_file_within(root: &Path, path: &str, content: &str) -> std::io::Result<()> {
+    let Some(target) = resolve_within(root, path) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "path escapes the workspace root",
+        ));
+    };
+    fs::write(target, content)
+}
+
 fn read(target: &Path) -> Option<FileRead> {
     let meta = fs::metadata(target).ok()?;
     if !meta.is_file() {
@@ -98,5 +112,20 @@ mod tests {
     fn returns_empty_for_a_directory() {
         let dir = tempdir().unwrap();
         assert_eq!(read_file_within(dir.path(), ".").content, "");
+    }
+
+    #[test]
+    fn write_round_trips_and_overwrites_within_the_root() {
+        let dir = tempdir().unwrap();
+        write_file_within(dir.path(), "a.txt", "hello").unwrap();
+        assert_eq!(read_file_within(dir.path(), "a.txt").content, "hello");
+        write_file_within(dir.path(), "a.txt", "bye").unwrap();
+        assert_eq!(read_file_within(dir.path(), "a.txt").content, "bye");
+    }
+
+    #[test]
+    fn write_refuses_a_path_that_escapes_the_root() {
+        let dir = tempdir().unwrap();
+        assert!(write_file_within(dir.path(), "../escape.txt", "x").is_err());
     }
 }

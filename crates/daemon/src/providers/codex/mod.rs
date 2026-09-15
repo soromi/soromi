@@ -1,10 +1,11 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::{AgentUsage, Status};
+use soromi_protocol::{AgentUsage, PermissionMode, Status};
 
-use super::{Provider, UsageAuthState};
+use super::{ChatFrame, Provider, UsageAuthState};
 
+mod chat;
 mod hooks;
 mod status;
 mod usage;
@@ -58,6 +59,33 @@ impl Provider for Codex {
         status::parse(chunk)
     }
 
+    // Codex's headless chat runs one `codex exec` process per turn (unlike Claude's single persistent
+    // stream-json process). All of its parsing + command-building lives in `chat`.
+    fn chat_is_per_turn(&self) -> bool {
+        true
+    }
+
+    fn chat_turn_command(
+        &self,
+        prompt: &str,
+        resume_id: Option<&str>,
+        model: Option<&str>,
+        effort: Option<&str>,
+        permission: PermissionMode,
+    ) -> Option<Vec<String>> {
+        Some(chat::turn_command(
+            prompt, resume_id, model, effort, permission,
+        ))
+    }
+
+    fn parse_chat_frame(&self, line: &str) -> ChatFrame {
+        chat::parse_chat_frame(line)
+    }
+
+    fn context_tokens(&self, line: &str) -> Option<Option<u32>> {
+        chat::context_tokens(line)
+    }
+
     // Codex writes a "rollout" JSONL transcript, but its schema differs from Claude's and Soromi
     // does not yet capture Codex's transcript path (the notify bridge reports only the session id).
     // So `parse_transcript_line` stays the default (no events) until both are wired; the seam is
@@ -75,5 +103,19 @@ mod tests {
         assert!(!Codex.is_logged_in(dir.path()));
         std::fs::write(dir.path().join("auth.json"), "{}").unwrap();
         assert!(Codex.is_logged_in(dir.path()));
+    }
+
+    #[test]
+    fn cannot_pin_a_caller_chosen_session_id() {
+        // Codex only issues its own ids, so Soromi's `session.id` must never be resumed — the launch
+        // logic gates on this so a fresh tab starts clean instead of `codex resume <soromi-uuid>`.
+        assert!(!Codex.can_pin_session_id());
+    }
+
+    #[test]
+    fn resume_prepends_the_resume_subcommand() {
+        let mut args = vec!["--model".to_string(), "gpt-5".to_string()];
+        Codex.apply_resume(&mut args, "real-codex-id");
+        assert_eq!(args, ["resume", "real-codex-id", "--model", "gpt-5"]);
     }
 }

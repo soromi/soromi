@@ -8,70 +8,32 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
+import { modelCatalog } from './model-catalog'
 import { cn } from '../lib/utils'
 
-/** A selectable model. `value` is the `--model` alias the daemon passes (null = the provider
- * default); `effort` marks models that accept a reasoning-effort level. */
-interface ModelOption {
-  value: string | null
-  label: string
-  description: string
-  effort: boolean
-}
-
-const MODELS: ModelOption[] = [
-  {
-    value: null,
-    label: 'Default',
-    description: 'Opus 5 with 1M context · best for everyday, complex tasks',
-    effort: true,
-  },
-  {
-    value: 'opus',
-    label: 'Opus',
-    description: 'Opus 5 with 1M context · best for everyday, complex tasks',
-    effort: true,
-  },
-  {
-    value: 'fable',
-    label: 'Fable',
-    description: 'Fable 5 · most capable for your hardest, longest-running tasks',
-    effort: true,
-  },
-  {
-    value: 'sonnet',
-    label: 'Sonnet',
-    description: 'Sonnet 5 · efficient for routine tasks',
-    effort: false,
-  },
-  {
-    value: 'haiku',
-    label: 'Haiku',
-    description: 'Haiku 4.5 · fastest for quick answers',
-    effort: false,
-  },
-]
-
-const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
-/** The level the CLI uses when none is set explicitly. */
-const DEFAULT_EFFORT = 'high'
-const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-
 /**
- * The composer's model picker: pick the Claude model, and — for models that support it — the reasoning
- * effort. Applied live (the daemon sends `/model` / `/effort`) and persisted. Claude only, for now.
+ * The composer's model picker: pick the session's model, and — for models that support it — the
+ * reasoning effort. Applied live (the daemon translates the choice per provider) and persisted. The
+ * models, effort ladder, and labels all come from the provider's catalog (`modelCatalog(agent)`), so
+ * this component holds no provider names; it renders nothing for a provider with no catalog.
  */
 export function ModelSelect({
+  agent,
   model,
   effort,
   onChange,
 }: {
+  agent?: string
   model: string | null
   effort: string | null
   onChange: (model: string | null, effort: string | null) => void
 }) {
-  const current = MODELS.find((m) => m.value === model) ?? MODELS[0]
-  const activeEffort = effort ?? DEFAULT_EFFORT
+  const catalog = modelCatalog(agent)
+  if (!catalog) return null
+  const { models, effortLevels, effortLabels, defaultEffort } = catalog
+  const effortLabel = (s: string) => effortLabels[s] ?? s.charAt(0).toUpperCase() + s.slice(1)
+  const current = models.find((m) => m.value === model) ?? models[0]
+  const activeEffort = effort ?? defaultEffort
 
   return (
     <DropdownMenu>
@@ -83,12 +45,12 @@ export function ModelSelect({
         >
           <Sparkles className="h-3.5 w-3.5" />
           {current.label}
-          {current.effort && <span className="opacity-70">· {title(activeEffort)}</span>}
+          {current.effort && <span className="opacity-70">· {effortLabel(activeEffort)}</span>}
           <ChevronDown className="h-3 w-3" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        {MODELS.map((option) => (
+        {models.map((option) => (
           <DropdownMenuItem
             key={option.label}
             // Keep the current effort for effort-capable models; clear it otherwise.
@@ -110,11 +72,12 @@ export function ModelSelect({
         {current.effort && (
           <>
             <DropdownMenuSeparator />
-            {/* Plain buttons (not menu items) so tweaking effort doesn't close the menu. */}
-            <div className="flex items-center justify-between px-2 py-1.5">
+            {/* Plain buttons (not menu items) so tweaking effort doesn't close the menu. The label
+                sits above the row so all five levels fit without crowding the model descriptions. */}
+            <div className="px-2 py-1.5">
               <span className="text-[11px] text-[var(--soromi-text-faint)]">Effort</span>
-              <div className="flex gap-1">
-                {EFFORT_LEVELS.map((level) => (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {effortLevels.map((level) => (
                   <button
                     key={level}
                     type="button"
@@ -126,7 +89,7 @@ export function ModelSelect({
                         : 'bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)]',
                     )}
                   >
-                    {title(level)}
+                    {effortLabel(level)}
                   </button>
                 ))}
               </div>

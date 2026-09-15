@@ -28,7 +28,7 @@ export function ToolGroup({ tools }: { tools: ToolItem[] }) {
 function summarize(tools: ToolItem[]): string {
   const counts = new Map<string, number>()
   for (const tool of tools) {
-    const verb = toolVerb(tool.name)
+    const verb = toolVerb(tool.kind, tool.name)
     counts.set(verb, (counts.get(verb) ?? 0) + 1)
   }
   return [...counts].map(([verb, count]) => `${verb} ${count}`).join(' · ')

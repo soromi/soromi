@@ -59,6 +59,7 @@ export function buildRows(events: ChatEvent[]): Row[] {
         key,
         tool: {
           name: event.name,
+          kind: event.toolKind,
           path: event.path,
           body: event.body,
           result: resultById.get(event.id),

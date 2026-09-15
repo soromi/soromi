@@ -16,6 +16,8 @@ import {
 } from '@soromi/ui'
 
 //Store
+import { agentOptionsFor } from '@/shared/agent-options'
+import { ProviderIcon } from '@/shared/provider-icon'
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
@@ -53,6 +55,29 @@ const AGENT_STATE: Record<Status, { dot: string; pulse: boolean; label: string }
   blocked: { dot: '#f47070', pulse: false, label: 'Blocked' },
   done: { dot: 'var(--soromi-accent)', pulse: false, label: 'Review' },
   idle: { dot: 'var(--soromi-text-faint)', pulse: false, label: 'Idle' },
+}
+
+const NEW_SESSION_CLASS =
+  'flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6e6e6e] text-[12px] hover:bg-[#1f1f1f] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]'
+
+/** The little `+` that leads the "New session" row. */
+function NewSessionGlyph() {
+  return (
+    <span className="flex w-1.5 flex-none items-center justify-center">
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </span>
+  )
 }
 
 /** The Soromi brand mark: three emerald rounded bars, drawn bare (no chip) per the design. */
@@ -155,14 +180,20 @@ export function Sidebar() {
   // Stable: reads the current workspaces/accounts imperatively from the store (they change on every
   // status tick), so its identity never changes and doesn't defeat WorkspaceGroup's memoization.
   const openNewSession = useCallback(
-    (name: string, mode: SessionMode = 'terminal') => {
+    (
+      name: string,
+      mode: SessionMode = 'terminal',
+      choice?: { agent: string; account?: string },
+    ) => {
       const { workspaces, accounts } = useClientStore.getState()
       const ws = workspaces.find((w) => w.name === name)
-      const agent = ws?.accounts[0]?.agent ?? 'claude'
+      // `choice` is the agent picked from the New-session menu (when the workspace has more than one);
+      // otherwise fall back to the workspace's first bound agent.
+      const agent = choice?.agent ?? ws?.accounts[0]?.agent ?? 'claude'
       const bound = ws?.accounts.some((a) => a.agent === agent) ?? false
-      const account = bound
-        ? undefined
-        : (accounts.find((a) => agent in a.providers)?.name ?? 'personal')
+      const account =
+        choice?.account ??
+        (bound ? undefined : (accounts.find((a) => agent in a.providers)?.name ?? 'personal'))
       transport.send({ type: 'open-session', workspace: name, agent, account, mode })
       select(name)
       setExpanded((prev) => new Set(prev).add(name))
@@ -648,7 +679,11 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
   dropAfter: boolean
   onDragStart: (name: string, event: React.PointerEvent) => void
   onToggle: (name: string) => void
-  onNewSession: (name: string, mode: SessionMode) => void
+  onNewSession: (
+    name: string,
+    mode: SessionMode,
+    choice?: { agent: string; account?: string },
+  ) => void
   onSelectSession: (name: string, id: string) => void
   onRenameSession: (id: string, title: string) => void
   onCloseSession: (id: string) => void
@@ -662,6 +697,14 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
   }).length
   const reviewCount = sessions.filter((s) => s.status === 'done').length
   const kbd = index < 9 ? `${modLabel}${index + 1}` : null
+  // The agents the New-session menu offers: the workspace's *real* bound agents (phantom bindings
+  // filtered out via the account profiles). More than one turns the menu into a provider picker;
+  // each starts a chat (the default — a session can be switched to a terminal later).
+  const accountProfiles = useClientStore((s) => s.accounts)
+  const newSessionAgents = useMemo(
+    () => agentOptionsFor(workspace.accounts, accountProfiles, false),
+    [workspace.accounts, accountProfiles],
+  )
 
   return (
     <div
@@ -766,7 +809,7 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
               onSelect={() => openWorkspaceSettings(workspace.name)}
             >
               <SettingsSvg width={15} height={15} />
-              Workspace settings…
+              Settings
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -788,38 +831,42 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
               onCloseSession={onCloseSession}
             />
           ))}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6e6e6e] text-[12px] hover:bg-[#1f1f1f] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]"
-              >
-                <span className="flex w-1.5 flex-none items-center justify-center">
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    aria-hidden="true"
+          {newSessionAgents.length <= 1 ? (
+            // One (or no resolvable) agent: start a chat straight away, no menu.
+            <button
+              type="button"
+              onClick={() => onNewSession(workspace.name, 'chat', newSessionAgents[0])}
+              className={NEW_SESSION_CLASS}
+            >
+              <NewSessionGlyph />
+              New session
+            </button>
+          ) : (
+            // Several agents: pick the provider; each starts a chat under its bound account.
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className={NEW_SESSION_CLASS}>
+                  <NewSessionGlyph />
+                  New session
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[190px]">
+                {newSessionAgents.map((choice) => (
+                  <DropdownMenuItem
+                    key={choice.agent}
+                    onSelect={() => onNewSession(workspace.name, 'chat', choice)}
+                    className="flex items-center gap-2"
                   >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </span>
-                New session
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[170px]">
-              <DropdownMenuItem onSelect={() => onNewSession(workspace.name, 'terminal')}>
-                Terminal
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onNewSession(workspace.name, 'chat')}>
-                Chat
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                    <ProviderIcon provider={choice.agent} size={14} />
+                    <span className="text-[13px]">{choice.label}</span>
+                    <span className="ml-auto text-[11px] text-[var(--soromi-text-faint)]">
+                      {choice.accountLabel}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       )}
     </div>
