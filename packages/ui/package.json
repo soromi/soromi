@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./chat": "./src/chat/index.ts",
     "./code-viewer": "./src/files/code-viewer.tsx",
+    "./diff-viewer": "./src/files/diff-viewer.tsx",
     "./theme.css": "./src/theme.css"
   },
   "scripts": {

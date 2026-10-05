@@ -20,6 +20,9 @@ export default defineConfig({
       '@soromi/ui/code-viewer': fileURLToPath(
         new URL('../ui/src/files/code-viewer.tsx', import.meta.url),
       ),
+      '@soromi/ui/diff-viewer': fileURLToPath(
+        new URL('../ui/src/files/diff-viewer.tsx', import.meta.url),
+      ),
       // The bare package resolves to the barrel; any subpath (`@soromi/ui/lib/utils`,
       // `@soromi/ui/components/ui/*`) resolves under `src/`, so shadcn/AI-Elements' generated
       // internal imports work when the app bundles the ui source.

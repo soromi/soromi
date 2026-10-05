@@ -22,12 +22,8 @@ interface TerminalSurfaceProps {
   /** Terminal colors, supplied by the host so the engine stays theme-agnostic. */
   background: string
   foreground: string
-  /** Font size in px. Hosts can shrink it on small screens to fit more columns. Defaults to 13. */
+  /** Font size in px. Hosts can shrink it to fit more columns in a narrow pane. Defaults to 13. */
   fontSize?: number
-  /** Renderer: `canvas` (GPU-composited; right for the desktop webview, where DPR is stable) or
-   * `dom` (real text nodes; right for mobile browsers, immune to canvas DPR mis-scaling that
-   * draws cells wider than the fit and clips columns). Defaults to `canvas`. */
-  renderer?: 'canvas' | 'dom'
 }
 
 /**
@@ -42,7 +38,6 @@ export function TerminalSurface({
   background,
   foreground,
   fontSize = 13,
-  renderer = 'canvas',
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -75,22 +70,17 @@ export function TerminalSurface({
     termRef.current = term
     fitRef.current = fit
 
-    // Canvas renderer: GPU-composited, reliable in WKWebView, and free of WebGL's per-page
-    // context limit (which the parked-buffer model, one live terminal per tab, can hit). Hosts on
-    // mobile browsers pass `dom` instead (see the prop); the DOM renderer also stays as the
-    // fallback if canvas fails.
-    if (renderer === 'canvas') {
-      try {
-        term.loadAddon(new CanvasAddon())
-      } catch {
-        // DOM renderer stays.
-      }
+    // Canvas renderer: GPU-composited, reliable in the desktop webview, and free of WebGL's
+    // per-page context limit (which the parked-buffer model, one live terminal per tab, can hit).
+    // The DOM renderer stays as the fallback if canvas fails.
+    try {
+      term.loadAddon(new CanvasAddon())
+    } catch {
+      // DOM renderer stays.
     }
 
-    const offMessage = transport.onMessage((message) => {
-      if (message.type === 'output' && message.session === session) {
-        term.write(message.data)
-      }
+    const offOutput = transport.onOutput((target, data) => {
+      if (target === session) term.write(data)
     })
     const inputSub = term.onData((data) => {
       transport.send({ type: 'input', session, data })
@@ -133,7 +123,7 @@ export function TerminalSurface({
 
     return () => {
       observer.disconnect()
-      offMessage()
+      offOutput()
       offOpen()
       offReset()
       inputSub.dispose()
@@ -141,7 +131,7 @@ export function TerminalSurface({
       termRef.current = null
       fitRef.current = null
     }
-  }, [transport, session, background, foreground, fontSize, renderer])
+  }, [transport, session, background, foreground, fontSize])
 
   // Refit and focus when this pane becomes the visible one, or when this viewport gains control (a
   // hidden pane can't be fitted; gaining control needs the size re-sent to claim the PTY).

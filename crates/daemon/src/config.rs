@@ -17,8 +17,6 @@ pub fn port() -> u16 {
 
 /// The relay to dial when a config value / env var is unset (Soromi's hosted relay).
 const DEFAULT_RELAY_URL: &str = "wss://relay.soromi.dev";
-/// The web viewport base to point pairing QRs at when unset (Soromi's hosted web app).
-const DEFAULT_WEB_URL: &str = "https://remote.soromi.dev";
 /// The relay access key when unset. Public builds share this default so they reach the public
 /// relay with no setup; self-hosters set their own so only their daemons can create rooms.
 const DEFAULT_ACCESS_KEY: &str = "soromi";
@@ -29,8 +27,6 @@ const DEFAULT_ACCESS_KEY: &str = "soromi";
 struct StoredConfig {
     #[serde(default)]
     relay_url: String,
-    #[serde(default)]
-    web_url: String,
     #[serde(default)]
     access_key: String,
 }
@@ -66,11 +62,6 @@ pub fn relay_url() -> String {
     )
 }
 
-/// The web viewport base the pairing QR points at. Config file (`webUrl`) > `SOROMI_WEB_URL` > default.
-pub fn web_url() -> String {
-    resolve(&load_config().web_url, "SOROMI_WEB_URL", DEFAULT_WEB_URL)
-}
-
 /// The relay access key the daemon presents to create a room. Config file (`accessKey`) >
 /// `SOROMI_RELAY_ACCESS_KEY` > default (`soromi`).
 pub fn access_key() -> String {
@@ -85,7 +76,6 @@ pub fn access_key() -> String {
 pub fn remote_config() -> RemoteConfig {
     RemoteConfig {
         relay_url: relay_url(),
-        web_url: web_url(),
         access_key: access_key(),
     }
 }
@@ -95,7 +85,6 @@ pub fn remote_config() -> RemoteConfig {
 pub fn set_remote_config(config: &RemoteConfig) -> std::io::Result<RemoteConfig> {
     let stored = StoredConfig {
         relay_url: config.relay_url.trim().to_string(),
-        web_url: config.web_url.trim().to_string(),
         access_key: config.access_key.trim().to_string(),
     };
     let json = serde_json::to_string_pretty(&stored)?;

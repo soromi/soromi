@@ -48,14 +48,34 @@ function useElapsed(since: number | null | undefined): number {
   return Math.max(0, Math.floor((now - start) / 1000))
 }
 
+/** Elapsed seconds as a compact clock: `55s` under a minute, else `6m 55s`. */
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+/** A token count abbreviated for the running line: `840`, `6.0k`, `1.2M`. */
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
 /**
- * Live "agent is working" indicator: an accent icon plus a shimmering, cycling status word and the
- * running seconds — the way Claude Code rotates its spinner words. The `--color-background` override
- * flips the AI Elements Shimmer's sweep to a light highlight, since our app background is dark.
+ * Live "agent is working" indicator: an accent icon plus a shimmering, cycling status word, the
+ * running clock (`6m 55s`), and — when known — the turn's context tokens (`↓ 6.0k tokens`) — the way
+ * Claude Code rotates its spinner words. The `--color-background` override flips the AI Elements
+ * Shimmer's sweep to a light highlight, since our app background is dark.
  *
  * Owns its own word + second timers so those ticks re-render only this indicator, not the whole view.
  */
-export function WorkingIndicator({ since }: { since?: number | null }) {
+export function WorkingIndicator({
+  since,
+  tokens,
+}: {
+  since?: number | null
+  tokens?: number | null
+}) {
   const word = useWorkingWord()
   const elapsed = useElapsed(since)
   return (
@@ -65,7 +85,14 @@ export function WorkingIndicator({ since }: { since?: number | null }) {
     >
       <WorkingMark size={11} />
       <Shimmer duration={1.6}>{word}</Shimmer>
-      <span className="text-[var(--soromi-text-faint)] tabular-nums">· {elapsed}s</span>
+      <span className="text-[var(--soromi-text-faint)] tabular-nums">
+        · {formatElapsed(elapsed)}
+      </span>
+      {tokens != null && tokens > 0 && (
+        <span className="text-[var(--soromi-text-faint)] tabular-nums">
+          · ↓ {formatTokens(tokens)} tokens
+        </span>
+      )}
       <span className="text-[var(--soromi-text-faint)]">
         · <kbd className="font-sans">esc</kbd> to interrupt
       </span>

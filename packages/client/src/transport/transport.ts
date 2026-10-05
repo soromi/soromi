@@ -9,6 +9,8 @@ export interface Transport {
   connect(): void
   send(message: ClientMessage): void
   onMessage(listener: (message: ServerMessage) => void): () => void
+  /** Fires with each piece of terminal output for an attached session. */
+  onOutput(listener: (session: string, data: string) => void): () => void
   /** Fires each time the connection (re)opens. */
   onOpen(listener: () => void): () => void
   /** Fires each time the connection drops. */

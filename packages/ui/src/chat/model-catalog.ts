@@ -1,6 +1,7 @@
-// The selectable models per provider. Today only Claude has a catalog; another provider adds its
-// models, effort ladder, and context windows here in one place, and the composer's model picker +
-// the "context filling up" banner pick it up by the session's agent — no provider names elsewhere.
+// The selectable models per provider. The list is **provided by the daemon** (each provider owns its
+// own model names, ids, effort ladder, and context windows) and delivered on connect via the
+// `model-catalog` message; the app populates it with `setModelCatalog`. The composer's model picker
+// and the "context filling up" banner read it by the session's agent — no provider names live here.
 
 /** A selectable model. `value` is the launch alias the daemon passes (null = the provider default);
  * `effort` marks models that accept a reasoning-effort level; `contextLimit` sizes the context meter. */
@@ -23,70 +24,53 @@ export interface ProviderModels {
   defaultEffort: string
 }
 
-const MILLION = 1_000_000
 const STANDARD = 200_000
 
-const CLAUDE: ProviderModels = {
-  models: [
-    {
-      value: null,
-      label: 'Default',
-      description: 'Opus 5 with 1M context · best for everyday, complex tasks',
-      effort: true,
-      contextLimit: MILLION,
-    },
-    {
-      value: 'opus',
-      label: 'Opus',
-      description: 'Opus 5 with 1M context · best for everyday, complex tasks',
-      effort: true,
-      contextLimit: MILLION,
-    },
-    {
-      value: 'claude-opus-4-8[1m]',
-      label: 'Opus 4.8',
-      description: 'Opus 4.8 with 1M context · the prior Opus generation',
-      effort: true,
-      contextLimit: MILLION,
-    },
-    {
-      value: 'fable',
-      label: 'Fable',
-      description: 'Fable 5 · most capable for your hardest, longest-running tasks',
-      effort: true,
-      contextLimit: STANDARD,
-    },
-    {
-      value: 'sonnet',
-      label: 'Sonnet',
-      description: 'Sonnet 5 · efficient for routine tasks',
-      effort: false,
-      contextLimit: STANDARD,
-    },
-    {
-      value: 'haiku',
-      label: 'Haiku',
-      description: 'Haiku 4.5 · fastest for quick answers',
-      effort: false,
-      contextLimit: STANDARD,
-    },
-  ],
-  effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-  effortLabels: { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'X-High', max: 'Max' },
-  defaultEffort: 'high',
+/** The wire shape of a catalog (from `@soromi/protocol`): `value` may be absent for the default,
+ * and `effortLabels` values are optional. `setModelCatalog` normalizes it into `ProviderModels`. */
+interface WireProviderModels {
+  models: Array<{
+    value?: string | null
+    label: string
+    description: string
+    effort: boolean
+    contextLimit: number
+  }>
+  effortLevels: string[]
+  effortLabels: Record<string, string | undefined>
+  defaultEffort: string
 }
 
-const CATALOG: Record<string, ProviderModels> = { claude: CLAUDE }
+/** The daemon-provided catalogs, keyed by provider. Empty until the `model-catalog` message lands. */
+let catalog: Record<string, ProviderModels> = {}
+
+/** Ingest the per-provider catalogs from the daemon, normalizing the wire shape (absent `value` →
+ * `null`, so the picker's `value === model` matching and the daemon's "default" round-trip cleanly). */
+export function setModelCatalog(next: Record<string, WireProviderModels | undefined>): void {
+  const normalized: Record<string, ProviderModels> = {}
+  for (const [provider, pm] of Object.entries(next)) {
+    if (!pm) continue
+    normalized[provider] = {
+      models: pm.models.map((m) => ({ ...m, value: m.value ?? null })),
+      effortLevels: pm.effortLevels,
+      effortLabels: Object.fromEntries(
+        Object.entries(pm.effortLabels).filter(([, v]) => v != null),
+      ) as Record<string, string>,
+      defaultEffort: pm.defaultEffort,
+    }
+  }
+  catalog = normalized
+}
 
 /** The model-picker data for a provider, or `null` if it exposes no models (hides the picker). */
 export function modelCatalog(agent: string | undefined): ProviderModels | null {
-  return (agent && CATALOG[agent]) || null
+  return (agent && catalog[agent]) || null
 }
 
 /** The context-window size for a session's model, for the "context filling up" banner. */
 export function contextLimitFor(agent: string | undefined, model: string | null): number {
-  const catalog = modelCatalog(agent)
-  if (!catalog) return STANDARD
-  const option = catalog.models.find((m) => m.value === model) ?? catalog.models[0]
+  const found = modelCatalog(agent)
+  if (!found) return STANDARD
+  const option = found.models.find((m) => m.value === model) ?? found.models[0]
   return option?.contextLimit ?? STANDARD
 }

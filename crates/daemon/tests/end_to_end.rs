@@ -1,13 +1,15 @@
-//! Drives the real WebSocket server the way the GUI does: create a space, list it, attach, and
-//! exchange terminal I/O. Proves the Rust daemon serves the same wire protocol as the Node one.
+//! Drives the real WebSocket server the way a client does, pinning what it is sent: the version
+//! handshake, binary terminal frames, per-session updates in place of the whole workspace list, and
+//! directory updates only for directories it listed.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::{SinkExt, Stream, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
-use tokio_tungstenite::tungstenite::{Error, Message};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use soromi_daemon::accounts::store::FileAccountManager;
 use soromi_daemon::keep_awake::backend::NoopKeepAwake;
@@ -17,221 +19,371 @@ use soromi_daemon::notifications::notifier::NoopNotifier;
 use soromi_daemon::sound::player::NoopSoundPlayer;
 use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
-use soromi_protocol::KeepAwakeMode;
+use soromi_protocol::{KeepAwakeMode, PROTOCOL_VERSION, TERMINAL_OUTPUT};
 
-async fn next_json<S>(ws: &mut S) -> Value
-where
-    S: Stream<Item = Result<Message, Error>> + Unpin,
-{
-    loop {
-        let message = tokio::time::timeout(Duration::from_secs(5), ws.next())
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// A daemon serving on a free port, with its own temporary home and workspace root.
+struct Daemon {
+    addr: std::net::SocketAddr,
+    /// The workspace root, with symlinks resolved: the directory watcher matches on real paths, and
+    /// a temporary directory on macOS sits behind one.
+    root: std::path::PathBuf,
+    _root: tempfile::TempDir,
+    _home: tempfile::TempDir,
+}
+
+impl Daemon {
+    async fn start() -> Self {
+        let home = tempfile::tempdir().unwrap();
+        soromi_daemon::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
+        let keep_awake = Arc::new(KeepAwakeController::new(
+            Arc::new(NoopKeepAwake),
+            KeepAwakeMode::Off,
+        ));
+        let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None);
+        let accounts = Arc::new(FileAccountManager);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let pairing = soromi_daemon::pairing::PairingService::new(
+            hub.clone(),
+            accounts.clone(),
+            "ws://localhost:8787".to_string(),
+            "soromi".to_string(),
+        );
+        tokio::spawn(serve(listener, hub, accounts, pairing));
+
+        Self {
+            addr,
+            root: root.path().canonicalize().unwrap(),
+            _root: root,
+            _home: home,
+        }
+    }
+
+    /// Opens a socket and says nothing yet.
+    async fn open(&self) -> Socket {
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", self.addr))
             .await
-            .expect("timed out waiting for a message")
-            .expect("stream ended")
-            .expect("websocket error");
-        if let Message::Text(text) = message {
-            return serde_json::from_str(&text).expect("valid json");
-        }
+            .unwrap();
+        ws
+    }
+
+    /// Connects and completes the version handshake.
+    async fn connect(&self) -> Socket {
+        let mut ws = self.open().await;
+        send(
+            &mut ws,
+            json!({ "type": "hello", "protocol": PROTOCOL_VERSION, "clientId": "test" }),
+        )
+        .await;
+        let welcome = read_until(&mut ws, "welcome").await;
+        assert_eq!(welcome["protocol"], PROTOCOL_VERSION);
+        ws
+    }
+
+    /// Creates a one-session space running `agent` and returns the session id.
+    async fn create_space(&self, ws: &mut Socket, agent: &str) -> String {
+        send(
+            ws,
+            json!({
+                "type": "create-space",
+                "name": "kazomi",
+                "root": self.root.to_string_lossy(),
+                "agent": agent,
+                "account": "personal"
+            }),
+        )
+        .await;
+        read_until(ws, "workspace-opened").await;
+        send(ws, json!({ "type": "list-workspaces" })).await;
+        let list = read_until(ws, "workspace-list").await;
+        list["workspaces"][0]["sessions"][0]["id"]
+            .as_str()
+            .expect("session id")
+            .to_string()
     }
 }
 
-async fn read_until<S>(ws: &mut S, ty: &str) -> Value
-where
-    S: Stream<Item = Result<Message, Error>> + Unpin,
-{
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        soromi_daemon::home::set_soromi_home(None);
+    }
+}
+
+async fn send(ws: &mut Socket, value: Value) {
+    ws.send(Message::Text(value.to_string())).await.unwrap();
+}
+
+/// The next data frame, or `None` once `wait` passes with nothing.
+async fn next_frame(ws: &mut Socket, wait: Duration) -> Option<Message> {
     loop {
-        let value = next_json(ws).await;
-        if value["type"] == ty {
-            return value;
+        match tokio::time::timeout(wait, ws.next()).await {
+            Err(_) => return None,
+            Ok(frame) => match frame.expect("stream ended").expect("websocket error") {
+                frame @ (Message::Text(_) | Message::Binary(_)) => return Some(frame),
+                _ => continue,
+            },
         }
     }
 }
 
-/// Lists workspaces and returns the first workspace's first session id.
-async fn first_session_id<S>(ws: &mut S) -> String
-where
-    S: Stream<Item = Result<Message, Error>> + Unpin + SinkExt<Message> + Unpin,
-    <S as futures_util::Sink<Message>>::Error: std::fmt::Debug,
-{
-    ws.send(Message::Text(
-        json!({ "type": "list-workspaces" }).to_string(),
-    ))
-    .await
-    .unwrap();
-    let list = read_until(ws, "workspace-list").await;
-    list["workspaces"][0]["sessions"][0]["id"]
-        .as_str()
-        .expect("session id")
-        .to_string()
+/// Reads until a JSON message of type `ty` arrives, skipping everything else.
+async fn read_until(ws: &mut Socket, ty: &str) -> Value {
+    loop {
+        let frame = next_frame(ws, Duration::from_secs(5))
+            .await
+            .unwrap_or_else(|| panic!("timed out waiting for `{ty}`"));
+        if let Message::Text(text) = frame {
+            let value: Value = serde_json::from_str(&text).expect("valid json");
+            if value["type"] == ty {
+                return value;
+            }
+        }
+    }
+}
+
+/// Every JSON message type seen until the link has been quiet for `quiet`.
+async fn drain_types(ws: &mut Socket, quiet: Duration) -> Vec<String> {
+    let mut types = Vec::new();
+    while let Some(frame) = next_frame(ws, quiet).await {
+        if let Message::Text(text) = frame {
+            let value: Value = serde_json::from_str(&text).expect("valid json");
+            types.push(value["type"].as_str().unwrap_or_default().to_string());
+        }
+    }
+    types
+}
+
+/// Reads binary terminal frames for `slot` until their combined text contains `needle`.
+async fn terminal_contains(ws: &mut Socket, slot: u16, needle: &str) -> bool {
+    let mut seen = String::new();
+    while let Some(frame) = next_frame(ws, Duration::from_secs(5)).await {
+        if let Message::Binary(bytes) = frame {
+            assert_eq!(
+                bytes[0], TERMINAL_OUTPUT,
+                "a terminal frame leads with its opcode"
+            );
+            assert_eq!(u16::from_be_bytes([bytes[1], bytes[2]]), slot);
+            seen.push_str(std::str::from_utf8(&bytes[3..]).expect("utf-8 output"));
+            if seen.contains(needle) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[tokio::test]
 #[serial_test::serial]
-async fn resize_reaches_the_pty() {
-    let home = tempfile::tempdir().unwrap();
-    soromi_daemon::home::set_soromi_home(Some(home.path().to_path_buf()));
-    let root = tempfile::tempdir().unwrap();
+async fn a_client_on_another_version_is_told_which_side_to_update() {
+    let daemon = Daemon::start().await;
 
-    let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
-    let keep_awake = Arc::new(KeepAwakeController::new(
-        Arc::new(NoopKeepAwake),
-        KeepAwakeMode::Off,
-    ));
-    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None);
-    let accounts = Arc::new(FileAccountManager);
+    let mut older = daemon.open().await;
+    send(
+        &mut older,
+        json!({ "type": "hello", "protocol": PROTOCOL_VERSION - 1, "clientId": "old" }),
+    )
+    .await;
+    let reply = read_until(&mut older, "incompatible").await;
+    assert_eq!(reply["action"], "update-client");
+    assert_eq!(reply["protocol"], PROTOCOL_VERSION);
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let pairing = soromi_daemon::pairing::PairingService::new(
-        hub.clone(),
-        accounts.clone(),
-        "ws://localhost:8787".to_string(),
-        "http://localhost:1430".to_string(),
-        "soromi".to_string(),
+    let mut newer = daemon.open().await;
+    send(
+        &mut newer,
+        json!({ "type": "hello", "protocol": PROTOCOL_VERSION + 1, "clientId": "new" }),
+    )
+    .await;
+    assert_eq!(
+        read_until(&mut newer, "incompatible").await["action"],
+        "update-daemon"
     );
-    tokio::spawn(serve(listener, hub, accounts, pairing));
+}
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-        .await
-        .unwrap();
+#[tokio::test]
+#[serial_test::serial]
+async fn a_ping_is_echoed_with_its_nonce() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
 
-    ws.send(Message::Text(
-        json!({
-            "type": "create-space",
-            "name": "kazomi",
-            "root": root.path().to_string_lossy(),
-            "agent": "/bin/sh",
-            "account": "personal"
-        })
-        .to_string(),
-    ))
-    .await
-    .unwrap();
-    read_until(&mut ws, "workspace-opened").await;
+    send(&mut ws, json!({ "type": "ping", "nonce": 41 })).await;
+    assert_eq!(read_until(&mut ws, "pong").await["nonce"], 41);
+}
 
-    let session = first_session_id(&mut ws).await;
+#[tokio::test]
+#[serial_test::serial]
+async fn terminal_output_arrives_as_binary_frames() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
+    let session = daemon.create_space(&mut ws, "/bin/cat").await;
 
-    ws.send(Message::Text(
-        json!({ "type": "attach", "session": session }).to_string(),
-    ))
-    .await
-    .unwrap();
-    ws.send(Message::Text(
-        json!({ "type": "resize", "session": session, "cols": 120, "rows": 40 }).to_string(),
-    ))
-    .await
-    .unwrap();
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    let attached = read_until(&mut ws, "attached").await;
+    assert_eq!(attached["session"], session.as_str());
+    let slot = attached["slot"].as_u64().expect("slot") as u16;
+
+    // The attach repaint leads with a terminal reset, then live output follows on the same slot.
+    assert!(terminal_contains(&mut ws, slot, "\u{1b}c").await);
+    send(
+        &mut ws,
+        json!({ "type": "input", "session": session, "data": "ping\n" }),
+    )
+    .await;
+    assert!(
+        terminal_contains(&mut ws, slot, "ping").await,
+        "did not receive the echoed output"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_detached_session_stops_streaming_until_it_is_attached_again() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
+    let session = daemon.create_space(&mut ws, "/bin/cat").await;
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    let slot = read_until(&mut ws, "attached").await["slot"]
+        .as_u64()
+        .expect("slot") as u16;
+    assert!(terminal_contains(&mut ws, slot, "\u{1b}c").await);
+
+    send(&mut ws, json!({ "type": "detach", "session": session })).await;
+    drain_types(&mut ws, Duration::from_millis(300)).await;
+    send(
+        &mut ws,
+        json!({ "type": "input", "session": session, "data": "quiet\n" }),
+    )
+    .await;
+    let mut binary_frames = 0;
+    while let Some(frame) = next_frame(&mut ws, Duration::from_millis(400)).await {
+        if matches!(frame, Message::Binary(_)) {
+            binary_frames += 1;
+        }
+    }
+    assert_eq!(binary_frames, 0, "output kept streaming after detach");
+
+    // Attaching again repaints from the scrollback, which includes what was missed.
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    assert!(terminal_contains(&mut ws, slot, "quiet").await);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_session_change_is_sent_as_that_session_only() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
+    let session = daemon.create_space(&mut ws, "/bin/cat").await;
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    // Let the list and attach traffic from setup settle before watching what a change sends.
+    drain_types(&mut ws, Duration::from_millis(400)).await;
+
+    // Submitting input marks the session as working: a change to that one session.
+    send(
+        &mut ws,
+        json!({ "type": "input", "session": session, "data": "go\r" }),
+    )
+    .await;
+    let update = read_until(&mut ws, "session-updated").await;
+    assert_eq!(update["workspace"], "kazomi");
+    assert_eq!(update["status"], "thinking");
+    assert_eq!(update["session"]["id"], session.as_str());
+    assert_eq!(update["session"]["status"], "thinking");
+
+    let after = drain_types(&mut ws, Duration::from_millis(400)).await;
+    assert!(
+        !after.iter().any(|ty| ty == "workspace-list"),
+        "the whole list was resent for a one-session change: {after:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_client_that_skips_the_hello_is_told_to_update_and_served_nothing() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.open().await;
+
+    send(&mut ws, json!({ "type": "list-workspaces" })).await;
+    send(&mut ws, json!({ "type": "ping", "nonce": 1 })).await;
+    assert_eq!(
+        drain_types(&mut ws, Duration::from_millis(400)).await,
+        vec!["incompatible"]
+    );
+
+    // Saying hello after all is enough to be served.
+    send(
+        &mut ws,
+        json!({ "type": "hello", "protocol": PROTOCOL_VERSION, "clientId": "late" }),
+    )
+    .await;
+    read_until(&mut ws, "welcome").await;
+    send(&mut ws, json!({ "type": "ping", "nonce": 2 })).await;
+    assert_eq!(read_until(&mut ws, "pong").await["nonce"], 2);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_resize_reaches_the_pty() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
+    let session = daemon.create_space(&mut ws, "/bin/sh").await;
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    let slot = read_until(&mut ws, "attached").await["slot"]
+        .as_u64()
+        .expect("slot") as u16;
+
+    send(
+        &mut ws,
+        json!({ "type": "resize", "session": session, "cols": 120, "rows": 40 }),
+    )
+    .await;
     // Give the shell a moment to receive SIGWINCH before it runs the command.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    ws.send(Message::Text(
-        json!({ "type": "input", "session": session, "data": "stty size\n" }).to_string(),
-    ))
-    .await
-    .unwrap();
+    send(
+        &mut ws,
+        json!({ "type": "input", "session": session, "data": "stty size\n" }),
+    )
+    .await;
 
     // `stty size` prints "<rows> <cols>".
-    let got = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let value = next_json(&mut ws).await;
-            if value["type"] == "output"
-                && value["data"].as_str().is_some_and(|d| d.contains("40 120"))
-            {
-                break true;
-            }
-        }
-    })
-    .await
-    .unwrap_or(false);
-    assert!(got, "PTY did not report the resized dimensions");
-
-    soromi_daemon::home::set_soromi_home(None);
+    assert!(
+        terminal_contains(&mut ws, slot, "40 120").await,
+        "the PTY did not report the resized dimensions"
+    );
 }
 
 #[tokio::test]
 #[serial_test::serial]
-async fn gui_can_create_list_attach_and_exchange_io() {
-    let home = tempfile::tempdir().unwrap();
-    soromi_daemon::home::set_soromi_home(Some(home.path().to_path_buf()));
-    let root = tempfile::tempdir().unwrap();
+async fn a_directory_change_goes_only_to_clients_that_listed_it() {
+    let daemon = Daemon::start().await;
+    let mut watching = daemon.connect().await;
+    daemon.create_space(&mut watching, "/bin/cat").await;
+    let mut other = daemon.connect().await;
 
-    let notifications = Arc::new(NotificationController::new(Arc::new(NoopNotifier)));
-    let keep_awake = Arc::new(KeepAwakeController::new(
-        Arc::new(NoopKeepAwake),
-        KeepAwakeMode::Off,
-    ));
-    let hub = WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None);
-    let accounts = Arc::new(FileAccountManager);
+    send(
+        &mut watching,
+        json!({ "type": "list-dir", "workspace": "kazomi", "path": "" }),
+    )
+    .await;
+    read_until(&mut watching, "dir-listing").await;
+    drain_types(&mut other, Duration::from_millis(300)).await;
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let pairing = soromi_daemon::pairing::PairingService::new(
-        hub.clone(),
-        accounts.clone(),
-        "ws://localhost:8787".to_string(),
-        "http://localhost:1430".to_string(),
-        "soromi".to_string(),
+    std::fs::write(daemon.root.join("new.txt"), "hello").unwrap();
+
+    let listing = read_until(&mut watching, "dir-listing").await;
+    assert!(
+        listing["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "new.txt")
     );
-    tokio::spawn(serve(listener, hub, accounts, pairing));
-
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-        .await
-        .unwrap();
-
-    // Create a space backed by a trivial PTY program.
-    ws.send(Message::Text(
-        json!({
-            "type": "create-space",
-            "name": "kazomi",
-            "root": root.path().to_string_lossy(),
-            "agent": "/bin/cat",
-            "account": "personal"
-        })
-        .to_string(),
-    ))
-    .await
-    .unwrap();
-    let opened = read_until(&mut ws, "workspace-opened").await;
-    assert_eq!(opened["workspace"], "kazomi");
-
-    // List workspaces.
-    ws.send(Message::Text(
-        json!({ "type": "list-workspaces" }).to_string(),
-    ))
-    .await
-    .unwrap();
-    let list = read_until(&mut ws, "workspace-list").await;
-    assert_eq!(list["workspaces"][0]["name"], "kazomi");
-    let session = list["workspaces"][0]["sessions"][0]["id"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    assert_eq!(list["workspaces"][0]["sessions"][0]["agent"], "/bin/cat");
-
-    // Attach, then exchange terminal I/O (cat echoes input in a PTY).
-    ws.send(Message::Text(
-        json!({ "type": "attach", "session": session }).to_string(),
-    ))
-    .await
-    .unwrap();
-    ws.send(Message::Text(
-        json!({ "type": "input", "session": session, "data": "ping\n" }).to_string(),
-    ))
-    .await
-    .unwrap();
-
-    let echoed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let value = next_json(&mut ws).await;
-            if value["type"] == "output"
-                && value["data"].as_str().is_some_and(|d| d.contains("ping"))
-            {
-                break true;
-            }
-        }
-    })
-    .await
-    .unwrap_or(false);
-    assert!(echoed, "did not receive echoed terminal output");
-
-    soromi_daemon::home::set_soromi_home(None);
+    let seen = drain_types(&mut other, Duration::from_millis(500)).await;
+    assert!(
+        !seen.iter().any(|ty| ty == "dir-listing"),
+        "a client that never listed the directory was sent its listing: {seen:?}"
+    );
 }

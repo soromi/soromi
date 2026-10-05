@@ -3,6 +3,7 @@ import { assertNever } from '@/lib/assert-never'
 
 //Components
 import { FilePreview } from '@/features/files/file-preview'
+import { DiffPreview } from '@/features/git/diff-preview'
 import { Settings } from '@/features/settings/settings'
 import { WorkspaceSettings } from '@/features/workspaces/workspace-settings'
 import { CreateSpaceOverlay } from '@/features/welcome/welcome'
@@ -18,6 +19,8 @@ export function OverlayScreen({ overlay }: { overlay: Overlay }) {
   switch (overlay.type) {
     case 'file':
       return <FilePreview overlay={overlay} />
+    case 'diff':
+      return <DiffPreview overlay={overlay} />
     case 'create-space':
       return <CreateSpaceOverlay />
     case 'settings':

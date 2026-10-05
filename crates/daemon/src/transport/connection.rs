@@ -1,20 +1,32 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use soromi_protocol::{ClientMessage, ServerMessage};
-use tokio::sync::{broadcast, mpsc};
+use soromi_protocol::{ClientMessage, IncompatibleAction, PROTOCOL_VERSION, ServerMessage, Status};
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use super::coalesce::{Coalescer, until};
+use super::outbound::{Closed, Frame, LinkState, Outbound};
 use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
 use crate::sessions::chat::ChatSession;
+use crate::sessions::delta::DeltaFrame;
 use crate::sessions::session::Session;
 use crate::workspaces::service::{CreateSpaceInput, WorkspaceService};
 
 /// Chat messages sent per page: the recent tail on attach, and each "Load earlier" step.
 const CHAT_PAGE: usize = 80;
 
-pub type Outbound = mpsc::UnboundedSender<ServerMessage>;
+/// Terminal output is merged over this window. Short enough to be invisible, long enough that a
+/// burst of small reads becomes a few frames.
+const OUTPUT_WINDOW: Duration = Duration::from_millis(5);
+/// A terminal frame is sent early once it holds this much, however fast output is arriving.
+const OUTPUT_MAX_BATCH: usize = 64 * 1024;
+
+/// Streaming chat text is merged over this window: about twenty updates a second at most.
+const DELTA_WINDOW: Duration = Duration::from_millis(50);
+const DELTA_MAX_BATCH: usize = 16 * 1024;
 
 /// Per-connection message routing. A viewport lists and opens workspaces, attaches to one,
 /// then its input/resize drives that session while output and status stream back. Owns the
@@ -25,7 +37,14 @@ pub struct Connection {
     /// Present only on the trusted local link; device management is refused without it.
     pairing: Option<Arc<PairingService>>,
     out: Outbound,
+    /// What this connection's tasks share about the client: its protocol version, whether it is
+    /// there, and which directories it has listed.
+    link: Arc<LinkState>,
+    /// Whether this client has already been told it cannot be served, so it is told only once.
+    refused: bool,
     attached: HashMap<String, JoinHandle<()>>,
+    /// The slot each attached terminal's binary output frames are tagged with.
+    slots: HashMap<String, u16>,
     /// Forwards notification banners to this viewport as `Notify` messages, while it has opted into
     /// native notifications (the Electron shell). Its live broadcast subscription is what tells the
     /// controller to route banners here instead of firing them via the OS.
@@ -40,6 +59,7 @@ impl Connection {
         accounts: Arc<FileAccountManager>,
         pairing: Option<Arc<PairingService>>,
         out: Outbound,
+        link: Arc<LinkState>,
         viewer_id: u64,
     ) -> Self {
         Self {
@@ -47,14 +67,52 @@ impl Connection {
             accounts,
             pairing,
             out,
+            link,
+            refused: false,
             attached: HashMap::new(),
+            slots: HashMap::new(),
             notify_task: None,
             viewer_id,
         }
     }
 
     pub fn handle(&mut self, message: ClientMessage) {
+        // Nothing is served before a hello this daemon can speak to. A client that skips it is one
+        // from before the handshake existed: it is told to update, once, and otherwise ignored.
+        if !self.link.is_ready() && !matches!(message, ClientMessage::Hello { .. }) {
+            if !self.refused {
+                self.refused = true;
+                self.send(ServerMessage::Incompatible {
+                    protocol: PROTOCOL_VERSION,
+                    action: IncompatibleAction::UpdateClient,
+                });
+            }
+            return;
+        }
         match message {
+            ClientMessage::Hello { protocol, .. } => {
+                // A hello starts a client from scratch. On a relay link a new device can take over
+                // the daemon's standing socket, so whatever the last one had attached is dropped.
+                self.reset_client();
+                if protocol == PROTOCOL_VERSION {
+                    self.link.set_protocol(protocol);
+                    self.send(ServerMessage::Welcome {
+                        protocol: PROTOCOL_VERSION,
+                        version: crate::updates::current_version().to_string(),
+                    });
+                } else {
+                    self.refused = true;
+                    self.send(ServerMessage::Incompatible {
+                        protocol: PROTOCOL_VERSION,
+                        action: if protocol < PROTOCOL_VERSION {
+                            IncompatibleAction::UpdateClient
+                        } else {
+                            IncompatibleAction::UpdateDaemon
+                        },
+                    });
+                }
+            }
+            ClientMessage::Ping { nonce } => self.send(ServerMessage::Pong { nonce }),
             ClientMessage::ListWorkspaces => {
                 // A viewport (re)connecting always asks for the workspace list; reply with the
                 // current control state too, so a fresh page (e.g. a phone that refreshed) knows
@@ -234,6 +292,8 @@ impl Connection {
             }
             ClientMessage::SetKeepAwakeMode { mode } => self.hub.set_keep_awake_mode(mode),
             ClientMessage::ListDir { workspace, path } => {
+                // Remember it, so this viewport is told when that directory changes on disk.
+                self.link.mark_listed(&workspace, &path);
                 let entries = self.hub.list_dir(&workspace, &path);
                 self.send(ServerMessage::DirListing {
                     workspace,
@@ -261,9 +321,45 @@ impl Connection {
                     message: format!("couldn't save {path}: {error}"),
                 }),
             },
+            ClientMessage::OpenShell {
+                workspace,
+                shell,
+                folder,
+            } => {
+                // Spawning a shell only makes it viewable; typing into it is still gated by `Input`,
+                // so this isn't controller-gated. Surface a spawn failure instead of swallowing it.
+                if let Err(error) = self.hub.open_shell(&workspace, &shell, &folder) {
+                    self.send(ServerMessage::Error {
+                        message: format!("couldn't open terminal: {error}"),
+                    });
+                }
+            }
+            ClientMessage::GitStatus { workspace } => {
+                let status = self.hub.git_status(&workspace);
+                self.send(ServerMessage::GitStatus { workspace, status });
+            }
+            ClientMessage::GitDiff {
+                workspace,
+                path,
+                staged,
+            } => {
+                let (patch, truncated) = self.hub.git_diff(&workspace, &path, staged);
+                self.send(ServerMessage::GitDiff {
+                    workspace,
+                    path,
+                    staged,
+                    patch,
+                    truncated,
+                });
+            }
             ClientMessage::ListSkills { session } => {
                 let skills = self.hub.list_skills(&session);
                 self.send(ServerMessage::SkillList { session, skills });
+            }
+            ClientMessage::ListModels => {
+                self.send(ServerMessage::ModelCatalog {
+                    catalog: crate::providers::all_catalogs(),
+                });
             }
             ClientMessage::ListAccounts => self.send_accounts(),
             ClientMessage::SaveAccount { profile } => {
@@ -295,7 +391,7 @@ impl Connection {
                 }
             }
             ClientMessage::GetRemoteConfig => {
-                // Local-link only, like device management: the relay/web URLs are a host setting.
+                // Local-link only, like device management: the relay is a host setting.
                 if self.pairing.is_some() {
                     self.send(ServerMessage::RemoteConfig {
                         config: crate::config::remote_config(),
@@ -309,7 +405,6 @@ impl Connection {
                             // Apply live so new pairings + existing dials use the new relay + key.
                             pairing.set_remote(
                                 resolved.relay_url.clone(),
-                                resolved.web_url.clone(),
                                 resolved.access_key.clone(),
                             );
                             self.send(ServerMessage::RemoteConfig { config: resolved });
@@ -353,6 +448,11 @@ impl Connection {
                 self.set_notifications_native(enabled)
             }
             ClientMessage::Attach { session } => self.attach(&session),
+            ClientMessage::Detach { session } => {
+                if let Some(forwarder) = self.attached.remove(&session) {
+                    forwarder.abort();
+                }
+            }
             ClientMessage::Input { session, data } => {
                 // Only the controlling viewport drives the terminal.
                 if self.hub.is_controller(self.viewer_id)
@@ -437,10 +537,32 @@ impl Connection {
         });
     }
 
-    /// Replays scrollback and current status, then streams both. Re-attaching replaces the
-    /// prior forwarder, so output is never streamed twice for one session on one connection.
-    /// The snapshot is prefixed with a terminal reset (`ESC c`) so a re-attach (reconnect) wipes
-    /// the old content instead of writing on top of it.
+    /// Drops everything tied to the client on the other end: the device left, or a new one said
+    /// hello on the same link. Stops its streams and forgets what it had attached and listed.
+    pub fn reset_client(&mut self) {
+        for (_, handle) in self.attached.drain() {
+            handle.abort();
+        }
+        self.slots.clear();
+        if let Some(task) = self.notify_task.take() {
+            task.abort();
+        }
+        self.refused = false;
+        self.link.reset();
+    }
+
+    /// The slot this connection tags a session's terminal frames with, assigned on first attach.
+    fn slot_for(&mut self, session_id: &str) -> u16 {
+        if let Some(slot) = self.slots.get(session_id) {
+            return *slot;
+        }
+        let slot = self.slots.len() as u16;
+        self.slots.insert(session_id.to_string(), slot);
+        slot
+    }
+
+    /// Replays a session's current state, then streams it. Re-attaching replaces the prior
+    /// forwarder, so nothing is streamed twice for one session on one connection.
     fn attach(&mut self, session_id: &str) {
         if let Some(previous) = self.attached.remove(session_id) {
             previous.abort();
@@ -449,162 +571,325 @@ impl Connection {
         // spec (a no-op if it's already live), so opening a tab is what launches its agent.
         self.hub.ensure_session(session_id);
         // A tab is either a PTY terminal or a headless chat; attach whichever exists.
-        if let Some(session) = self.hub.get(session_id) {
-            self.attach_pty(session_id, &session);
+        let id = session_id.to_string();
+        let out = self.out.clone();
+        let handle = if let Some(session) = self.hub.get(session_id) {
+            let slot = self.slot_for(session_id);
+            tokio::spawn(async move {
+                let _ = forward_pty(out, id, session, slot).await;
+            })
         } else if let Some(chat) = self.hub.get_chat(session_id) {
-            self.attach_chat(session_id, &chat);
-        }
-    }
-
-    /// Replays scrollback + status for a PTY terminal, then streams output/status/chat.
-    fn attach_pty(&mut self, session_id: &str, session: &Session) {
-        self.send(ServerMessage::Output {
-            session: session_id.to_string(),
-            data: format!("\u{1b}c{}", session.snapshot()),
-        });
-        self.send(ServerMessage::Status {
-            session: session_id.to_string(),
-            status: session.status(),
-        });
-        // Reset the chat view, then replay the transcript so far. A session with no transcript
-        // (non-Claude, or before its first hook) sends the reset and no events, so the viewport
-        // falls back to the terminal.
-        self.send(ServerMessage::ChatReset {
-            session: session_id.to_string(),
-        });
-        let chat = session.chat_snapshot();
-        if !chat.is_empty() {
-            self.send(ServerMessage::Chat {
-                session: session_id.to_string(),
-                events: chat,
-            });
-        }
-
-        let out = self.out.clone();
-        let id = session_id.to_string();
-        let mut output_rx = session.subscribe_output();
-        let mut status_rx = session.subscribe_status();
-        let mut chat_rx = session.subscribe_chat();
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    output = output_rx.recv() => match output {
-                        Ok(data) => {
-                            let _ = out.send(ServerMessage::Output { session: id.clone(), data });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    changed = status_rx.changed() => {
-                        if changed.is_err() {
-                            break;
-                        }
-                        let status = *status_rx.borrow_and_update();
-                        let _ = out.send(ServerMessage::Status { session: id.clone(), status });
-                    }
-                    event = chat_rx.recv() => match event {
-                        Ok(event) => {
-                            let _ = out.send(ServerMessage::Chat {
-                                session: id.clone(),
-                                events: vec![event],
-                            });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                }
-            }
-        });
+            tokio::spawn(async move {
+                let _ = forward_chat(out, id, chat).await;
+            })
+        } else {
+            return;
+        };
         self.attached.insert(session_id.to_string(), handle);
     }
+}
 
-    /// Attaches a headless chat session: sends its status + transcript-so-far, then streams status and
-    /// new chat events. No terminal output/scrollback - the chat view renders from the events.
-    fn attach_chat(&mut self, session_id: &str, session: &ChatSession) {
-        self.send(ServerMessage::Status {
-            session: session_id.to_string(),
-            status: session.status(),
-        });
-        self.send(ServerMessage::ChatReset {
-            session: session_id.to_string(),
-        });
-        // Only the recent tail, so a long transcript doesn't flood the wire / balloon the webview; the
-        // viewport pages back with `ChatLoadEarlier`.
-        let (tail, has_more) = session.chat_tail(CHAT_PAGE);
-        if !tail.is_empty() || has_more {
-            self.send(ServerMessage::ChatHistory {
-                session: session_id.to_string(),
-                events: tail,
-                has_more,
-            });
-        }
-        // A viewer joining mid-turn should see the in-progress reply.
-        let delta = session.delta_snapshot();
-        if !delta.is_empty() {
-            self.send(ServerMessage::ChatDelta {
-                session: session_id.to_string(),
-                text: delta,
-            });
-        }
-        // ...and any tool approvals still awaiting an answer.
-        for approval in session.approval_snapshot() {
-            self.send(ServerMessage::ChatApproval {
-                session: session_id.to_string(),
-                approval,
-            });
-        }
+/// Where a terminal's output goes on one connection: binary frames tagged with its slot.
+struct TerminalSink {
+    out: Outbound,
+    slot: u16,
+}
 
-        let out = self.out.clone();
-        let id = session_id.to_string();
-        let mut status_rx = session.subscribe_status();
-        let mut chat_rx = session.subscribe_chat();
-        let mut delta_rx = session.subscribe_delta();
-        let mut approval_rx = session.subscribe_approval();
-        let mut resolved_rx = session.subscribe_resolved();
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    changed = status_rx.changed() => {
-                        if changed.is_err() { break }
-                        let status = *status_rx.borrow_and_update();
-                        let _ = out.send(ServerMessage::Status { session: id.clone(), status });
+impl TerminalSink {
+    async fn write(&self, data: String) -> Result<(), Closed> {
+        self.out
+            .stream(Frame::Terminal {
+                slot: self.slot,
+                data,
+            })
+            .await
+    }
+
+    /// Wipes the viewport's terminal (`ESC c`) and redraws it from the scrollback: on attach, and
+    /// again whenever the viewport fell too far behind to catch up chunk by chunk.
+    async fn repaint(&self, snapshot: String) -> Result<(), Closed> {
+        self.write(format!("\u{1b}c{snapshot}")).await
+    }
+}
+
+/// Streams a PTY terminal to one viewport: the slot its output is tagged with, the screen so far
+/// and its status, then output, status,
+/// and transcript events as they happen. Output is merged over [`OUTPUT_WINDOW`], and every send
+/// waits for room in the connection's queue; a viewport slow enough to miss output is repainted
+/// from the scrollback instead of being sent a backlog it will never catch up on.
+async fn forward_pty(
+    out: Outbound,
+    id: String,
+    session: Arc<Session>,
+    slot: u16,
+) -> Result<(), Closed> {
+    out.stream_message(ServerMessage::Attached {
+        session: id.clone(),
+        slot,
+    })
+    .await?;
+    let sink = TerminalSink {
+        out: out.clone(),
+        slot,
+    };
+    let (snapshot, mut output_rx) = session.attach_output();
+    sink.repaint(snapshot).await?;
+
+    let mut status_rx = session.subscribe_status();
+    let mut last_status = *status_rx.borrow_and_update();
+    send_status(&out, &id, last_status).await?;
+
+    // Reset the chat view, then replay the transcript so far. A session with no transcript
+    // (non-Claude, or before its first hook) sends the reset and no events, so the viewport falls
+    // back to the terminal.
+    let mut chat_rx = session.subscribe_chat();
+    send_pty_chat(&out, &id, &session).await?;
+
+    let mut output = Coalescer::new(OUTPUT_WINDOW, OUTPUT_MAX_BATCH);
+    loop {
+        tokio::select! {
+            chunk = output_rx.recv() => match chunk {
+                Ok(data) => {
+                    if let Some(text) = output.push(&data, Instant::now()) {
+                        sink.write(text).await?;
                     }
-                    event = chat_rx.recv() => match event {
-                        Ok(event) => {
-                            let _ = out.send(ServerMessage::Chat {
-                                session: id.clone(),
-                                events: vec![event],
-                            });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    delta = delta_rx.recv() => match delta {
-                        Ok(text) => {
-                            let _ = out.send(ServerMessage::ChatDelta { session: id.clone(), text });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    approval = approval_rx.recv() => match approval {
-                        Ok(approval) => {
-                            let _ = out.send(ServerMessage::ChatApproval { session: id.clone(), approval });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    resolved = resolved_rx.recv() => match resolved {
-                        Ok(approval_id) => {
-                            let _ = out.send(ServerMessage::ChatApprovalResolved { session: id.clone(), id: approval_id });
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    output.clear();
+                    let (snapshot, rx) = session.attach_output();
+                    output_rx = rx;
+                    sink.repaint(snapshot).await?;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = until(output.deadline()) => {
+                if let Some(text) = output.take(Instant::now()) {
+                    sink.write(text).await?;
                 }
             }
-        });
-        self.attached.insert(session_id.to_string(), handle);
+            changed = status_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let status = *status_rx.borrow_and_update();
+                if status != last_status {
+                    last_status = status;
+                    send_status(&out, &id, status).await?;
+                }
+            }
+            event = chat_rx.recv() => match event {
+                Ok(event) => {
+                    out.stream_message(ServerMessage::Chat {
+                        session: id.clone(),
+                        events: vec![event],
+                    })
+                    .await?;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    chat_rx = session.subscribe_chat();
+                    send_pty_chat(&out, &id, &session).await?;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+        }
     }
+    Ok(())
+}
+
+/// Streams a headless chat session to one viewport: its status, the recent transcript, the reply in
+/// progress, pending approvals and slash commands, then each as it changes. Streaming text is sent
+/// as the new piece only, merged over [`DELTA_WINDOW`]; a viewport that falls behind is re-synced
+/// from the session's current state rather than replayed.
+async fn forward_chat(out: Outbound, id: String, chat: Arc<ChatSession>) -> Result<(), Closed> {
+    let mut status_rx = chat.subscribe_status();
+    let mut last_status = *status_rx.borrow_and_update();
+    send_status(&out, &id, last_status).await?;
+
+    let mut chat_rx = chat.subscribe_chat();
+    let mut approval_rx = chat.subscribe_approval();
+    let mut resolved_rx = chat.subscribe_resolved();
+    send_chat_state(&out, &id, &chat).await?;
+    let mut delta_rx = send_delta_snapshot(&out, &id, &chat, false).await?;
+
+    let mut commands_rx = chat.subscribe_commands();
+    let commands = commands_rx.borrow_and_update().clone();
+    if !commands.is_empty() {
+        out.stream_message(ServerMessage::SessionCommands {
+            session: id.clone(),
+            commands,
+        })
+        .await?;
+    }
+
+    let mut delta = Coalescer::new(DELTA_WINDOW, DELTA_MAX_BATCH);
+    loop {
+        tokio::select! {
+            changed = status_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let status = *status_rx.borrow_and_update();
+                if status != last_status {
+                    last_status = status;
+                    send_status(&out, &id, status).await?;
+                }
+            }
+            event = chat_rx.recv() => match event {
+                Ok(event) => {
+                    out.stream_message(ServerMessage::Chat {
+                        session: id.clone(),
+                        events: vec![event],
+                    })
+                    .await?;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Events were missed: start the view over from the session's current state.
+                    chat_rx = chat.subscribe_chat();
+                    send_chat_state(&out, &id, &chat).await?;
+                    delta.clear();
+                    delta_rx = send_delta_snapshot(&out, &id, &chat, true).await?;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            frame = delta_rx.recv() => match frame {
+                Ok(DeltaFrame::Append(text)) => {
+                    if let Some(text) = delta.push(&text, Instant::now()) {
+                        send_delta(&out, &id, text, false).await?;
+                    }
+                }
+                Ok(DeltaFrame::Reset) => {
+                    // The live message is gone; text still held for it must not follow it out.
+                    delta.clear();
+                    send_delta(&out, &id, String::new(), true).await?;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    delta.clear();
+                    delta_rx = send_delta_snapshot(&out, &id, &chat, true).await?;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = until(delta.deadline()) => {
+                if let Some(text) = delta.take(Instant::now()) {
+                    send_delta(&out, &id, text, false).await?;
+                }
+            }
+            approval = approval_rx.recv() => match approval {
+                Ok(approval) => {
+                    out.stream_message(ServerMessage::ChatApproval {
+                        session: id.clone(),
+                        approval,
+                    })
+                    .await?;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            resolved = resolved_rx.recv() => match resolved {
+                Ok(approval_id) => {
+                    out.stream_message(ServerMessage::ChatApprovalResolved {
+                        session: id.clone(),
+                        id: approval_id,
+                    })
+                    .await?;
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            changed = commands_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let commands = commands_rx.borrow_and_update().clone();
+                out.stream_message(ServerMessage::SessionCommands {
+                    session: id.clone(),
+                    commands,
+                })
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn send_status(out: &Outbound, session: &str, status: Status) -> Result<(), Closed> {
+    out.stream_message(ServerMessage::Status {
+        session: session.to_string(),
+        status,
+    })
+    .await
+}
+
+async fn send_delta(
+    out: &Outbound,
+    session: &str,
+    text: String,
+    replace: bool,
+) -> Result<(), Closed> {
+    out.stream_message(ServerMessage::ChatDelta {
+        session: session.to_string(),
+        text,
+        replace,
+    })
+    .await
+}
+
+/// Resets a PTY session's chat view and replays its transcript so far.
+async fn send_pty_chat(out: &Outbound, id: &str, session: &Session) -> Result<(), Closed> {
+    out.stream_message(ServerMessage::ChatReset {
+        session: id.to_string(),
+    })
+    .await?;
+    let events = session.chat_snapshot();
+    if !events.is_empty() {
+        out.stream_message(ServerMessage::Chat {
+            session: id.to_string(),
+            events,
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+/// Resets a headless chat view and sends what it needs to start from: the recent tail of the
+/// transcript (the viewport pages back with `ChatLoadEarlier`, so a long one doesn't flood the wire)
+/// and any tool approvals still awaiting an answer.
+async fn send_chat_state(out: &Outbound, id: &str, chat: &ChatSession) -> Result<(), Closed> {
+    out.stream_message(ServerMessage::ChatReset {
+        session: id.to_string(),
+    })
+    .await?;
+    let (tail, has_more) = chat.chat_tail(CHAT_PAGE);
+    if !tail.is_empty() || has_more {
+        out.stream_message(ServerMessage::ChatHistory {
+            session: id.to_string(),
+            events: tail,
+            has_more,
+        })
+        .await?;
+    }
+    for approval in chat.approval_snapshot() {
+        out.stream_message(ServerMessage::ChatApproval {
+            session: id.to_string(),
+            approval,
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+/// Sends the reply in progress as a whole (a viewer joining mid-turn should see it) and returns a
+/// feed of the changes after it. With `always`, an empty reply is sent too, to clear a stale one.
+async fn send_delta_snapshot(
+    out: &Outbound,
+    id: &str,
+    chat: &ChatSession,
+    always: bool,
+) -> Result<broadcast::Receiver<DeltaFrame>, Closed> {
+    let (text, rx) = chat.delta_attach();
+    if always || !text.is_empty() {
+        send_delta(out, id, text, true).await?;
+    }
+    Ok(rx)
 }
 
 impl Drop for Connection {
@@ -623,7 +908,7 @@ impl Drop for Connection {
     }
 }
 
-/// Sends the current workspace list and keep-awake state.
+/// Sends the current workspace list and app-wide state, in reply to a viewport asking for it.
 pub fn send_state(hub: &WorkspaceService, out: &Outbound) {
     let _ = out.send(ServerMessage::WorkspaceList {
         workspaces: hub.summaries(),
@@ -638,5 +923,133 @@ pub fn send_state(hub: &WorkspaceService, out: &Outbound) {
             url: update.url,
             notes: update.notes,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::stream_json::StreamJsonSession;
+    use soromi_protocol::{ChatEvent, PermissionMode};
+    use tokio::sync::mpsc;
+
+    /// One `stream_event` line carrying a piece of assistant text, as the agent prints it.
+    fn text_delta(text: &str) -> String {
+        format!(
+            r#"{{"type":"stream_event","event":{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":"{text}"}}}}}}"#
+        )
+    }
+
+    /// A headless chat session backed by a shell script standing in for the agent: it waits for the
+    /// first turn on stdin, then prints `script`'s stream-json lines.
+    fn scripted_chat(script: &str) -> Arc<ChatSession> {
+        let provider = crate::providers::provider("claude").expect("claude provider");
+        let session = StreamJsonSession::spawn(
+            provider,
+            "/bin/sh",
+            &["-c".to_string(), format!("read _\n{script}\nsleep 5")],
+            ".",
+            None,
+            Vec::new(),
+            PermissionMode::Default,
+        )
+        .expect("spawn stand-in agent");
+        Arc::new(ChatSession::StreamJson(session))
+    }
+
+    /// Collects the streaming-text frames sent until the assistant message commits.
+    async fn deltas_until_commit(rx: &mut mpsc::Receiver<Frame>) -> Vec<(String, bool)> {
+        let mut deltas = Vec::new();
+        let mut committed = false;
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("timed out waiting for the reply")
+                .expect("forwarder ended");
+            match frame {
+                Frame::Message(ServerMessage::ChatDelta { text, replace, .. }) => {
+                    deltas.push((text, replace));
+                    // The clearing frame after the commit is the last one of interest.
+                    if committed {
+                        return deltas;
+                    }
+                }
+                Frame::Message(ServerMessage::Chat { events, .. })
+                    if events
+                        .iter()
+                        .any(|event| matches!(event, ChatEvent::Assistant { .. })) =>
+                {
+                    committed = true;
+                    if matches!(deltas.last(), Some((text, true)) if text.is_empty()) {
+                        return deltas;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_text_is_sent_as_new_pieces_then_cleared_on_commit() {
+        // Pieces spaced wider than the merge window, so each one travels on its own.
+        let script = [
+            format!("printf '%s\\n' '{}'", text_delta("Hel")),
+            "sleep 0.2".to_string(),
+            format!("printf '%s\\n' '{}'", text_delta("lo")),
+            "sleep 0.2".to_string(),
+            format!("printf '%s\\n' '{}'", text_delta(" world")),
+            "sleep 0.2".to_string(),
+            r#"printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}'"#.to_string(),
+        ]
+        .join("\n");
+        let chat = scripted_chat(&script);
+        let (out, mut rx, _stalled) = Outbound::channel();
+        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone()));
+
+        chat.send_turn("hi", &[]).await;
+        let deltas = deltas_until_commit(&mut rx).await;
+
+        // Each frame carries only what is new; the last one clears the live message.
+        assert_eq!(
+            deltas,
+            vec![
+                ("Hel".to_string(), false),
+                ("lo".to_string(), false),
+                (" world".to_string(), false),
+                (String::new(), true),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_streaming_text_is_merged_into_a_few_frames() {
+        // Forty pieces with no pause between them, then a pause before the commit.
+        let mut lines: Vec<String> = (0..40)
+            .map(|_| format!("printf '%s\\n' '{}'", text_delta("ab")))
+            .collect();
+        lines.push("sleep 0.3".to_string());
+        lines.push(
+            r#"printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'"#
+                .to_string(),
+        );
+        let chat = scripted_chat(&lines.join("\n"));
+        let (out, mut rx, _stalled) = Outbound::channel();
+        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone()));
+
+        chat.send_turn("hi", &[]).await;
+        let deltas = deltas_until_commit(&mut rx).await;
+
+        let appended: Vec<&str> = deltas
+            .iter()
+            .filter(|(_, replace)| !replace)
+            .map(|(text, _)| text.as_str())
+            .collect();
+        // Nothing lost or repeated, in far fewer frames than pieces.
+        assert_eq!(appended.concat(), "ab".repeat(40));
+        assert!(
+            appended.len() <= 5,
+            "expected the burst merged into a few frames, got {}",
+            appended.len()
+        );
     }
 }

@@ -185,7 +185,8 @@ fn user_text(text: &str) -> Option<ChatEvent> {
 /// injected user string, a `text` block, or (most often) the `Skill` tool's own result. The Skill
 /// tool card already marks that it ran, so this dump is never echoed as a bubble or a result block.
 fn is_skill_dump(text: &str) -> bool {
-    text.trim_start().starts_with("Base directory for this skill:")
+    text.trim_start()
+        .starts_with("Base directory for this skill:")
 }
 
 /// The inner text of the first `<tag>…</tag>` in `text`, if present.

@@ -11,8 +11,8 @@ use super::paths::resolve_within;
 /// declared folders as top-level nodes, except a single `.` folder (the whole work folder),
 /// which lists the root's own contents. Any other path is read from disk, guarded against
 /// escaping the workspace root. Directories sort before files, then alphabetically. Each entry
-/// carries whether it is git-ignored. Dot-prefixed entries are omitted (hidden) from disk
-/// listings; the declared workspace folders are always listed.
+/// carries whether it is dimmed (`ignored`): git-ignored entries and dot-prefixed ones (`.git`,
+/// `.env`, …) are both shown but dimmed. The declared workspace folders are always listed.
 pub fn list_directory(root: &Path, folders: &[String], path: &str) -> Vec<DirEntry> {
     let ignore = build_gitignore(root);
 
@@ -45,19 +45,20 @@ fn read_entries(target: &Path, ignore: &Gitignore) -> Vec<DirEntry> {
     };
     let mut entries: Vec<DirEntry> = read_dir
         .filter_map(|entry| entry.ok())
-        // Hide dot-prefixed entries (.git, .env, .vscode, …). A future `list-dir` param can
-        // opt into showing them; the declared workspace folders are listed separately and kept.
-        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .map(|entry| {
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // Dot-prefixed entries (.git, .env, .vscode, …) are shown but dimmed — like git-ignored
+            // ones (node_modules) — so they're visible without cluttering the eye.
+            let ignored = name.starts_with('.') || is_ignored(ignore, &entry.path(), is_dir);
             DirEntry {
-                name: entry.file_name().to_string_lossy().into_owned(),
+                name,
                 kind: if is_dir {
                     EntryKind::Dir
                 } else {
                     EntryKind::File
                 },
-                ignored: is_ignored(ignore, &entry.path(), is_dir),
+                ignored,
             }
         })
         .collect();
@@ -149,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn hides_dot_prefixed_entries() {
+    fn shows_dot_prefixed_entries_dimmed() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -157,7 +158,17 @@ mod tests {
         fs::write(dir.path().join("readme.md"), "").unwrap();
 
         let entries = list_directory(dir.path(), &[".".into()], "");
-        assert_eq!(entries, vec![folder("src"), file("readme.md")]);
+        let by_name = |name: &str| entries.iter().find(|e| e.name == name).unwrap();
+        // Dot-prefixed entries are present but dimmed; ordinary entries are not dimmed.
+        assert!(by_name(".git").ignored);
+        assert!(by_name(".env").ignored);
+        assert!(!by_name("src").ignored);
+        assert!(!by_name("readme.md").ignored);
+        // Dirs still sort before files, so `.git`/`src` precede `.env`/`readme.md`.
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec![".git", "src", ".env", "readme.md"]
+        );
     }
 
     #[test]

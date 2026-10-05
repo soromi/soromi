@@ -9,6 +9,9 @@ use soromi_protocol::{
     ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval,
 };
 
+use super::delta::DeltaFrame;
+#[cfg(doc)]
+use super::delta::DeltaStream;
 use super::exec_chat::ExecChatSession;
 use super::stream_json::StreamJsonSession;
 
@@ -78,11 +81,9 @@ impl ChatSession {
     pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
         dispatch!(self, subscribe_chat())
     }
-    pub fn subscribe_delta(&self) -> broadcast::Receiver<String> {
-        dispatch!(self, subscribe_delta())
-    }
-    pub fn delta_snapshot(&self) -> String {
-        dispatch!(self, delta_snapshot())
+    /// The streaming text so far plus a feed of each change after it (see [`DeltaStream::attach`]).
+    pub fn delta_attach(&self) -> (String, broadcast::Receiver<DeltaFrame>) {
+        dispatch!(self, delta_attach())
     }
     pub fn subscribe_approval(&self) -> broadcast::Receiver<ToolApproval> {
         dispatch!(self, subscribe_approval())

@@ -1,7 +1,7 @@
 use std::io;
 use std::path::Path;
 
-use soromi_protocol::{AgentUsage, PermissionMode, Status};
+use soromi_protocol::{AgentUsage, PermissionMode, ProviderModels, Status};
 
 use super::{ChatFrame, Provider, UsageAuthState};
 
@@ -16,6 +16,48 @@ pub struct Codex;
 impl Provider for Codex {
     fn key(&self) -> &'static str {
         "codex"
+    }
+
+    fn model_catalog(&self) -> Option<ProviderModels> {
+        // Codex applies the model per turn via `-m <slug>`; `None` (the GUI's "Default") is resolved
+        // to GPT-6 Astra in `turn_command`. 272k is Codex's real default `context_window` for these
+        // models (max_context_window 872k is the opt-in extended context); it sizes the meter.
+        const CODEX_CONTEXT: u32 = 272_000;
+        Some(ProviderModels {
+            models: vec![
+                super::model_option(
+                    None,
+                    "Default",
+                    "GPT-6 Astra · newest, most capable",
+                    true,
+                    CODEX_CONTEXT,
+                ),
+                super::model_option(
+                    Some("gpt-5.6-terra"),
+                    "GPT-5.6 Terra",
+                    "High capability",
+                    true,
+                    CODEX_CONTEXT,
+                ),
+                super::model_option(
+                    Some("gpt-5.6-luna"),
+                    "GPT-5.6 Luna",
+                    "Faster, lighter",
+                    true,
+                    CODEX_CONTEXT,
+                ),
+            ],
+            effort_levels: ["low", "medium", "high", "xhigh"]
+                .map(String::from)
+                .to_vec(),
+            effort_labels: super::effort_labels(&[
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "X-High"),
+            ]),
+            default_effort: "high".to_string(),
+        })
     }
 
     fn config_env_var(&self) -> &'static str {

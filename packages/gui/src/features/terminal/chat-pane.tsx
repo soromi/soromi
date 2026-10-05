@@ -11,6 +11,10 @@ import { ProviderIcon } from '@/shared/provider-icon'
 
 //Types
 import type { Transport } from '@soromi/client'
+import type { SlashCommand } from '@soromi/protocol'
+
+/** A stable empty list, so a session with no commands yet doesn't hand the view a new array each render. */
+const NO_COMMANDS: SlashCommand[] = []
 
 // When a turn started, per session — kept outside React (the daemon owns the running turn, not the
 // UI). Switching chats unmounts the pane, so a mount-based clock would restart; this keeps the
@@ -35,6 +39,7 @@ export function ChatPane({
   const streaming = useClientStore((s) => s.chatDelta[session])
   const approvals = useClientStore((s) => s.chatApproval[session])
   const canLoadEarlier = useClientStore((s) => s.chatEarlier[session] ?? false)
+  const commands = useClientStore((s) => s.commands[session])
   const inControl = useClientStore((s) => s.controlHolder === null)
   const workspace = useClientStore((s) =>
     s.workspaces.find((w) => w.sessions.some((x) => x.id === session)),
@@ -51,6 +56,9 @@ export function ChatPane({
   // The agent is mid-turn while its status is "thinking" — drives the live working indicator.
   const working = summary?.status === 'thinking'
   const permissionMode = summary?.permissionMode ?? 'default'
+  // Subscribe to the catalog signal: the model catalog lives in @soromi/ui (outside React), so a
+  // bump re-renders this pane when it lands, updating the model picker and the context meter.
+  void useClientStore((s) => s.modelCatalogVersion)
   // The model's context window, for the "context filling up" banner — from the provider's catalog.
   const contextLimit = contextLimitFor(summary?.agent, summary?.model ?? null)
 
@@ -88,7 +96,7 @@ export function ChatPane({
         }
         onStop={() => transport.send({ type: 'chat-interrupt', session })}
         subagents={summary?.subagents ?? []}
-        commands={summary?.commands ?? []}
+        commands={commands ?? NO_COMMANDS}
         approvals={approvals}
         onApproval={(id, allow) =>
           transport.send({ type: 'chat-approval-response', session, id, allow })

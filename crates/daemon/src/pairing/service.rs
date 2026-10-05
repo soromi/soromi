@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use base64::Engine;
 use soromi_protocol::DeviceSummary;
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
@@ -9,16 +10,19 @@ use crate::accounts::store::FileAccountManager;
 use crate::pairing::device::{Device, load_devices, save_devices};
 use crate::workspaces::service::WorkspaceService;
 
+/// The layout of the pairing code's payload. A scanner that does not know the version it reads asks
+/// for an app update instead of guessing.
+const PAIRING_CODE_VERSION: u32 = 1;
+
 /// Owns the paired devices and one relay connection per device. Device management happens only over
 /// the trusted local link (the desktop app); the per-device relay links are plain viewports that
 /// never reach back into this service, so a phone can neither list devices nor see other keys.
 pub struct PairingService {
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
-    /// The relay + web URLs and relay access key; behind locks so a self-host settings change
-    /// applies live. The access key is presented (as a header) when dialing the relay.
+    /// The relay URL and relay access key; behind locks so a self-host settings change applies
+    /// live. The access key is presented (as a header) when dialing the relay.
     relay_url: Mutex<String>,
-    web_url: Mutex<String>,
     access_key: Mutex<String>,
     devices: Mutex<Vec<Device>>,
     /// device id -> its relay dial task, so revoking can stop it.
@@ -36,7 +40,6 @@ impl PairingService {
         hub: Arc<WorkspaceService>,
         accounts: Arc<FileAccountManager>,
         relay_url: String,
-        web_url: String,
         access_key: String,
     ) -> Arc<Self> {
         let (changed_tx, _) = broadcast::channel(16);
@@ -44,7 +47,6 @@ impl PairingService {
             hub,
             accounts,
             relay_url: Mutex::new(relay_url),
-            web_url: Mutex::new(web_url),
             access_key: Mutex::new(access_key),
             devices: Mutex::new(load_devices()),
             connections: Mutex::new(HashMap::new()),
@@ -59,7 +61,7 @@ impl PairingService {
         service
     }
 
-    /// Pairs a new device, starts dialing its room, and returns its summary (with the QR url).
+    /// Pairs a new device, starts dialing its room, and returns its summary (with the QR code).
     pub fn create_device(&self, name: String) -> DeviceSummary {
         let device = Device::generate(name);
         self.dial(&device);
@@ -96,11 +98,9 @@ impl PairingService {
         devices.iter().map(|device| self.summary(device)).collect()
     }
 
-    /// Updates the relay + web URLs and relay access key (self-host settings change). Re-dials every
-    /// device when the relay URL or access key changed, so the change is live, not restart-gated.
-    pub fn set_remote(&self, relay_url: String, web_url: String, access_key: String) {
-        *self.web_url.lock().unwrap() = web_url;
-
+    /// Updates the relay URL and relay access key (self-host settings change). Re-dials every
+    /// device when either changed, so the change is live, not restart-gated.
+    pub fn set_remote(&self, relay_url: String, access_key: String) {
         let relay_changed = {
             let mut current = self.relay_url.lock().unwrap();
             let changed = *current != relay_url;
@@ -163,7 +163,7 @@ impl PairingService {
         DeviceSummary {
             id: device.id.clone(),
             name: device.name.clone(),
-            pairing_url: self.pairing_url(device),
+            pairing_code: pairing_code(device, &self.relay_url.lock().unwrap()),
             connected: *self
                 .connected
                 .lock()
@@ -172,15 +172,61 @@ impl PairingService {
                 .unwrap_or(&false),
         }
     }
+}
 
-    /// `<webUrl>/?relay=<relay>&room=<room>&key=<key>`, with values URL-encoded.
-    fn pairing_url(&self, device: &Device) -> String {
-        format!(
-            "{}/?relay={}&room={}&key={}",
-            self.web_url.lock().unwrap().trim_end_matches('/'),
-            urlencoding::encode(&self.relay_url.lock().unwrap()),
-            urlencoding::encode(&device.room),
-            urlencoding::encode(&device.key),
-        )
+/// Everything the mobile app needs to reach this device's room, as the text of the QR it scans:
+/// `soromi://pair#<base64url(JSON)>`. The payload sits in the fragment so that an app or service
+/// handed the link as a URL does not log it along with the path.
+fn pairing_code(device: &Device, relay_url: &str) -> String {
+    let payload = serde_json::json!({
+        "v": PAIRING_CODE_VERSION,
+        "device": device.id,
+        "relay": relay_url,
+        "room": device.room,
+        "key": device.key,
+    });
+    format!(
+        "soromi://pair#{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string())
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pairing_code_carries_the_room_and_key_in_its_fragment() {
+        let device = Device {
+            id: "d1".into(),
+            name: "Phone".into(),
+            room: "room/1".into(),
+            key: "a+b/c=".into(),
+        };
+        let code = pairing_code(&device, "wss://relay.example/?x=1");
+
+        let encoded = code
+            .strip_prefix("soromi://pair#")
+            .expect("scheme and fragment");
+        // Nothing in the payload needs escaping to survive a QR or a link.
+        assert!(
+            encoded
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "v": 1,
+                "device": "d1",
+                "relay": "wss://relay.example/?x=1",
+                "room": "room/1",
+                "key": "a+b/c=",
+            })
+        );
     }
 }

@@ -9,11 +9,15 @@ import { useAppStore } from '@/stores/app-store'
 
 //Components
 import { FileTree } from '@/features/files/file-tree'
+import { GitPanel } from '@/features/git/git-panel'
 import { SkillList } from '@/features/skills/skill-list'
+import { TerminalPanel } from '@/features/terminal/terminal-panel'
 
 //Icons
 import FilesSvg from '@/assets/icons/files.svg?react'
+import GitBranchSvg from '@/assets/icons/git-branch.svg?react'
 import SkillsSvg from '@/assets/icons/skills.svg?react'
+import TerminalSvg from '@/assets/icons/terminal.svg?react'
 
 /**
  * The right-hand Explorer panel: the Files / Skills tabs over the tree or skills list, moved out of
@@ -116,7 +120,7 @@ export function Explorer() {
           </button>
         </div>
 
-        <div className="flex flex-none gap-1 px-3 pt-[11px] pb-[9px]">
+        <div className="flex flex-none gap-1 overflow-x-auto px-3 pt-[11px] pb-[9px]">
           <SectionTab
             label="Files"
             active={sidebarMode === 'files'}
@@ -129,11 +133,39 @@ export function Explorer() {
             onClick={() => setSidebarMode('skills')}
             icon={<SkillsSvg width={14} height={14} />}
           />
+          <SectionTab
+            label="Git"
+            active={sidebarMode === 'git'}
+            onClick={() => setSidebarMode('git')}
+            icon={<GitBranchSvg width={14} height={14} />}
+          />
+          <SectionTab
+            label="Terminal"
+            active={sidebarMode === 'terminal'}
+            onClick={() => setSidebarMode('terminal')}
+            icon={<TerminalSvg width={14} height={14} />}
+          />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-          {active && (sidebarMode === 'files' ? <FileTree /> : <SkillList />)}
-        </div>
+        {/* The Terminal tab manages its own scrolling (parked xterm panes), so it isn't wrapped in the
+            shared overflow container the other tabs use. */}
+        {sidebarMode === 'terminal' ? (
+          // A flex column so the terminal panes get a real height (the xterm surface fills flex:1).
+          <div className="flex min-h-0 flex-1 flex-col px-1 pb-2">
+            {active && <TerminalPanel />}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+            {active &&
+              (sidebarMode === 'files' ? (
+                <FileTree />
+              ) : sidebarMode === 'skills' ? (
+                <SkillList />
+              ) : (
+                <GitPanel />
+              ))}
+          </div>
+        )}
       </div>
     </aside>
   )
@@ -156,7 +188,7 @@ function SectionTab({
       type="button"
       onClick={onClick}
       className={cn(
-        'flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-[11px] py-1.5 font-semibold text-[12.5px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
+        'flex flex-none cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-[11px] py-1.5 font-semibold text-[12.5px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
         active &&
           'bg-[var(--soromi-accent-dim)] text-[var(--soromi-accent)] hover:bg-[var(--soromi-accent-dim)] hover:text-[var(--soromi-accent)]',
       )}

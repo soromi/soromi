@@ -19,7 +19,6 @@
     "test:watch": "vitest",
     "dev:daemon": "cargo run -p soromi-daemon",
     "dev:desktop": "pnpm --filter @soromi/desktop dev",
-    "dev:web": "pnpm --filter @soromi/web dev",
     "dev:relay": "pnpm --filter @soromi/relay dev",
     "app:mac": "pnpm --filter @soromi/desktop package",
     "gen:protocol": "cargo test -p soromi-protocol --features ts",

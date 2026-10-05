@@ -2,7 +2,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use soromi_protocol::{AgentUsage, ChatEvent, ChatFile, PermissionMode, SlashCommand, Status};
+use soromi_protocol::{
+    AgentUsage, ChatEvent, ChatFile, PermissionMode, ProviderModels, SlashCommand, Status,
+};
 
 use super::{Provider, UsageAuthState};
 
@@ -155,9 +157,73 @@ impl Provider for Claude {
             .flatten()
     }
 
+    fn model_catalog(&self) -> Option<ProviderModels> {
+        const MILLION: u32 = 1_000_000;
+        const STANDARD: u32 = 200_000;
+        Some(ProviderModels {
+            models: vec![
+                // `None` = no explicit model; the daemon launches Opus 5.5 (see `model_commands`).
+                super::model_option(
+                    None,
+                    "Default",
+                    "Opus 5.5 with 1M context · newest, best for everyday & complex tasks",
+                    true,
+                    MILLION,
+                ),
+                super::model_option(
+                    Some("claude-opus-5[1m]"),
+                    "Opus 5",
+                    "Opus 5 with 1M context · the prior default",
+                    true,
+                    MILLION,
+                ),
+                super::model_option(
+                    Some("claude-opus-4-8[1m]"),
+                    "Opus 4.8",
+                    "Opus 4.8 with 1M context · the prior Opus generation",
+                    true,
+                    MILLION,
+                ),
+                super::model_option(
+                    Some("fable"),
+                    "Fable",
+                    "Fable 5 · most capable for your hardest, longest-running tasks",
+                    true,
+                    STANDARD,
+                ),
+                super::model_option(
+                    Some("sonnet"),
+                    "Sonnet",
+                    "Sonnet 5 · efficient for routine tasks",
+                    false,
+                    STANDARD,
+                ),
+                super::model_option(
+                    Some("haiku"),
+                    "Haiku",
+                    "Haiku 4.5 · fastest for quick answers",
+                    false,
+                    STANDARD,
+                ),
+            ],
+            effort_levels: ["low", "medium", "high", "xhigh", "max"]
+                .map(String::from)
+                .to_vec(),
+            effort_labels: super::effort_labels(&[
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "X-High"),
+                ("max", "Max"),
+            ]),
+            default_effort: "high".to_string(),
+        })
+    }
+
     fn model_commands(&self, model: Option<&str>, effort: Option<&str>) -> Vec<String> {
-        // Claude changes model/effort live by sending these as ordinary user messages.
-        let mut commands = vec![format!("/model {}", model.unwrap_or("default"))];
+        // Claude changes model/effort live by sending these as ordinary user messages. With no model
+        // chosen (the GUI's "Default" option), launch the current default — Opus 5.5 at 1M context.
+        let mut commands = vec![format!("/model {}", model.unwrap_or("claude-opus-5-5[1m]"))];
         if let Some(effort) = effort {
             commands.push(format!("/effort {effort}"));
         }

@@ -4,7 +4,7 @@
 
 export { AgentSelect } from './agent-select'
 export type { AgentOption } from './agent-select'
-export { contextLimitFor } from './model-catalog'
+export { contextLimitFor, setModelCatalog } from './model-catalog'
 export { ChatView } from './chat-view'
 export type { ChatViewProps } from './chat-view'
 export { Markdown } from './markdown'

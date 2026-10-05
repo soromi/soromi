@@ -186,13 +186,13 @@ export function DevicesWidget() {
             {step === 'qr' && paired && (
               <div className={POPUP_BODY}>
                 <div className="flex justify-center py-1.5">
-                  <QrCode value={paired.pairingUrl} size={190} />
+                  <QrCode value={paired.pairingCode} size={190} />
                 </div>
                 <p className="m-0 text-center text-[var(--soromi-text-dim)] text-xs">
-                  Scan with your phone's camera to connect.
+                  Scan with the Soromi app on your phone to connect.
                 </p>
                 <code className="break-all rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-tab)] px-2.5 py-2 text-center text-[10.5px] text-[var(--soromi-text-faint)]">
-                  {paired.pairingUrl}
+                  {paired.pairingCode}
                 </code>
                 <button type="button" className={PRIMARY} onClick={() => setStep('list')}>
                   Done pairing

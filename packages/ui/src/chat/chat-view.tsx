@@ -99,13 +99,13 @@ export interface ChatViewProps {
 }
 
 /**
- * Presentational chat conversation + composer, shared by the desktop and web viewports. It renders an
- * agent's transcript as reflowing markdown, reasoning blocks, and tool cards (pairing each tool with
- * its result), a live working indicator while a turn runs, and a composer whose send action is
- * injected via `onSend` — terminal input for a PTY session, a chat turn for a headless one. All
- * store/transport wiring stays in each app's container. The rows, streaming tail, working indicator,
- * and composer are their own components/hooks (`./rows`, `./chat-row`, `./streaming-tail`,
- * `./working-indicator`, `./composer`); this file owns only the layout and scroll-follow behavior.
+ * Presentational chat conversation + composer. It renders an agent's transcript as reflowing
+ * markdown, reasoning blocks, and tool cards (pairing each tool with its result), a live working
+ * indicator while a turn runs, and a composer whose send action is injected via `onSend` — terminal
+ * input for a PTY session, a chat turn for a headless one. All store/transport wiring stays in the
+ * app's container. The rows, streaming tail, working indicator, and composer are their own
+ * components/hooks (`./rows`, `./chat-row`, `./streaming-tail`, `./working-indicator`,
+ * `./composer`); this file owns only the layout and scroll-follow behavior.
  */
 export function ChatView({
   events,
@@ -251,7 +251,7 @@ export function ChatView({
         onScroll={onScroll}
         className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [-webkit-overflow-scrolling:touch]"
       >
-        {/* A centered reading column (like Synara), so lines don't stretch edge-to-edge on a wide
+        {/* A centered reading column, so lines don't stretch edge-to-edge on a wide
             window. The scroll container stays full width so the scrollbar sits at the window edge.
             `min-w-0` lets the column shrink so a long unbreakable token wraps instead of forcing a
             horizontal scrollbar — wide blocks (code) scroll inside their own container instead. */}
@@ -280,7 +280,9 @@ export function ChatView({
             </>
           )}
           <StreamingTail text={streaming?.trim() ? streaming : ''} />
-          {working && !approvals?.length && <WorkingIndicator since={workingSince} />}
+          {working && !approvals?.length && (
+            <WorkingIndicator since={workingSince} tokens={contextTokens} />
+          )}
           {approvals?.map((approval) => (
             <Approval
               key={approval.id}

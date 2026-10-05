@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::account::AccountProfile;
@@ -30,6 +32,91 @@ pub struct DirEntry {
     pub kind: EntryKind,
     /// True when the entry is git-ignored (shown dimmed in the tree).
     pub ignored: bool,
+}
+
+/// One changed file in a workspace's git working tree (read-only source-control view). A file can be
+/// changed in both the index and the worktree at once, so `index` and `worktree` are independent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", ts(rename_all = "camelCase"))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct GitChange {
+    /// Path relative to the repo root, POSIX-separated (as git prints it).
+    pub path: String,
+    /// Staged (index) status letter — "M" "A" "D" "R" "C" "T" — or "" when not staged.
+    pub index: String,
+    /// Unstaged (worktree) status letter — "M" "D" "T" "?" (untracked) — or "" when clean there.
+    pub worktree: String,
+    /// The source path for a rename/copy, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub orig_path: Option<String>,
+}
+
+/// A workspace's git working-tree status (read-only). `is_repo` is false when the root isn't a git
+/// repository, so the panel can show an empty state instead of an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", ts(rename_all = "camelCase"))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct GitStatusInfo {
+    pub is_repo: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub branch: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub changes: Vec<GitChange>,
+}
+
+/// A selectable model in the composer's picker. `value` is the launch id/alias the daemon passes for
+/// this provider (`None` = the provider's own default); `effort` marks models that accept a
+/// reasoning-effort level; `context_limit` sizes the "context filling up" meter. The provider owns
+/// this list — the GUI holds no model names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", ts(rename_all = "camelCase"))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ModelOption {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub value: Option<String>,
+    pub label: String,
+    pub description: String,
+    pub effort: bool,
+    pub context_limit: u32,
+}
+
+/// One provider's model-picker data: its models plus its reasoning-effort ladder. Returned per
+/// provider in the `ModelCatalog` message so the composer renders whatever the provider exposes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", ts(rename_all = "camelCase"))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ProviderModels {
+    pub models: Vec<ModelOption>,
+    /// Effort levels low → highest; empty when the provider has no reasoning-effort control.
+    pub effort_levels: Vec<String>,
+    /// Display names for the effort tokens (the wire tokens don't always title-case cleanly).
+    pub effort_labels: HashMap<String, String>,
+    /// The effort the provider uses when none is set explicitly.
+    pub default_effort: String,
 }
 
 /// Whether a skill is a slash command or an agent skill.
@@ -232,10 +319,6 @@ pub struct SessionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub context_tokens: Option<u32>,
-    /// Slash commands ("actions") the provider exposes for this session (Claude only, for now), for
-    /// the chat composer's `/` menu. Empty for providers that don't expose them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub commands: Vec<SlashCommand>,
 }
 
 /// Rail-facing summary of a workspace. `status` is the aggregate of its sessions.
@@ -259,9 +342,9 @@ pub struct WorkspaceSummary {
     pub instructions: Option<String>,
 }
 
-/// A paired remote device (a phone). `pairingUrl` opens the web viewport already configured with
-/// this device's relay, room, and end-to-end key; the desktop renders it as a QR to scan. Only
-/// ever sent to the trusted local viewport, never over the relay.
+/// A paired remote device (a phone). `pairingCode` holds this device's relay, room, and end-to-end
+/// key; the desktop renders it as a QR for the mobile app to scan. Only ever sent to the trusted
+/// local viewport, never over the relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(
@@ -271,9 +354,9 @@ pub struct WorkspaceSummary {
 pub struct DeviceSummary {
     pub id: String,
     pub name: String,
-    #[cfg_attr(feature = "ts", ts(rename = "pairingUrl"))]
-    #[serde(rename = "pairingUrl")]
-    pub pairing_url: String,
+    #[cfg_attr(feature = "ts", ts(rename = "pairingCode"))]
+    #[serde(rename = "pairingCode")]
+    pub pairing_code: String,
     /// Whether this device's phone is currently connected through the relay (live). A paired device
     /// with no phone attached, or an unreachable relay, is `false`.
     pub connected: bool,
@@ -315,9 +398,9 @@ pub struct AgentUsage {
     pub note: Option<String>,
 }
 
-/// The relay + web-viewport URLs used when pairing devices. Runtime-configurable (self-host) so the
-/// bundled app never needs a rebuild to point at a different relay or hosted web app. Empty values
-/// fall back to the daemon's env vars, then its compiled defaults.
+/// The relay used when pairing devices. Runtime-configurable (self-host) so the bundled app never
+/// needs a rebuild to point at a different relay. Empty values fall back to the daemon's env vars,
+/// then its compiled defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -328,11 +411,24 @@ pub struct AgentUsage {
 pub struct RemoteConfig {
     /// The relay WebSocket URL the daemon and paired phones dial (e.g. `wss://relay.example.com`).
     pub relay_url: String,
-    /// The base URL the pairing QR points at, where the web viewport is hosted.
-    pub web_url: String,
     /// Shared secret the daemon presents to the relay to create a room (self-host gate). Held only
-    /// on the daemon (never in a pairing link); paired phones join by room id without it.
+    /// on the daemon (never in a pairing code); paired phones join by room id without it.
     pub access_key: String,
+}
+
+/// Which side has to update when a client and the daemon speak incompatible protocol versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum IncompatibleAction {
+    /// The client is older than the daemon supports.
+    UpdateClient,
+    /// The client is newer than the daemon.
+    UpdateDaemon,
 }
 
 /// Viewport -> daemon. A discriminated union on `type`.
@@ -348,7 +444,25 @@ pub struct RemoteConfig {
     ts(export, export_to = "../../../packages/protocol/src/generated/")
 )]
 pub enum ClientMessage {
+    /// The first message a client sends: its protocol version and a stable id for this install.
+    /// Replied with `Welcome`, or `Incompatible` if the versions cannot talk; nothing else is
+    /// answered until then. On a relay link a new `Hello` also marks a fresh client on the same
+    /// daemon socket, resetting what was attached.
+    Hello {
+        protocol: u32,
+        client_id: String,
+    },
+    /// Round-trip probe: echoed back as `Pong` with the same nonce. Used to measure latency and to
+    /// check that a connection is still alive.
+    Ping {
+        nonce: u32,
+    },
     Attach {
+        session: String,
+    },
+    /// Stop streaming a session to this viewport (it is no longer on screen). The session keeps
+    /// running; attaching again replays its current state.
+    Detach {
         session: String,
     },
     Input {
@@ -482,9 +596,32 @@ pub enum ClientMessage {
         path: String,
         content: String,
     },
+    /// Open an ad-hoc shell PTY for a workspace, rooted at `folder` (workspace-relative; "" = root).
+    /// The client mints `shell` as `shell:<uuid>`, then `Attach`es to it like any session. These
+    /// shells are not persisted and are not workspace tabs.
+    OpenShell {
+        workspace: String,
+        shell: String,
+        folder: String,
+    },
+    /// The git working-tree status for a workspace (read-only source-control view). Replied with
+    /// `GitStatus`.
+    GitStatus {
+        workspace: String,
+    },
+    /// The unified diff for one changed file. `staged` selects the index diff (`--cached`) vs the
+    /// worktree diff. Replied with `GitDiff`.
+    GitDiff {
+        workspace: String,
+        path: String,
+        staged: bool,
+    },
     ListSkills {
         session: String,
     },
+    /// Request the per-provider model catalogs (the composer's model picker). Replied with
+    /// `ModelCatalog`. The GUI sends this once on connect.
+    ListModels,
     ListAccounts,
     SaveAccount {
         profile: AccountProfile,
@@ -527,7 +664,7 @@ pub enum ClientMessage {
     /// Re-run the update check now (the "Check for updates" menu item).
     CheckUpdate,
     /// Pair a new remote device: mint a room + key, persist it, start dialing the relay for it,
-    /// and reply with `DevicePaired` (whose `pairingUrl` the desktop shows as a QR).
+    /// and reply with `DevicePaired` (whose `pairingCode` the desktop shows as a QR).
     CreateDevice {
         name: String,
     },
@@ -582,9 +719,26 @@ pub enum ClientMessage {
     ts(export, export_to = "../../../packages/protocol/src/generated/")
 )]
 pub enum ServerMessage {
-    Output {
+    /// Reply to `Hello`: the daemon's protocol version and its release version.
+    Welcome {
+        protocol: u32,
+        version: String,
+    },
+    /// Reply to a `Hello` the daemon cannot serve, or to a client that skipped it. `action` says
+    /// which side must update.
+    Incompatible {
+        protocol: u32,
+        action: IncompatibleAction,
+    },
+    /// Echo of a `Ping`.
+    Pong {
+        nonce: u32,
+    },
+    /// Reply to `Attach` for a terminal session: its output arrives as binary frames tagged with
+    /// `slot` (`[0x01][slot, big-endian u16][utf-8 bytes]`), not as a message.
+    Attached {
         session: String,
-        data: String,
+        slot: u16,
     },
     Status {
         session: String,
@@ -614,6 +768,19 @@ pub enum ServerMessage {
     WorkspaceList {
         workspaces: Vec<WorkspaceSummary>,
     },
+    /// One session's summary changed (status, activity, sub-agents, context). `status` is the
+    /// workspace's new aggregate status. Current clients get this instead of a full `WorkspaceList`.
+    SessionUpdated {
+        workspace: String,
+        status: Status,
+        session: SessionSummary,
+    },
+    /// The slash commands a chat session's provider exposes, for the composer's `/` menu. Sent on
+    /// attach and when the list changes.
+    SessionCommands {
+        session: String,
+        commands: Vec<SlashCommand>,
+    },
     WorkspaceOpened {
         workspace: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -640,9 +807,27 @@ pub enum ServerMessage {
         workspace: String,
         path: String,
     },
+    /// A workspace's git working-tree status (reply to `GitStatus`).
+    GitStatus {
+        workspace: String,
+        status: GitStatusInfo,
+    },
+    /// The unified diff for one changed file (reply to `GitDiff`). `patch` is the raw `git diff`
+    /// output; `truncated` marks that a very large diff was clipped.
+    GitDiff {
+        workspace: String,
+        path: String,
+        staged: bool,
+        patch: String,
+        truncated: bool,
+    },
     SkillList {
         session: String,
         skills: Vec<Skill>,
+    },
+    /// The model-picker catalogs, keyed by provider (reply to `ListModels`).
+    ModelCatalog {
+        catalog: HashMap<String, ProviderModels>,
     },
     KeepAwake {
         active: bool,
@@ -670,7 +855,7 @@ pub enum ServerMessage {
     },
     /// The manual update check found nothing newer (only sent in reply to `CheckUpdate`).
     UpToDate,
-    /// A device was just paired; `device.pairingUrl` is shown as a QR to scan.
+    /// A device was just paired; `device.pairingCode` is shown as a QR to scan.
     DevicePaired {
         device: DeviceSummary,
     },
@@ -708,12 +893,16 @@ pub enum ServerMessage {
     ChatReset {
         session: String,
     },
-    /// The assistant message currently streaming in, as cumulative text (each update replaces the
-    /// last). An empty string clears the live message — it has committed as a `Chat` event or the
-    /// turn ended. Only headless "chat" sessions emit these.
+    /// Text for the assistant message currently streaming in. By default `text` is appended to what
+    /// the viewport already holds; with `replace` it replaces it (sent on attach, on a resync, and
+    /// with empty text when the live message has committed as a `Chat` event or the turn ended).
+    /// Only headless "chat" sessions emit these.
     ChatDelta {
         session: String,
         text: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+        replace: bool,
     },
     /// A tool call is waiting for the user to allow or deny it (headless chat, permission prompts).
     /// Sent on the `can_use_tool` control request; the turn is paused until answered.

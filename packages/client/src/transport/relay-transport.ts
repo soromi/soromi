@@ -2,7 +2,7 @@ import { decodeKey, open, seal } from './relay-crypto'
 import { WebSocketTransport } from './web-socket-transport'
 
 //Types
-import type { ClientMessage, ServerMessage } from '@soromi/protocol'
+import type { ClientMessage } from '@soromi/protocol'
 
 export interface RelayConfig {
   /** The relay's base URL, e.g. `wss://relay.soromi.app` or `ws://localhost:8787`. */
@@ -16,10 +16,13 @@ export interface RelayConfig {
 /**
  * Transport to the daemon through the relay: dials `<relayUrl>/?room=<room>` and speaks the same
  * protocol. The relay is a content-blind pipe. With a `key`, every frame is XChaCha20-Poly1305
- * end-to-end encrypted (the relay sees only ciphertext) by overriding the base encode/decode hooks.
+ * end-to-end encrypted (the relay sees only ciphertext) by overriding the base encode/open hooks.
+ * The socket to the relay can be up with no daemon behind it, so this transport only counts as open
+ * while the relay reports the daemon present.
  */
 export class RelayTransport extends WebSocketTransport {
   private readonly key?: Uint8Array
+  protected override awaitsPeer = true
 
   constructor(config: RelayConfig) {
     super(`${config.relayUrl.replace(/\/$/, '')}/?room=${encodeURIComponent(config.room)}`)
@@ -35,17 +38,10 @@ export class RelayTransport extends WebSocketTransport {
     return seal(this.key, new TextEncoder().encode(JSON.stringify(message)))
   }
 
-  protected override decode(data: unknown): ServerMessage | null {
-    if (!this.key) return super.decode(data)
+  protected override open(data: unknown): string | Uint8Array | null {
+    if (!this.key) return super.open(data)
     if (!(data instanceof ArrayBuffer)) return null
 
-    const plaintext = open(this.key, data)
-    if (!plaintext) return null
-
-    try {
-      return JSON.parse(new TextDecoder().decode(plaintext)) as ServerMessage
-    } catch {
-      return null
-    }
+    return open(this.key, data)
   }
 }

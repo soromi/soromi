@@ -3,7 +3,8 @@ use std::path::Path;
 
 use serde_json::Value;
 use soromi_protocol::{
-    AgentUsage, ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, ToolApproval,
+    AgentUsage, ChatEvent, ChatFile, ModelOption, PermissionMode, ProviderModels, SlashCommand,
+    Status, ToolApproval,
 };
 
 pub mod claude;
@@ -215,6 +216,13 @@ pub trait Provider: Send + Sync {
     /// The messages that change the model + reasoning effort live in the headless chat (Claude sends
     /// `/model <alias>` and `/effort <level>` as user messages). Provider-specific syntax; the session
     /// writes each verbatim. Default: the provider can't switch model live, so nothing is sent.
+    /// The composer's model picker for this provider (models + reasoning-effort ladder), or `None`
+    /// to hide the picker. Each provider owns its own model names, ids, effort tokens, and context
+    /// windows — the GUI holds none of that.
+    fn model_catalog(&self) -> Option<ProviderModels> {
+        None
+    }
+
     fn model_commands(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<String> {
         Vec::new()
     }
@@ -289,4 +297,38 @@ const PROVIDERS: &[&dyn Provider] = &[&claude::Claude, &codex::Codex, &grok::Gro
 /// The provider for a key or command basename, if known.
 pub fn provider(key: &str) -> Option<&'static dyn Provider> {
     PROVIDERS.iter().copied().find(|p| p.key() == key)
+}
+
+/// Builds one `ModelOption` for a provider's catalog (`value` = launch id/alias; `None` = default).
+pub(crate) fn model_option(
+    value: Option<&str>,
+    label: &str,
+    description: &str,
+    effort: bool,
+    context_limit: u32,
+) -> ModelOption {
+    ModelOption {
+        value: value.map(String::from),
+        label: label.to_string(),
+        description: description.to_string(),
+        effort,
+        context_limit,
+    }
+}
+
+/// Builds the effort-label map from `(token, display)` pairs.
+pub(crate) fn effort_labels(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+/// Every provider's model-picker catalog, keyed by provider key (providers with no picker are
+/// omitted). Sent to the GUI in the `ModelCatalog` message.
+pub fn all_catalogs() -> std::collections::HashMap<String, ProviderModels> {
+    PROVIDERS
+        .iter()
+        .filter_map(|p| p.model_catalog().map(|c| (p.key().to_string(), c)))
+        .collect()
 }

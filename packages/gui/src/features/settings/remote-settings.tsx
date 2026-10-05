@@ -8,14 +8,13 @@ import { Button, Input, Label } from '@soromi/ui'
 import { CARD, DESC, H2, SECTION, SECTION_HEAD } from './styles'
 
 /**
- * Remote (self-host) settings: the relay + web-viewport URLs paired phones use. Local-link only.
- * Editable at runtime so a bundled app never needs a rebuild to point at a different relay / host.
+ * Remote (self-host) settings: the relay paired phones connect through. Local-link only.
+ * Editable at runtime so a bundled app never needs a rebuild to point at a different relay.
  * Reads the current values on mount and applies changes live on the daemon.
  */
 export function RemoteSettings() {
   const transport = useTransport()
   const [relayUrl, setRelayUrl] = useState('')
-  const [webUrl, setWebUrl] = useState('')
   const [accessKey, setAccessKey] = useState('')
   const [saved, setSaved] = useState(false)
 
@@ -23,7 +22,6 @@ export function RemoteSettings() {
     const off = transport.onMessage((message) => {
       if (message.type === 'remote-config') {
         setRelayUrl(message.config.relayUrl)
-        setWebUrl(message.config.webUrl)
         setAccessKey(message.config.accessKey)
       }
     })
@@ -35,7 +33,7 @@ export function RemoteSettings() {
   const save = () => {
     transport.send({
       type: 'set-remote-config',
-      config: { relayUrl: relayUrl.trim(), webUrl: webUrl.trim(), accessKey: accessKey.trim() },
+      config: { relayUrl: relayUrl.trim(), accessKey: accessKey.trim() },
     })
     setSaved(true)
   }
@@ -50,8 +48,8 @@ export function RemoteSettings() {
         <div>
           <h2 className={H2}>Remote</h2>
           <p className={DESC}>
-            Where paired phones connect. Change these to self-host the relay or the web app; no
-            rebuild needed. Leave blank to use the defaults.
+            Where paired phones connect. Change these to self-host the relay; no rebuild needed.
+            Leave blank to use the defaults.
           </p>
         </div>
       </div>
@@ -66,15 +64,6 @@ export function RemoteSettings() {
                 placeholder="wss://relay.soromi.dev"
                 value={relayUrl}
                 onChange={(event) => edit(setRelayUrl)(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="web-url">Web app URL</Label>
-              <Input
-                id="web-url"
-                placeholder="https://remote.soromi.dev"
-                value={webUrl}
-                onChange={(event) => edit(setWebUrl)(event.target.value)}
               />
             </div>
             <div className="flex flex-col gap-1.5">

@@ -10,6 +10,11 @@ export type { ClientMessage } from './generated/ClientMessage'
 export type { DeviceSummary } from './generated/DeviceSummary'
 export type { DirEntry } from './generated/DirEntry'
 export type { EntryKind } from './generated/EntryKind'
+export type { GitChange } from './generated/GitChange'
+export type { GitStatusInfo } from './generated/GitStatusInfo'
+export type { IncompatibleAction } from './generated/IncompatibleAction'
+export type { ModelOption } from './generated/ModelOption'
+export type { ProviderModels } from './generated/ProviderModels'
 export type { KeepAwakeMode } from './generated/KeepAwakeMode'
 export type { PermissionMode } from './generated/PermissionMode'
 export type { ProviderConfig } from './generated/ProviderConfig'
@@ -27,3 +32,10 @@ export type { ToolApproval } from './generated/ToolApproval'
 export type { ToolKind } from './generated/ToolKind'
 export type { UsageWindow } from './generated/UsageWindow'
 export type { WorkspaceSummary } from './generated/WorkspaceSummary'
+
+/** The wire protocol version this client speaks, announced in `hello`. Mirrors `PROTOCOL_VERSION`
+ * in `crates/protocol/src/lib.rs` (a Rust test fails if the two drift). */
+export const PROTOCOL_VERSION = 2
+
+/** Opcode of a binary terminal-output frame: `[TERMINAL_OUTPUT][slot, big-endian u16][utf-8]`. */
+export const TERMINAL_OUTPUT = 0x01

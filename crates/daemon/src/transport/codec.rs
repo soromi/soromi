@@ -30,18 +30,19 @@ impl Codec {
         Some(Codec::Encrypted(Box::new(cipher)))
     }
 
-    /// Encodes an outbound server message into a WebSocket frame.
-    pub fn encode(&self, message: &ServerMessage) -> Option<Message> {
-        let json = serde_json::to_vec(message).ok()?;
-
+    /// Wraps an outbound payload in a WebSocket frame. On a plaintext link JSON goes out as a text
+    /// frame and anything else as binary; on an encrypted link every payload is sealed into a binary
+    /// frame of `nonce || ciphertext`, and the receiver tells JSON from binary by its first byte.
+    pub fn seal(&self, payload: Vec<u8>, text: bool) -> Option<Message> {
         match self {
-            Codec::Plain => Some(Message::Text(String::from_utf8(json).ok()?)),
+            Codec::Plain if text => Some(Message::Text(String::from_utf8(payload).ok()?)),
+            Codec::Plain => Some(Message::Binary(payload)),
             Codec::Encrypted(cipher) => {
                 let mut nonce = [0u8; NONCE_LEN];
                 getrandom::getrandom(&mut nonce).ok()?;
 
                 let ciphertext = cipher
-                    .encrypt(XNonce::from_slice(&nonce), json.as_ref())
+                    .encrypt(XNonce::from_slice(&nonce), payload.as_ref())
                     .ok()?;
 
                 let mut frame = Vec::with_capacity(NONCE_LEN + ciphertext.len());
@@ -53,15 +54,15 @@ impl Codec {
         }
     }
 
-    /// Decodes an inbound WebSocket frame into a client message, or `None` if it cannot.
-    pub fn decode(&self, message: Message) -> Option<ClientMessage> {
+    /// Unwraps an inbound WebSocket frame to its payload, or `None` if it is not a data frame or
+    /// does not decrypt.
+    pub fn open(&self, message: Message) -> Option<Vec<u8>> {
         match self {
-            Codec::Plain => {
-                let Message::Text(text) = message else {
-                    return None;
-                };
-                serde_json::from_str(&text).ok()
-            }
+            Codec::Plain => match message {
+                Message::Text(text) => Some(text.into_bytes()),
+                Message::Binary(bytes) => Some(bytes),
+                _ => None,
+            },
             Codec::Encrypted(cipher) => {
                 let Message::Binary(frame) = message else {
                     return None;
@@ -71,11 +72,23 @@ impl Codec {
                 }
 
                 let (nonce, ciphertext) = frame.split_at(NONCE_LEN);
-                let plaintext = cipher.decrypt(XNonce::from_slice(nonce), ciphertext).ok()?;
-
-                serde_json::from_slice(&plaintext).ok()
+                cipher.decrypt(XNonce::from_slice(nonce), ciphertext).ok()
             }
         }
+    }
+
+    /// Encodes an outbound server message into a WebSocket frame.
+    pub fn encode(&self, message: &ServerMessage) -> Option<Message> {
+        self.seal(serde_json::to_vec(message).ok()?, true)
+    }
+
+    /// Decodes an inbound WebSocket frame into a client message, or `None` if it cannot.
+    pub fn decode(&self, message: Message) -> Option<ClientMessage> {
+        // A plaintext link carries client messages as text frames only.
+        if matches!(self, Codec::Plain) && !matches!(message, Message::Text(_)) {
+            return None;
+        }
+        serde_json::from_slice(&self.open(message)?).ok()
     }
 }
 
@@ -119,18 +132,18 @@ mod tests {
 
     /// Encrypts a client message with a codec (mirrors `encode`, which is server-message-typed).
     fn encrypt_client(codec: &Codec, message: &ClientMessage) -> Message {
-        let Codec::Encrypted(cipher) = codec else {
-            unreachable!()
-        };
-        let json = serde_json::to_vec(message).unwrap();
-        let mut nonce = [0u8; NONCE_LEN];
-        getrandom::getrandom(&mut nonce).unwrap();
-        let ciphertext = cipher
-            .encrypt(XNonce::from_slice(&nonce), json.as_ref())
-            .unwrap();
-        let mut frame = nonce.to_vec();
-        frame.extend_from_slice(&ciphertext);
+        codec
+            .seal(serde_json::to_vec(message).unwrap(), true)
+            .unwrap()
+    }
 
-        Message::Binary(frame)
+    #[test]
+    fn a_sealed_binary_payload_opens_to_the_same_bytes() {
+        let payload = vec![0x01, 0x00, 0x02, b'h', b'i'];
+        for codec in [Codec::Plain, Codec::from_key_base64(KEY).unwrap()] {
+            let frame = codec.seal(payload.clone(), false).unwrap();
+            assert!(matches!(frame, Message::Binary(_)));
+            assert_eq!(codec.open(frame), Some(payload.clone()));
+        }
     }
 }

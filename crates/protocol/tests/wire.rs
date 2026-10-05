@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use soromi_protocol::{
-    AccountProfile, AgentAccount, ClientMessage, DirEntry, EntryKind, KeepAwakeMode,
-    PermissionMode, ProviderConfig, ServerMessage, SessionMode, SessionSummary, SlashCommand,
-    Status, SubAgent, WorkspaceSummary,
+    AccountProfile, AgentAccount, ClientMessage, DeviceSummary, DirEntry, EntryKind,
+    IncompatibleAction, KeepAwakeMode, PermissionMode, ProviderConfig, RemoteConfig, ServerMessage,
+    SessionMode, SessionSummary, SlashCommand, Status, SubAgent, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -120,14 +120,7 @@ fn client_update_space_carries_account_bindings() {
 }
 
 #[test]
-fn server_output_and_session_opened() {
-    assert_server(
-        ServerMessage::Output {
-            session: "s1".into(),
-            data: "hi".into(),
-        },
-        json!({ "type": "output", "session": "s1", "data": "hi" }),
-    );
+fn server_session_opened() {
     assert_server(
         ServerMessage::SessionOpened {
             workspace: "kazomi".into(),
@@ -144,7 +137,6 @@ fn server_output_and_session_opened() {
                 model: None,
                 effort: None,
                 context_tokens: None,
-                commands: Vec::new(),
             },
         },
         json!({
@@ -325,10 +317,6 @@ fn server_workspace_list_and_summary() {
                     model: None,
                     effort: None,
                     context_tokens: Some(120_000),
-                    commands: vec![SlashCommand {
-                        name: "recap".into(),
-                        description: Some("Generate a recap".into()),
-                    }],
                 }],
                 instructions: None,
             }],
@@ -351,8 +339,7 @@ fn server_workspace_list_and_summary() {
                     "activity": "Editing config.ts",
                     "mode": "terminal",
                     "permissionMode": "default",
-                    "context_tokens": 120_000,
-                    "commands": [{ "name": "recap", "description": "Generate a recap" }]
+                    "context_tokens": 120_000
                 }]
             }]
         }),
@@ -450,6 +437,134 @@ fn server_update_available_omits_absent_notes() {
             "type": "update-available",
             "version": "0.2.0",
             "url": "https://example.com/v0.2.0"
+        }),
+    );
+}
+
+#[test]
+fn hello_and_welcome_carry_the_protocol_version() {
+    assert_client(
+        ClientMessage::Hello {
+            protocol: 2,
+            client_id: "c-1".into(),
+        },
+        json!({ "type": "hello", "protocol": 2, "clientId": "c-1" }),
+    );
+    assert_server(
+        ServerMessage::Welcome {
+            protocol: 2,
+            version: "1.0.0".into(),
+        },
+        json!({ "type": "welcome", "protocol": 2, "version": "1.0.0" }),
+    );
+    assert_server(
+        ServerMessage::Incompatible {
+            protocol: 2,
+            action: IncompatibleAction::UpdateClient,
+        },
+        json!({ "type": "incompatible", "protocol": 2, "action": "update-client" }),
+    );
+}
+
+#[test]
+fn client_detach_names_the_session() {
+    assert_client(
+        ClientMessage::Detach {
+            session: "s1".into(),
+        },
+        json!({ "type": "detach", "session": "s1" }),
+    );
+}
+
+#[test]
+fn ping_and_pong_echo_a_nonce() {
+    assert_client(
+        ClientMessage::Ping { nonce: 7 },
+        json!({ "type": "ping", "nonce": 7 }),
+    );
+    assert_server(
+        ServerMessage::Pong { nonce: 7 },
+        json!({ "type": "pong", "nonce": 7 }),
+    );
+}
+
+#[test]
+fn chat_delta_appends_by_default_and_flags_a_replace() {
+    // The common case (an appended chunk) carries no `replace` key at all.
+    assert_server(
+        ServerMessage::ChatDelta {
+            session: "s1".into(),
+            text: "lo".into(),
+            replace: false,
+        },
+        json!({ "type": "chat-delta", "session": "s1", "text": "lo" }),
+    );
+    assert_server(
+        ServerMessage::ChatDelta {
+            session: "s1".into(),
+            text: String::new(),
+            replace: true,
+        },
+        json!({ "type": "chat-delta", "session": "s1", "text": "", "replace": true }),
+    );
+}
+
+#[test]
+fn session_updates_and_commands_travel_per_session() {
+    assert_server(
+        ServerMessage::Attached {
+            session: "s1".into(),
+            slot: 3,
+        },
+        json!({ "type": "attached", "session": "s1", "slot": 3 }),
+    );
+    assert_server(
+        ServerMessage::SessionCommands {
+            session: "s1".into(),
+            commands: vec![SlashCommand {
+                name: "recap".into(),
+                description: Some("Generate a recap".into()),
+            }],
+        },
+        json!({
+            "type": "session-commands",
+            "session": "s1",
+            "commands": [{ "name": "recap", "description": "Generate a recap" }]
+        }),
+    );
+}
+
+#[test]
+fn pairing_messages_carry_a_code_and_a_relay() {
+    assert_server(
+        ServerMessage::DevicePaired {
+            device: DeviceSummary {
+                id: "d1".into(),
+                name: "Phone".into(),
+                pairing_code: "soromi://pair#abc".into(),
+                connected: false,
+            },
+        },
+        json!({
+            "type": "device-paired",
+            "device": {
+                "id": "d1",
+                "name": "Phone",
+                "pairingCode": "soromi://pair#abc",
+                "connected": false
+            }
+        }),
+    );
+    assert_client(
+        ClientMessage::SetRemoteConfig {
+            config: RemoteConfig {
+                relay_url: "wss://relay.example".into(),
+                access_key: "secret".into(),
+            },
+        },
+        json!({
+            "type": "set-remote-config",
+            "config": { "relayUrl": "wss://relay.example", "accessKey": "secret" }
         }),
     );
 }

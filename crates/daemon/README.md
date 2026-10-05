@@ -37,19 +37,23 @@ The relay itself is a separate, content-blind process; see [`@soromi/relay`](../
 
 ### Pairing endpoints (self-host, no rebuild)
 
-The relay and hosted web-viewport URLs used when **pairing a phone** are runtime config, so a bundled
-app never needs a rebuild to point at your own infrastructure. They resolve **config file →
-environment variable → default**, and the desktop app edits the file from its Settings ("Remote").
+The relay used when **pairing a phone** is runtime config, so a bundled app never needs a rebuild to
+point at your own infrastructure. Each value resolves **config file → environment variable →
+default**, and the desktop app edits the file from its Settings ("Remote").
 
 | Key (`~/.soromi/config.json`) | Env var | Default | Purpose |
 | --- | --- | --- | --- |
-| `relayUrl` | `SOROMI_RELAY_URL` | `ws://localhost:8787` | Relay both the daemon and paired phones dial. |
-| `webUrl` | `SOROMI_WEB_URL` | `http://localhost:1430` | Base URL the pairing QR opens (where the web viewport is hosted). |
+| `relayUrl` | `SOROMI_RELAY_URL` | `wss://relay.soromi.dev` | Relay both the daemon and paired phones dial. |
+| `accessKey` | `SOROMI_RELAY_ACCESS_KEY` | `soromi` | Secret the daemon presents to the relay to create a room. |
+
+Pairing a device produces a code, shown as a QR, of the form `soromi://pair#<base64url(JSON)>`. The
+JSON holds the code's version, the device id, the relay URL, the room, and the end-to-end key; the
+relay access key is never part of it.
 
 Example `~/.soromi/config.json`:
 
 ```json
-{ "relayUrl": "wss://relay.example.com", "webUrl": "https://app.example.com" }
+{ "relayUrl": "wss://relay.example.com", "accessKey": "a-long-random-secret" }
 ```
 
 An empty value falls back to the env var, then the default. Changes made from Settings apply live

@@ -241,6 +241,16 @@ impl Session {
         self.output_tx.subscribe()
     }
 
+    /// The recent screen and a feed of everything written after it, taken together: the receiver
+    /// starts exactly where the snapshot ends, so replaying one then the other neither drops nor
+    /// repeats output. Used on attach, and again to repaint a viewer that fell too far behind.
+    pub fn attach_output(&self) -> (String, broadcast::Receiver<String>) {
+        match self.scrollback.lock() {
+            Ok(buffer) => (buffer.snapshot(), self.output_tx.subscribe()),
+            Err(_) => (String::new(), self.output_tx.subscribe()),
+        }
+    }
+
     /// A watch on the agent status; the current value is available immediately.
     pub fn subscribe_status(&self) -> watch::Receiver<Status> {
         self.status_rx.clone()
@@ -434,8 +444,11 @@ fn spawn_reader(
                     if text.is_empty() {
                         continue;
                     }
+                    // Record and publish under one lock, so a viewer that takes the scrollback and a
+                    // receiver together (`attach_output`) sees this chunk exactly once.
                     if let Ok(mut sb) = scrollback.lock() {
                         sb.append(&text);
+                        let _ = output_tx.send(text.clone());
                     }
                     // Output means the agent is doing something: keep the idle-decay clock fresh.
                     if let Ok(mut at) = last_activity.lock() {
@@ -452,7 +465,6 @@ fn spawn_reader(
                     {
                         let _ = status_tx.send(status);
                     }
-                    let _ = output_tx.send(text);
                 }
             }
         }

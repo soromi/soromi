@@ -1,6 +1,5 @@
-// Shared, presentational feature components used by both the desktop app and the web app. They
-// take data and callbacks via props (and refs for imperative calls), so all store / transport /
-// platform logic stays in each app's own containers.
+// Presentational feature components. They take data and callbacks via props (and refs for
+// imperative calls), so all store / transport / platform logic stays in the app's own containers.
 
 export { SkillList } from './skills/skill-list'
 export type { SkillListProps } from './skills/skill-list'
@@ -21,7 +20,7 @@ export { DragHandle } from './drag-handle'
 
 export { cn } from './lib/utils'
 
-// shadcn/ui primitives (Tailwind + Radix), shared by the desktop and web apps.
+// shadcn/ui primitives (Tailwind + Radix).
 export { Button, buttonVariants } from './components/ui/button'
 export type { ButtonProps } from './components/ui/button'
 export { Input } from './components/ui/input'

@@ -56,6 +56,17 @@ pub struct OpenResult {
     pub warning: Option<String>,
 }
 
+/// What changed, so a viewport is told only that. Sent on the hub's change channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Change {
+    /// The set of workspaces or sessions, or their saved settings: the whole list is stale.
+    Structure,
+    /// One session's live state (status, activity, sub-agents, context usage).
+    Session(String),
+    /// App-wide state outside the workspace list (keep-awake, an available update).
+    Global,
+}
+
 /// Creates and owns spaces. Spaces are created in-app and persisted under `~/.soromi/`, so
 /// they restore when the daemon restarts. A workspace holds one or more terminal sessions
 /// (tabs); each session's account is resolved from the workspace's per-agent account bindings.
@@ -67,7 +78,7 @@ pub struct WorkspaceService {
     notifications: Arc<NotificationController>,
     keep_awake: Arc<KeepAwakeController>,
     sound: Arc<dyn SoundPlayer>,
-    change_tx: broadcast::Sender<()>,
+    change_tx: broadcast::Sender<Change>,
     /// A newer release than the running build, once the update check finds one.
     update: Mutex<Option<UpdateInfo>>,
     /// Whether the app window is focused. While it is, agent-event sounds and banners are
@@ -222,7 +233,7 @@ impl WorkspaceService {
         }
     }
 
-    pub fn subscribe_changes(&self) -> broadcast::Receiver<()> {
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<Change> {
         self.change_tx.subscribe()
     }
 
@@ -334,7 +345,7 @@ impl WorkspaceService {
     /// Records an available update and wakes viewports so they can show the banner.
     pub fn set_update(&self, info: UpdateInfo) {
         *self.update.lock().unwrap() = Some(info);
-        self.emit_change();
+        self.emit_global();
     }
 
     /// The available update, if the check has found one.
@@ -500,7 +511,6 @@ impl WorkspaceService {
             model: None,
             effort: None,
             context_tokens: None,
-            commands: Vec::new(),
         })
     }
 
@@ -762,41 +772,7 @@ impl WorkspaceService {
                 let sessions: Vec<SessionSummary> = meta
                     .sessions
                     .iter()
-                    .map(|session| {
-                        let live = self.manager.get(&session.id);
-                        let live_chat = self.manager.get_chat(&session.id);
-                        SessionSummary {
-                            id: session.id.clone(),
-                            agent: session.agent.clone(),
-                            account: account_for(&meta.accounts, &session.agent),
-                            status: live
-                                .as_ref()
-                                .map(|s| s.status())
-                                .or_else(|| live_chat.as_ref().map(|s| s.status()))
-                                .unwrap_or(Status::Idle),
-                            title: session.title.clone(),
-                            subagents: live
-                                .as_ref()
-                                .map(|s| s.subagents())
-                                .or_else(|| live_chat.as_ref().map(|s| s.subagents()))
-                                .unwrap_or_default(),
-                            // Live activity wins; otherwise a restored tab shows its last transcript
-                            // activity so it doesn't read as "New session".
-                            activity: live.as_ref().and_then(|s| s.activity()).or_else(|| {
-                                self.restored_activity
-                                    .lock()
-                                    .unwrap()
-                                    .get(&session.id)
-                                    .cloned()
-                            }),
-                            mode: session.mode,
-                            permission_mode: session.permission_mode,
-                            model: session.model.clone(),
-                            effort: session.effort.clone(),
-                            context_tokens: live_chat.as_ref().and_then(|s| s.context_tokens()),
-                            commands: live_chat.as_ref().map(|s| s.commands()).unwrap_or_default(),
-                        }
-                    })
+                    .map(|session| self.session_summary(meta, session))
                     .collect();
                 WorkspaceSummary {
                     name: name.clone(),
@@ -809,6 +785,59 @@ impl WorkspaceService {
                 }
             })
             .collect()
+    }
+
+    /// One session's current summary with its workspace's name and aggregate status — what a
+    /// viewport needs when only that session changed. `None` if the session no longer exists.
+    pub fn session_update(&self, session_id: &str) -> Option<(String, Status, SessionSummary)> {
+        let metadata = self.metadata.lock().unwrap();
+        let (name, meta) = metadata
+            .iter()
+            .find(|(_, meta)| meta.sessions.iter().any(|s| s.id == session_id))?;
+        let sessions: Vec<SessionSummary> = meta
+            .sessions
+            .iter()
+            .map(|session| self.session_summary(meta, session))
+            .collect();
+        let status = aggregate_status(&sessions);
+        let summary = sessions.into_iter().find(|s| s.id == session_id)?;
+        Some((name.clone(), status, summary))
+    }
+
+    /// Builds a session's summary from its saved spec plus whatever its live backend reports.
+    fn session_summary(&self, meta: &WorkspaceMeta, session: &SessionSpec) -> SessionSummary {
+        let live = self.manager.get(&session.id);
+        let live_chat = self.manager.get_chat(&session.id);
+        SessionSummary {
+            id: session.id.clone(),
+            agent: session.agent.clone(),
+            account: account_for(&meta.accounts, &session.agent),
+            status: live
+                .as_ref()
+                .map(|s| s.status())
+                .or_else(|| live_chat.as_ref().map(|s| s.status()))
+                .unwrap_or(Status::Idle),
+            title: session.title.clone(),
+            subagents: live
+                .as_ref()
+                .map(|s| s.subagents())
+                .or_else(|| live_chat.as_ref().map(|s| s.subagents()))
+                .unwrap_or_default(),
+            // Live activity wins; otherwise a restored tab shows its last transcript activity so it
+            // doesn't read as "New session".
+            activity: live.as_ref().and_then(|s| s.activity()).or_else(|| {
+                self.restored_activity
+                    .lock()
+                    .unwrap()
+                    .get(&session.id)
+                    .cloned()
+            }),
+            mode: session.mode,
+            permission_mode: session.permission_mode,
+            model: session.model.clone(),
+            effort: session.effort.clone(),
+            context_tokens: live_chat.as_ref().and_then(|s| s.context_tokens()),
+        }
     }
 
     pub fn list_dir(&self, workspace: &str, path: &str) -> Vec<DirEntry> {
@@ -856,6 +885,68 @@ impl WorkspaceService {
         };
         write_file_within(Path::new(&root), path, content)?;
         Ok(())
+    }
+
+    /// The git working-tree status for a workspace (read-only source-control view). Falls back to an
+    /// empty non-repo status when the workspace is unknown.
+    pub fn git_status(&self, workspace: &str) -> soromi_protocol::GitStatusInfo {
+        match self.workspace_root(workspace) {
+            Some(root) => crate::files::git::status(Path::new(&root)),
+            None => soromi_protocol::GitStatusInfo {
+                is_repo: false,
+                branch: None,
+                ahead: 0,
+                behind: 0,
+                changes: Vec::new(),
+            },
+        }
+    }
+
+    /// The unified diff for one changed file. Returns `(patch, truncated)`; empty for an unknown
+    /// workspace.
+    pub fn git_diff(&self, workspace: &str, path: &str, staged: bool) -> (String, bool) {
+        match self.workspace_root(workspace) {
+            Some(root) => crate::files::git::diff(Path::new(&root), path, staged),
+            None => (String::new(), false),
+        }
+    }
+
+    /// Spawns an ad-hoc shell PTY for a workspace, rooted at `folder` (relative to the workspace root;
+    /// "" or "." = the root). Not persisted and not a workspace tab — a bare user shell keyed by
+    /// `shell_id` in the session manager, so Attach/Input/Resize/Output/CloseSession all reuse it by
+    /// id. The command is `$SHELL` with an unknown provider, so `Session::spawn` runs a raw terminal.
+    pub fn open_shell(&self, workspace: &str, shell_id: &str, folder: &str) -> anyhow::Result<()> {
+        let root = self
+            .workspace_root(workspace)
+            .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
+        let cwd = if folder.is_empty() || folder == "." {
+            root.clone()
+        } else {
+            Path::new(&root).join(folder).to_string_lossy().into_owned()
+        };
+        // A login+interactive shell, so it sources the user's rc files and prints a prompt. Fall back
+        // to a common shell when $SHELL is absent (a GUI-launched daemon may have a minimal env).
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let options = SessionOptions {
+            agent: "shell".into(),
+            command: shell,
+            args: vec!["-l".into(), "-i".into()],
+            cwd,
+            env: None,
+            cols: 80,
+            rows: 24,
+        };
+        self.manager.ensure(shell_id, options)?;
+        Ok(())
+    }
+
+    /// The on-disk root of a workspace, if it exists.
+    fn workspace_root(&self, workspace: &str) -> Option<String> {
+        let metadata = self.metadata.lock().unwrap();
+        metadata
+            .iter()
+            .find(|(name, _)| name == workspace)
+            .map(|(_, meta)| meta.root.clone())
     }
 
     /// Lists the slash commands and skills available to a session's agent (Claude only for now).
@@ -1003,7 +1094,7 @@ impl WorkspaceService {
 
     pub fn set_keep_awake_mode(&self, mode: KeepAwakeMode) {
         self.keep_awake.set_mode(mode);
-        self.emit_change();
+        self.emit_global();
     }
 
     pub fn set_muted(&self, workspace: &str, muted: bool) {
@@ -1421,7 +1512,8 @@ impl WorkspaceService {
     }
 
     /// Like `watch_status`, but for a headless chat session: forwards its status to keep-awake and
-    /// fires a change so the sidebar updates. Chat has no PTY sub-agent/activity channels yet.
+    /// signals a change for that session so the sidebar updates. Its slash commands are not part of
+    /// the summary; each attached viewport is sent them directly.
     ///
     /// Chat also has no agent hooks: its `can_use_tool` approval prompt is a stream-json control
     /// request, not a hook event, so `handle_agent_event` never runs for it. This watcher is
@@ -1431,7 +1523,6 @@ impl WorkspaceService {
     fn watch_chat(&self, workspace: &str, session_id: &str, session: &ChatSession) {
         let mut status_rx = session.subscribe_status();
         let mut subagents_rx = session.subscribe_subagents();
-        let mut commands_rx = session.subscribe_commands();
         let mut context_rx = session.subscribe_context();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
@@ -1441,13 +1532,23 @@ impl WorkspaceService {
         let workspace = workspace.to_string();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
+            // The backends re-send an unchanged status and context on almost every frame; only a
+            // real change is worth telling viewports about.
+            let mut last_status = *status_rx.borrow();
+            let mut last_context = *context_rx.borrow();
+            let changed = || {
+                let _ = change_tx.send(Change::Session(session_id.clone()));
+            };
             loop {
                 tokio::select! {
-                    changed = status_rx.changed() => {
-                        if changed.is_err() { break }
+                    result = status_rx.changed() => {
+                        if result.is_err() { break }
                         let status = *status_rx.borrow_and_update();
                         keep_awake.handle(&session_id, status);
-                        let _ = change_tx.send(());
+                        if status != last_status {
+                            last_status = status;
+                            changed();
+                        }
 
                         // Notify on entering an attention state, unless muted or the user is here.
                         if let Some(cue) = cue_for(status)
@@ -1458,26 +1559,22 @@ impl WorkspaceService {
                             notifications.fire(&workspace, Some(&session_id), cue_text(cue));
                         }
                     }
-                    // The running sub-agents changed (a Task spawned or finished): re-broadcast so the
-                    // chat tab's "agents working" panel updates live.
-                    changed = subagents_rx.changed() => {
-                        if changed.is_err() { break }
+                    // The running sub-agents changed (a Task spawned or finished), so the chat tab's
+                    // "agents working" panel updates live.
+                    result = subagents_rx.changed() => {
+                        if result.is_err() { break }
                         subagents_rx.borrow_and_update();
-                        let _ = change_tx.send(());
+                        changed();
                     }
-                    // The provider's slash commands arrived (the `system/init` frame): re-broadcast so
-                    // the chat composer's `/` menu is available right away.
-                    changed = commands_rx.changed() => {
-                        if changed.is_err() { break }
-                        commands_rx.borrow_and_update();
-                        let _ = change_tx.send(());
-                    }
-                    // The context token count changed (a turn reported usage): re-broadcast so the
-                    // composer's context meter updates.
-                    changed = context_rx.changed() => {
-                        if changed.is_err() { break }
-                        context_rx.borrow_and_update();
-                        let _ = change_tx.send(());
+                    // The context token count changed (a turn reported usage), so the composer's
+                    // context meter updates.
+                    result = context_rx.changed() => {
+                        if result.is_err() { break }
+                        let context = *context_rx.borrow_and_update();
+                        if context != last_context {
+                            last_context = context;
+                            changed();
+                        }
                     }
                 }
             }
@@ -1494,27 +1591,35 @@ impl WorkspaceService {
         let change_tx = self.change_tx.clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
+            // A hook re-sends `Thinking` on every tool start; only a real change is worth sending.
+            let mut last_status = *status_rx.borrow();
+            let changed = || {
+                let _ = change_tx.send(Change::Session(session_id.clone()));
+            };
             loop {
                 tokio::select! {
-                    changed = status_rx.changed() => {
-                        if changed.is_err() { break }
+                    result = status_rx.changed() => {
+                        if result.is_err() { break }
                         let status = *status_rx.borrow_and_update();
                         keep_awake.handle(&session_id, status);
-                        let _ = change_tx.send(());
+                        if status != last_status {
+                            last_status = status;
+                            changed();
+                        }
                     }
-                    // The running sub-agents changed (a Task spawned or finished): re-broadcast so
-                    // the sidebar nests them under the tab live.
-                    changed = subagents_rx.changed() => {
-                        if changed.is_err() { break }
+                    // The running sub-agents changed (a Task spawned or finished), so the sidebar
+                    // nests them under the tab live.
+                    result = subagents_rx.changed() => {
+                        if result.is_err() { break }
                         subagents_rx.borrow_and_update();
-                        let _ = change_tx.send(());
+                        changed();
                     }
-                    // The current activity changed (a tool started or finished): re-broadcast so the
-                    // tab's live subtitle updates.
-                    changed = activity_rx.changed() => {
-                        if changed.is_err() { break }
+                    // The current activity changed (a tool started or finished), so the tab's live
+                    // subtitle updates.
+                    result = activity_rx.changed() => {
+                        if result.is_err() { break }
                         activity_rx.borrow_and_update();
-                        let _ = change_tx.send(());
+                        changed();
                     }
                 }
             }
@@ -1610,7 +1715,11 @@ impl WorkspaceService {
     }
 
     fn emit_change(&self) {
-        let _ = self.change_tx.send(());
+        let _ = self.change_tx.send(Change::Structure);
+    }
+
+    fn emit_global(&self) {
+        let _ = self.change_tx.send(Change::Global);
     }
 }
 

@@ -23,6 +23,7 @@ use soromi_protocol::{
 };
 
 use crate::providers::{ChatFrame, Provider};
+use crate::sessions::delta::{DeltaFrame, DeltaStream};
 use crate::sessions::session::track_subagents;
 
 const CHAT_CAPACITY: usize = 512;
@@ -44,10 +45,8 @@ pub struct StreamJsonSession {
     chat_tx: broadcast::Sender<ChatEvent>,
     chat_log: Arc<Mutex<Vec<ChatEvent>>>,
     // The assistant message currently streaming in, token by token (from `stream_event` deltas). It
-    // is not part of `chat_log` — the complete `assistant` frame commits that. `delta_tx` broadcasts
-    // the cumulative text as it grows (empty string = the live message cleared / committed).
-    delta_tx: broadcast::Sender<String>,
-    partial: Arc<Mutex<String>>,
+    // is not part of `chat_log` — the complete `assistant` frame commits that.
+    delta: Arc<DeltaStream>,
     // Tool approvals: `approval_tx` announces a new `can_use_tool` request, `resolved_tx` announces
     // one was answered (so all viewers clear it), and `pending` holds the unanswered ones (for the
     // response's `updatedInput` and for a viewer attaching mid-approval).
@@ -129,8 +128,7 @@ impl StreamJsonSession {
         let status_tx = Arc::new(status_tx);
         let (chat_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let chat_log = Arc::new(Mutex::new(seed));
-        let (delta_tx, _) = broadcast::channel(CHAT_CAPACITY);
-        let partial = Arc::new(Mutex::new(String::new()));
+        let delta = Arc::new(DeltaStream::new(CHAT_CAPACITY));
         let (approval_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (resolved_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let pending: Arc<Mutex<HashMap<String, Pending>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -171,8 +169,7 @@ impl StreamJsonSession {
             chat_tx.clone(),
             chat_log.clone(),
             status_tx.clone(),
-            delta_tx.clone(),
-            partial.clone(),
+            delta.clone(),
             approval_tx.clone(),
             pending.clone(),
             interrupted.clone(),
@@ -191,8 +188,7 @@ impl StreamJsonSession {
             status_rx,
             chat_tx,
             chat_log,
-            delta_tx,
-            partial,
+            delta,
             approval_tx,
             resolved_tx,
             pending,
@@ -243,10 +239,7 @@ impl StreamJsonSession {
         let _ = self.status_tx.send(Status::Thinking);
         // A fresh turn drops any leftover streaming partial; steering leaves the live reply intact.
         if !steering {
-            if let Ok(mut partial) = self.partial.lock() {
-                partial.clear();
-            }
-            let _ = self.delta_tx.send(String::new());
+            self.delta.reset();
             // Reset the background sub-agent panel — the last turn's agents don't belong to this one.
             if let Ok(mut active) = self.active_subagents.lock()
                 && !active.is_empty()
@@ -452,14 +445,11 @@ impl StreamJsonSession {
         (log[start..oldest].to_vec(), start > 0)
     }
 
-    pub fn subscribe_delta(&self) -> broadcast::Receiver<String> {
-        self.delta_tx.subscribe()
-    }
-
-    /// The assistant text streaming in right now (empty when nothing is mid-stream), so a viewer that
-    /// attaches partway through a turn sees the in-progress reply.
-    pub fn delta_snapshot(&self) -> String {
-        self.partial.lock().map(|p| p.clone()).unwrap_or_default()
+    /// The assistant text streaming in right now (empty when nothing is mid-stream) and a feed of how
+    /// it changes from here, so a viewer that attaches partway through a turn sees the in-progress
+    /// reply and then each new piece exactly once.
+    pub fn delta_attach(&self) -> (String, broadcast::Receiver<DeltaFrame>) {
+        self.delta.attach()
     }
 
     /// Kills the child and stops the reader.
@@ -490,8 +480,7 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     chat_tx: broadcast::Sender<ChatEvent>,
     chat_log: Arc<Mutex<Vec<ChatEvent>>>,
     status_tx: Arc<watch::Sender<Status>>,
-    delta_tx: broadcast::Sender<String>,
-    partial: Arc<Mutex<String>>,
+    delta: Arc<DeltaStream>,
     approval_tx: broadcast::Sender<ToolApproval>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     interrupted: Arc<AtomicBool>,
@@ -504,17 +493,8 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
 ) -> AbortHandle {
     // Clears the streaming partial and tells viewers the live message is gone (committed / ended).
     let clear_partial = {
-        let partial = partial.clone();
-        let delta_tx = delta_tx.clone();
-        move || {
-            if let Ok(mut buffer) = partial.lock() {
-                if buffer.is_empty() {
-                    return;
-                }
-                buffer.clear();
-            }
-            let _ = delta_tx.send(String::new());
-        }
+        let delta = delta.clone();
+        move || delta.reset()
     };
 
     // Empties the "agents working in the background" panel. Called when the turn stops actively
@@ -593,10 +573,7 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     if matches!(*status_tx.borrow(), Status::Idle) {
                         let _ = status_tx.send(Status::Thinking);
                     }
-                    if let Ok(mut buffer) = partial.lock() {
-                        buffer.push_str(&text);
-                        let _ = delta_tx.send(buffer.clone());
-                    }
+                    delta.append(&text);
                 }
                 ChatFrame::Status(status) => {
                     if matches!(status, Status::Idle) {

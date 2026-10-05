@@ -62,9 +62,8 @@ WebSocket traffic, so both peers can dial `wss://relay.example.com`. The relay i
 holds no data, so it scales horizontally as long as **both peers of a room land on the same
 instance** (pin by the `room` query param, or run a single instance).
 
-**Wiring it up.** Point the daemon and the hosted web app at your relay: set the daemon's
-`SOROMI_RELAY_URL` (or Settings -> Remote) to `wss://relay.example.com` and `SOROMI_WEB_URL` to
-where you host the web viewport. If you set a private `RELAY_ACCESS_KEY`, give the daemon the same
-value in Settings -> Remote -> "Relay access key" (or `SOROMI_RELAY_ACCESS_KEY`). Paired devices' QR
-links then carry your relay + web URLs (never the access key). See the
+**Wiring it up.** Point the daemon at your relay: set its `SOROMI_RELAY_URL` (or Settings ->
+Remote) to `wss://relay.example.com`. If you set a private `RELAY_ACCESS_KEY`, give the daemon the
+same value in Settings -> Remote -> "Relay access key" (or `SOROMI_RELAY_ACCESS_KEY`). Paired
+devices' QR codes then carry your relay URL (never the access key). See the
 [daemon README](../../crates/daemon/README.md#pairing-endpoints-self-host-no-rebuild).

@@ -36,10 +36,10 @@ pub fn turn_command(
             args.push("workspace-write".to_string());
         }
     }
-    if let Some(model) = model {
-        args.push("-m".to_string());
-        args.push(model.to_string());
-    }
+    // Always pin the model. With no model chosen (the GUI's "Default"), launch the current flagship,
+    // GPT-6 Astra — the explicit default, matching how Claude resolves its own "Default".
+    args.push("-m".to_string());
+    args.push(model.unwrap_or("gpt-6-astra").to_string());
     if let Some(effort) = effort {
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort=\"{effort}\""));

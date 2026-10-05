@@ -36,8 +36,8 @@
 Each work folder, with all its repos, gets a terminal, an agent, and the right account. Switch
 between them like Slack workspaces.
 
-The daemon owns the terminals, so your agents keep running when you close the window. The GUI,
-whether the desktop app or the browser from your phone, is just a viewport onto them.
+The daemon owns the terminals, so your agents keep running when you close the window. The desktop
+app is just a viewport onto them.
 
 ## Download
 
@@ -85,8 +85,8 @@ Grab the latest build for your platform from the
 
 - **Shareable setup.** Export a workspace to a small file anyone can import, or start fresh with
   no file at all.
-- **Reach it from anywhere.** Open the same live terminal from your phone's browser. See
-  [Remote access](#remote-access).
+- **Built to be reached from anywhere.** Pair a device over an end-to-end-encrypted relay; the
+  phone app that connects through it is in development. See [Remote access](#remote-access).
 - **One app, nothing to wire up.** Everything runs from a single desktop app.
 
 ## Screenshots
@@ -108,14 +108,17 @@ Grab the latest build for your platform from the
 
 ## Remote access
 
-The daemon owns the terminals, so any viewport that speaks the protocol can attach, including
-a browser. Open Soromi from your phone or another machine and get the same live session: watch the
-output stream, type into it, run a skill, and answer permission prompts with a tap.
+The daemon owns the terminals, so any viewport that speaks the protocol can attach, not only the
+desktop app. A paired device gets the same live session: watch the output stream, type into it, run
+a skill, and answer permission prompts with a tap.
+
+> **Status:** the phone client is being rebuilt as a native mobile app and is not released yet. The
+> earlier browser client has been removed, so pairing a device has nothing to connect with until
+> the app ships. Everything below describes the link the app will use, which the daemon and relay
+> already implement.
 
 Control is exclusive and hands off cleanly. Move to the desktop app and it takes over; come back to
-the web client and it asks to take control again, so two devices never fight over the same terminal.
-The web viewport is responsive: a full sidebar-and-tabs layout on desktop, and a bottom-tab layout
-tuned for touch on mobile.
+the phone and it asks to take control again, so two devices never fight over the same terminal.
 
 ### Secure by design
 
@@ -131,8 +134,8 @@ middle can read your session:
 - **🎟️ Relay access key never leaves the daemon.** The relay is gated by an access key so randoms
   can't abuse it, but that key lives only in the daemon (config / `SOROMI_RELAY_ACCESS_KEY` /
   Settings) and is sent as a WebSocket header when dialing, never in a URL. Only the daemon can
-  *create* a room; the web viewport only ever *joins* an existing one with the room id. So the key
-  never rides along in the pairing link, browser history, or logs, and a URL leak can't expose it.
+  *create* a room; a paired device only ever *joins* an existing one with the room id. So the key
+  never rides along in the pairing code or in logs, and a leaked code can't expose it.
 - **📱 Per-device keys, revocable.** Pairing a phone (via QR) mints that device its own relay room
   and end-to-end key. Each paired device shows a live connection indicator, and you can revoke any
   of them at any time from the paired-devices list. Rooms are strictly two-peer: even if a room id
@@ -140,8 +143,8 @@ middle can read your session:
   because the session is end-to-end encrypted.
 - **🔑 No downgrade.** An invalid or missing key is refused rather than silently falling back to
   plaintext. Plaintext relay exists only for local development.
-- **🏠 Self-hostable.** Point the relay and web-viewport URLs at your own infrastructure from
-  Settings (or `~/.soromi/config.json`), no rebuild required. The relay is a small, separate,
+- **🏠 Self-hostable.** Point the relay URL at your own infrastructure from Settings (or
+  `~/.soromi/config.json`), no rebuild required. The relay is a small, separate,
   content-blind service you can run yourself; public builds create rooms on the public relay with
   zero config, while self-hosters set their own access key on the relay and in Settings.
 
@@ -214,14 +217,14 @@ Notes:
 Soromi is one idea repeated everywhere: **the daemon is the product, and every UI is just a
 viewport onto it.** The daemon owns all state (PTYs, workspaces, accounts, the file tree,
 notifications); viewports are stateless and interchangeable. The same protocol runs over a trusted
-local socket or an end-to-end-encrypted relay, so your phone's browser and the desktop app are the
-exact same client, just a different transport.
+local socket or an end-to-end-encrypted relay, so a phone and the desktop app speak to the daemon
+the same way, just over a different transport.
 
 ```
           VIEWPORTS (stateless)
     ┌───────────────┐     ┌───────────────┐
-    │  Desktop GUI  │     │    Web PWA    │     React + Zustand + xterm.js
-    │  (Electron)   │     │    (phone)    │     render from messages, send input
+    │  Desktop GUI  │     │  Mobile app   │     render from messages, send input
+    │  (Electron)   │     │   (planned)   │     desktop: React + Zustand + xterm.js
     └───────┬───────┘     └───────┬───────┘
             │ local WS            │ relay WS (E2EE)
             │ (localhost)         │ XChaCha20-Poly1305
@@ -280,7 +283,6 @@ packages/
   client/     Shared viewport engine + transports (local WS, E2EE relay)
   relay/      Content-blind WebSocket relay that pairs a daemon with a remote viewport
   gui/        React + Zustand + xterm.js viewport (runs in the desktop app's webview)
-  web/        Touch-first PWA viewport for the phone/browser, on the shared engine
 apps/
   desktop/    Electron app that spawns the daemon and renders the gui
 ```

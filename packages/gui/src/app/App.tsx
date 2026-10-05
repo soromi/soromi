@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 
 //Packages
 import { LocalWebSocketTransport, TransportProvider, useClientStore } from '@soromi/client'
+import { setModelCatalog } from '@soromi/ui/chat'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -72,6 +73,12 @@ export function App() {
         case 'provider-status':
           client.setProviderStatus(message.provider, message.configDir, message.loggedIn)
           break
+        case 'session-updated':
+          client.updateSession(message.workspace, message.status, message.session)
+          break
+        case 'session-commands':
+          client.setCommands(message.session, message.commands)
+          break
         case 'status':
           client.setSessionStatus(message.session, message.status)
           break
@@ -82,7 +89,7 @@ export function App() {
           client.resetChat(message.session)
           break
         case 'chat-delta':
-          client.setChatDelta(message.session, message.text)
+          client.applyChatDelta(message.session, message.text, message.replace ?? false)
           break
         case 'chat-approval':
           client.addChatApproval(message.session, message.approval)
@@ -109,6 +116,24 @@ export function App() {
           break
         case 'skill-list':
           client.setSkills(message.session, message.skills)
+          break
+        case 'model-catalog':
+          // The catalog store lives in @soromi/ui (outside React); bump a signal so the composer
+          // re-renders once it lands.
+          setModelCatalog(message.catalog)
+          client.bumpModelCatalog()
+          break
+        case 'git-status':
+          ui.setGitStatus(message.workspace, message.status)
+          break
+        case 'git-diff':
+          ui.setDiffPatch(
+            message.workspace,
+            message.path,
+            message.staged,
+            message.patch,
+            message.truncated,
+          )
           break
         case 'file-content':
           ui.setFileContent(message.workspace, message.path, {
@@ -138,6 +163,14 @@ export function App() {
           // workspace/session ride along so a click opens that tab.
           showNotification(message.title, message.body, message.workspace, message.session)
           break
+        case 'incompatible':
+          // The app and its daemon ship together, so this means a stale one is still running.
+          ui.setError(
+            message.action === 'update-client'
+              ? 'This window is older than the Soromi daemon it reached. Restart Soromi.'
+              : 'The Soromi daemon is older than this window. Restart Soromi.',
+          )
+          break
         case 'error':
           ui.setError(message.message)
           break
@@ -147,6 +180,8 @@ export function App() {
     const offOpen = transport.onOpen(() => {
       client.setConnected(true)
       transport.send({ type: 'list-workspaces' })
+      // The per-provider model catalogs (the composer's model picker) — provider-owned, fetched here.
+      transport.send({ type: 'list-models' })
       // The Electron shell (ad-hoc signed, like Tauri) renders banners natively with the Soromi
       // icon and click-to-open, so opt into wire notifications and let the daemon route them here
       // instead of firing its own osascript banner. We also report window focus so banners and

@@ -17,6 +17,7 @@ use soromi_protocol::{
 };
 
 use crate::providers::{ChatFrame, Provider};
+use crate::sessions::delta::{DeltaFrame, DeltaStream};
 
 const CHAT_CAPACITY: usize = 512;
 
@@ -37,8 +38,7 @@ pub struct ExecChatSession {
     status_rx: watch::Receiver<Status>,
     chat_tx: broadcast::Sender<ChatEvent>,
     chat_log: Arc<Mutex<Vec<ChatEvent>>>,
-    delta_tx: broadcast::Sender<String>,
-    partial: Arc<Mutex<String>>,
+    delta: DeltaStream,
     // Approvals / sub-agents / slash commands aren't surfaced by a per-turn provider yet — empty
     // channels for interface parity with `StreamJsonSession`.
     approval_tx: broadcast::Sender<ToolApproval>,
@@ -66,7 +66,6 @@ impl ExecChatSession {
     ) -> anyhow::Result<Self> {
         let (status_tx, status_rx) = watch::channel(Status::Idle);
         let (chat_tx, _) = broadcast::channel(CHAT_CAPACITY);
-        let (delta_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (approval_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (resolved_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (_subagents_tx, subagents_rx) = watch::channel(Vec::new());
@@ -86,8 +85,7 @@ impl ExecChatSession {
             status_rx,
             chat_tx,
             chat_log: Arc::new(Mutex::new(seed)),
-            delta_tx,
-            partial: Arc::new(Mutex::new(String::new())),
+            delta: DeltaStream::new(CHAT_CAPACITY),
             approval_tx,
             resolved_tx,
             subagents_rx,
@@ -171,6 +169,8 @@ impl ExecChatSession {
     fn apply(&self, frame: ChatFrame) {
         match frame {
             ChatFrame::Events(events) => {
+                // The complete frame commits the message; drop the streaming stand-in.
+                self.delta.reset();
                 if let Ok(mut log) = self.chat_log.lock() {
                     log.extend(events.iter().cloned());
                 }
@@ -179,12 +179,12 @@ impl ExecChatSession {
                 }
             }
             ChatFrame::Delta(text) => {
-                if let Ok(mut buffer) = self.partial.lock() {
-                    buffer.push_str(&text);
-                    let _ = self.delta_tx.send(buffer.clone());
-                }
+                self.delta.append(&text);
             }
             ChatFrame::Status(status) => {
+                if matches!(status, Status::Idle) {
+                    self.delta.reset();
+                }
                 let _ = self.status_tx.send(status);
             }
             ChatFrame::SessionId(id) => {
@@ -230,11 +230,8 @@ impl ExecChatSession {
     pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
         self.chat_tx.subscribe()
     }
-    pub fn subscribe_delta(&self) -> broadcast::Receiver<String> {
-        self.delta_tx.subscribe()
-    }
-    pub fn delta_snapshot(&self) -> String {
-        self.partial.lock().map(|p| p.clone()).unwrap_or_default()
+    pub fn delta_attach(&self) -> (String, broadcast::Receiver<DeltaFrame>) {
+        self.delta.attach()
     }
     pub fn subscribe_approval(&self) -> broadcast::Receiver<ToolApproval> {
         self.approval_tx.subscribe()

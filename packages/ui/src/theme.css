@@ -1,7 +1,6 @@
 /*
- * The single source of truth for the Soromi color palette, imported by both the desktop app and
- * the web app so their themes never drift. App-specific tokens (z-index ladder, safe-area insets)
- * live in each app's own theme.css.
+ * The single source of truth for the Soromi color palette. App-specific tokens (z-index ladder,
+ * safe-area insets) live in the app's own theme.css.
  */
 :root {
   /* Neutral dark palette. Surfaces collapse into a clean ladder: the darkest `shell` sits behind

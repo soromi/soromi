@@ -7,6 +7,7 @@ import type {
   KeepAwakeMode,
   SessionSummary,
   Skill,
+  SlashCommand,
   Status,
   ToolApproval,
   WorkspaceSummary,
@@ -62,14 +63,20 @@ interface ClientState {
   /** Structured transcript events for the chat view, keyed by session id (Claude sessions only).
    * Empty/absent means no transcript, so the viewport falls back to the terminal. */
   chat: Record<string, ChatEvent[]>
-  /** The assistant message streaming in right now, keyed by session id (cumulative text). Empty /
-   * absent means nothing is mid-stream — the completed message lives in `chat`. */
+  /** The assistant message streaming in right now, keyed by session id (the text so far, built up
+   * from the pieces the daemon sends). Empty / absent means nothing is mid-stream — the completed
+   * message lives in `chat`. */
   chatDelta: Record<string, string>
+  /** The slash commands a chat session's provider exposes (the composer's `/` menu), by session id. */
+  commands: Record<string, SlashCommand[]>
   /** Tool calls awaiting the user's allow/deny, keyed by session id. */
   chatApproval: Record<string, ToolApproval[]>
   /** Whether earlier messages exist on the daemon beyond what's loaded, keyed by session id (drives
    * the "Load earlier" button). */
   chatEarlier: Record<string, boolean>
+  /** Bumped each time the daemon's model catalog is (re)applied — a reactivity signal so the composer
+   * re-renders when the catalog (held in `@soromi/ui`) lands, since that store lives outside React. */
+  modelCatalogVersion: number
   /** A newer release, once the daemon reports one. */
   update: AppUpdate | null
   /** The update version the user dismissed; the banner stays hidden while it matches. */
@@ -83,15 +90,20 @@ interface ClientState {
   setKeepAwakeMode: (mode: KeepAwakeMode) => void
   setWorkspaces: (workspaces: WorkspaceInfo[]) => void
   setSessionStatus: (session: string, status: Status) => void
+  /** One session changed: swap in its new summary and the workspace's new aggregate status. */
+  updateSession: (workspace: string, status: Status, session: SessionSummary) => void
   addSession: (workspace: string, session: SessionSummary) => void
   setMuted: (name: string, muted: boolean) => void
   setAccounts: (accounts: AccountProfile[]) => void
   setProviderStatus: (provider: string, configDir: string, loggedIn: boolean) => void
+  bumpModelCatalog: () => void
   setSkills: (session: string, skills: Skill[]) => void
   appendChat: (session: string, events: ChatEvent[]) => void
   prependChatHistory: (session: string, events: ChatEvent[], hasMore: boolean) => void
   resetChat: (session: string) => void
-  setChatDelta: (session: string, text: string) => void
+  /** Streaming text arrived: add it to the live message, or replace the live message with it. */
+  applyChatDelta: (session: string, text: string, replace: boolean) => void
+  setCommands: (session: string, commands: SlashCommand[]) => void
   addChatApproval: (session: string, approval: ToolApproval) => void
   removeChatApproval: (session: string, id: string) => void
   setUpdate: (update: AppUpdate) => void
@@ -107,9 +119,11 @@ export const useClientStore = create<ClientState>()((set) => ({
   muted: {},
   accounts: [],
   providerStatus: {},
+  modelCatalogVersion: 0,
   skills: {},
   chat: {},
   chatDelta: {},
+  commands: {},
   chatApproval: {},
   chatEarlier: {},
   update: null,
@@ -128,6 +142,15 @@ export const useClientStore = create<ClientState>()((set) => ({
         return { ...w, sessions, status: aggregateStatus(sessions) }
       }),
     })),
+  updateSession: (workspace, status, session) =>
+    set((state) => ({
+      // Only the changed workspace and session get new objects, so rows for the rest don't re-render.
+      workspaces: state.workspaces.map((w) =>
+        w.name === workspace
+          ? { ...w, status, sessions: w.sessions.map((s) => (s.id === session.id ? session : s)) }
+          : w,
+      ),
+    })),
   addSession: (workspace, session) =>
     set((state) => ({
       workspaces: state.workspaces.map((w) =>
@@ -138,6 +161,7 @@ export const useClientStore = create<ClientState>()((set) => ({
     })),
   setMuted: (name, muted) => set((state) => ({ muted: { ...state.muted, [name]: muted } })),
   setAccounts: (accounts) => set({ accounts }),
+  bumpModelCatalog: () => set((state) => ({ modelCatalogVersion: state.modelCatalogVersion + 1 })),
   setProviderStatus: (provider, configDir, loggedIn) =>
     set((state) => ({
       providerStatus: { ...state.providerStatus, [`${provider}::${configDir}`]: loggedIn },
@@ -162,8 +186,15 @@ export const useClientStore = create<ClientState>()((set) => ({
       chatApproval: { ...state.chatApproval, [session]: [] },
       chatEarlier: { ...state.chatEarlier, [session]: false },
     })),
-  setChatDelta: (session, text) =>
-    set((state) => ({ chatDelta: { ...state.chatDelta, [session]: text } })),
+  applyChatDelta: (session, text, replace) =>
+    set((state) => ({
+      chatDelta: {
+        ...state.chatDelta,
+        [session]: replace ? text : (state.chatDelta[session] ?? '') + text,
+      },
+    })),
+  setCommands: (session, commands) =>
+    set((state) => ({ commands: { ...state.commands, [session]: commands } })),
   addChatApproval: (session, approval) =>
     set((state) => {
       const current = state.chatApproval[session] ?? []

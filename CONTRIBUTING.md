@@ -21,8 +21,8 @@ Read alongside each package's `README.md` (what that package is for).
    `utils` or `helpers`. Keep the layers separate: domain logic never reaches into transport
    or serialization, and vice versa. A file has one responsibility at one level.
 4. **Viewports render only from protocol messages.** No direct filesystem or PTY access in
-   the GUI. Tree, preview, and terminal output all arrive as messages. This is what lets the
-   PWA reuse the viewport verbatim.
+   the GUI. Tree, preview, and terminal output all arrive as messages. This is what lets a
+   remote client show the same thing as the desktop app.
 5. **Transport is an abstraction, not a raw socket.** Talk through a `Transport` interface so
    local (WS) and remote (E2EE-through-relay) are swappable. See the workplan's
    "Remote-ready seams" and honor all six even though remote is built last.
