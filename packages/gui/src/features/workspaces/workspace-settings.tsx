@@ -93,41 +93,68 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     ],
     [summary],
   )
-  const boundAccount = (agent: string) =>
-    summary?.accounts.find((a) => a.agent === agent)?.id ?? 'personal'
+  // The accounts the workspace binds to an agent, in order: its tabs run under the first, and a tab
+  // can be moved to any of the others. An agent bound to none shows the default account.
+  const boundAccounts = (agent: string) => {
+    const bound = summary?.accounts.filter((a) => a.agent === agent).map((a) => a.id) ?? []
+    return bound.length > 0 ? bound : ['personal']
+  }
   const initialFolders = useMemo(() => {
     const root = summary?.root ?? ''
     return (summary?.folders ?? []).map((folder) => (folder === '.' ? root : `${root}/${folder}`))
   }, [summary])
 
-  const [bindings, setBindings] = useState<Record<string, string>>(() =>
-    Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])),
+  const [bindings, setBindings] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(agents.map((agent) => [agent, boundAccounts(agent)])),
   )
   const [name, setName] = useState(workspace)
   const [instructions, setInstructions] = useState(summary?.instructions ?? '')
   const [folderPaths, setFolderPaths] = useState<string[]>(initialFolders)
 
-  // Prepare each agent's row (label, account options, current value) once, so the JSX only renders.
+  // Prepare each agent's row (label, its accounts, the ones it could add) once, so the JSX only
+  // renders.
   const agentRows = useMemo(
     () =>
-      agents.map((agent) => ({
-        agent,
-        label: PROVIDERS.find((p) => p.value === agent)?.label ?? agent,
-        value: bindings[agent] ?? 'personal',
-        options: [
+      agents.map((agent) => {
+        const chosen = bindings[agent] ?? ['personal']
+        const names = [
           ...new Set([
             'personal',
             ...accounts.filter((a) => agent in a.providers).map((a) => a.name),
-            ...(bindings[agent] ? [bindings[agent]] : []),
+            ...chosen,
           ]),
-        ].map((name) => ({ value: name, label: name })),
-      })),
+        ]
+        return {
+          agent,
+          label: PROVIDERS.find((p) => p.value === agent)?.label ?? agent,
+          chosen,
+          options: names.map((name) => ({ value: name, label: name })),
+          // Another account can be added while one that configures the agent is left over.
+          spare: accounts
+            .filter((a) => agent in a.providers)
+            .map((a) => a.name)
+            .filter((name) => !chosen.includes(name)),
+        }
+      }),
     [agents, accounts, bindings],
   )
+  const setAccount = (agent: string, index: number, account: string) =>
+    setBindings((prev) => {
+      const list = [...(prev[agent] ?? ['personal'])]
+      list[index] = account
+      return { ...prev, [agent]: [...new Set(list)] }
+    })
+  const addAccount = (agent: string, account: string) =>
+    setBindings((prev) => ({ ...prev, [agent]: [...(prev[agent] ?? []), account] }))
+  const dropAccount = (agent: string, index: number) =>
+    setBindings((prev) => ({
+      ...prev,
+      [agent]: (prev[agent] ?? []).filter((_, at) => at !== index),
+    }))
 
   const nameChanged = name.trim() !== '' && name.trim() !== workspace
   const accountsChanged = agents.some(
-    (agent) => (bindings[agent] ?? 'personal') !== boundAccount(agent),
+    (agent) => (bindings[agent] ?? ['personal']).join('\n') !== boundAccounts(agent).join('\n'),
   )
   const instructionsChanged = instructions.trim() !== (summary?.instructions ?? '').trim()
   const foldersChanged =
@@ -144,7 +171,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
 
   const discard = () => {
     setName(workspace)
-    setBindings(Object.fromEntries(agents.map((agent) => [agent, boundAccount(agent)])))
+    setBindings(Object.fromEntries(agents.map((agent) => [agent, boundAccounts(agent)])))
     setInstructions(summary?.instructions ?? '')
     setFolderPaths(initialFolders)
   }
@@ -153,7 +180,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
     // The rows default every unconfigured provider to "personal"; without this filter, saving any
     // change (a folder, the name) would bind every provider to a phantom account it can't run under.
     const next: AgentAccount[] = agents
-      .map((agent) => ({ id: bindings[agent] ?? 'personal', agent }))
+      .flatMap((agent) => (bindings[agent] ?? ['personal']).map((id) => ({ id, agent })))
       .filter((b) => accounts.find((a) => a.name === b.id)?.providers?.[b.agent] != null)
     const { root, folders } = deriveRootAndFolders(folderPaths)
 
@@ -317,34 +344,81 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                 {agentRows.map((row) => (
                   <div
                     key={row.agent}
-                    className="flex items-center gap-4 rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] px-4 py-3"
+                    className="flex items-start gap-4 rounded-[13px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] px-4 py-3"
                   >
-                    <span className="flex w-[130px] flex-none items-center gap-[11px] text-[var(--soromi-text)] text-sm">
+                    <span className="flex h-9 w-[130px] flex-none items-center gap-[11px] text-[var(--soromi-text)] text-sm">
                       <ProviderIcon provider={row.agent} size={16} />
                       {row.label}
                     </span>
-                    <Select
-                      value={row.value}
-                      onValueChange={(value) =>
-                        value && setBindings((prev) => ({ ...prev, [row.agent]: value }))
-                      }
-                    >
-                      <SelectTrigger className="w-[200px] flex-none rounded-[9px] bg-[var(--soromi-bg-hover)]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {row.options.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex flex-col gap-2">
+                      {row.chosen.map((account, index) => (
+                        <div key={account} className="flex items-center gap-2">
+                          <Select
+                            value={account}
+                            onValueChange={(value) => value && setAccount(row.agent, index, value)}
+                          >
+                            <SelectTrigger className="w-[200px] flex-none rounded-[9px] bg-[var(--soromi-bg-hover)]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {row.options
+                                .filter(
+                                  (option) =>
+                                    option.value === account || !row.chosen.includes(option.value),
+                                )
+                                .map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                          {index === 0 ? (
+                            row.chosen.length > 1 && (
+                              <span className="text-[11px] text-[var(--soromi-text-faint)]">
+                                Default
+                              </span>
+                            )
+                          ) : (
+                            <button
+                              type="button"
+                              title="Remove this account"
+                              onClick={() => dropAccount(row.agent, index)}
+                              className="flex h-[26px] w-[26px] cursor-pointer appearance-none items-center justify-center rounded-[7px] border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.9"
+                                strokeLinecap="round"
+                                aria-hidden="true"
+                              >
+                                <path d="M6 6l12 12M18 6L6 18" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {row.spare.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => addAccount(row.agent, row.spare[0])}
+                          className="flex w-fit cursor-pointer appearance-none items-center gap-1.5 rounded-md border-none bg-transparent px-1 py-0.5 text-[12px] text-[var(--soromi-text-faint)] hover:text-[var(--soromi-text-dim)]"
+                        >
+                          + Add another account
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
               <p className={HELP}>
-                Each agent runs under the chosen account. Changing one relaunches its tabs.
+                New tabs run under an agent's default account. With more than one, each session can
+                be moved to another from its composer, or started under one from New session.
+                Changing the default relaunches the tabs that follow it.
               </p>
             </section>
 

@@ -201,14 +201,7 @@ impl WorkspaceService {
     fn seed_restored_activity(&self) {
         // Snapshot what we need under the lock, then do the file reads without holding it.
         #[allow(clippy::type_complexity)]
-        let sessions: Vec<(
-            String,
-            String,
-            String,
-            String,
-            Vec<String>,
-            Vec<AgentAccount>,
-        )> = {
+        let sessions: Vec<(String, String, String, String, Vec<String>, String)> = {
             let metadata = self.metadata.lock().unwrap();
             metadata
                 .iter()
@@ -220,21 +213,20 @@ impl WorkspaceService {
                             spec.resume_id.clone().unwrap_or_else(|| spec.id.clone()),
                             meta.root.clone(),
                             meta.folders.clone(),
-                            meta.accounts.clone(),
+                            session_account(&meta.accounts, spec),
                         )
                     })
                 })
                 .collect()
         };
 
-        for (id, agent, convo_id, root, folders, accounts) in sessions {
+        for (id, agent, convo_id, root, folders, account) in sessions {
             let full_command = parse_agent_command(&agent)
                 .map(|p| p.command)
                 .unwrap_or_default();
             let Some(provider) = crate::providers::provider(basename(&full_command)) else {
                 continue;
             };
-            let account = account_for(&accounts, &agent);
             let config_dir = provider_config_dir(&account, provider);
             let (cwd, _) = session_dirs(&root, &folders);
             let Some(path) = provider
@@ -489,6 +481,7 @@ impl WorkspaceService {
                 agent: input.agent.clone(),
             }],
             sessions: vec![SessionSpec {
+                account: None,
                 id: new_session_id(),
                 agent: input.agent,
                 title: None,
@@ -512,6 +505,7 @@ impl WorkspaceService {
         let mut sessions: Vec<SessionSpec> = accounts
             .iter()
             .map(|a| SessionSpec {
+                account: None,
                 id: new_session_id(),
                 agent: a.agent.clone(),
                 title: None,
@@ -524,6 +518,7 @@ impl WorkspaceService {
             .collect();
         if sessions.is_empty() {
             sessions.push(SessionSpec {
+                account: None,
                 id: new_session_id(),
                 agent: "claude".to_string(),
                 title: None,
@@ -576,7 +571,8 @@ impl WorkspaceService {
         account: Option<String>,
         mode: SessionMode,
     ) -> anyhow::Result<SessionSummary> {
-        let session = SessionSpec {
+        let mut session = SessionSpec {
+            account: None,
             id: new_session_id(),
             agent: agent.clone(),
             title: None,
@@ -593,13 +589,17 @@ impl WorkspaceService {
                 .iter_mut()
                 .find(|(n, _)| n == workspace)
                 .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
-            if let Some(id) = account
-                && !meta.accounts.iter().any(|a| a.agent == agent)
-            {
-                meta.accounts.push(AgentAccount {
-                    id,
-                    agent: agent.clone(),
-                });
+            // The first tab of an agent the workspace does not bind yet binds it; any other runs
+            // under the account asked for, one of the workspace's for that agent.
+            if !meta.accounts.iter().any(|a| a.agent == agent) {
+                if let Some(id) = account {
+                    meta.accounts.push(AgentAccount {
+                        id,
+                        agent: agent.clone(),
+                    });
+                }
+            } else {
+                session.account = pin_for(&meta.accounts, &agent, account);
             }
             meta.sessions.push(session.clone());
             (
@@ -619,9 +619,10 @@ impl WorkspaceService {
         );
         self.persist();
         self.emit_change();
+        let account = session_account(&accounts, &session);
         Ok(SessionSummary {
             id: session.id,
-            account: account_for(&accounts, &agent),
+            account,
             agent,
             status: Status::Idle,
             title: None,
@@ -691,23 +692,36 @@ impl WorkspaceService {
                     continue;
                 };
                 if spec.agent == agent {
-                    return; // already this agent
-                }
-                spec.agent = agent.clone();
-                // A different provider can't resume this conversation, and its model/effort aliases
-                // differ - start clean rather than carry over an invalid combination.
-                spec.resume_id = None;
-                spec.model = None;
-                spec.effort = None;
-                // Record the account binding for the new agent, so `start_session` (and later tabs)
-                // resolve it - exactly as `open_session` binds an agent the first time it's used.
-                if let Some(id) = account.clone()
-                    && !meta.accounts.iter().any(|a| a.agent == agent)
-                {
-                    meta.accounts.push(AgentAccount {
-                        id,
-                        agent: agent.clone(),
-                    });
+                    // The same agent under another of the workspace's accounts for it. Each
+                    // account keeps its own conversations, so this one cannot be resumed there:
+                    // the session starts afresh, keeping its model.
+                    let current = session_account(&meta.accounts, spec);
+                    let Some(next) = account.clone().filter(|id| *id != current) else {
+                        return; // already this agent, under this account
+                    };
+                    spec.account = pin_for(&meta.accounts, &agent, Some(next));
+                    spec.resume_id = None;
+                } else {
+                    spec.agent = agent.clone();
+                    // A different provider can't resume this conversation, and its model/effort
+                    // aliases differ - start clean rather than carry over an invalid combination.
+                    spec.resume_id = None;
+                    spec.model = None;
+                    spec.effort = None;
+                    // Record the account binding for the new agent, so `start_session` (and later
+                    // tabs) resolve it - exactly as `open_session` binds an agent the first time
+                    // it's used. Bound already, the tab runs under the account asked for.
+                    if !meta.accounts.iter().any(|a| a.agent == agent) {
+                        if let Some(id) = account.clone() {
+                            meta.accounts.push(AgentAccount {
+                                id,
+                                agent: agent.clone(),
+                            });
+                        }
+                        spec.account = None;
+                    } else {
+                        spec.account = pin_for(&meta.accounts, &agent, account.clone());
+                    }
                 }
                 found = Some((
                     name.clone(),
@@ -733,6 +747,8 @@ impl WorkspaceService {
             instructions.as_deref(),
             &spec,
         );
+        // Tell viewports following it: what they hold is the old agent's conversation.
+        let _ = self.reset_tx.send(session_id.to_string());
         self.persist();
         self.emit_change();
     }
@@ -932,7 +948,7 @@ impl WorkspaceService {
         SessionSummary {
             id: session.id.clone(),
             agent: session.agent.clone(),
-            account: account_for(&meta.accounts, &session.agent),
+            account: session_account(&meta.accounts, session),
             status: live
                 .as_ref()
                 .map(|s| s.status())
@@ -980,14 +996,15 @@ impl WorkspaceService {
         list_directory(Path::new(&root), &folders, path)
     }
 
-    pub fn read_file(&self, workspace: &str, path: &str) -> FileRead {
+    pub fn read_file(&self, workspace: &str, path: &str, image_limit: u64) -> FileRead {
         let metadata = self.metadata.lock().unwrap();
         match metadata.iter().find(|(name, _)| name == workspace) {
-            Some((_, meta)) => read_file_within(Path::new(&meta.root), path),
+            Some((_, meta)) => read_file_within(Path::new(&meta.root), path, image_limit),
             None => FileRead {
                 content: String::new(),
                 truncated: false,
                 binary: false,
+                image: None,
             },
         }
     }
@@ -1005,6 +1022,22 @@ impl WorkspaceService {
             anyhow::bail!("workspace not found: {workspace}");
         };
         write_file_within(Path::new(&root), path, content)?;
+        Ok(())
+    }
+
+    /// Moves a file or folder of a workspace to the Trash (the tree's "Move to Trash").
+    pub fn trash_path(&self, workspace: &str, path: &str) -> anyhow::Result<()> {
+        let found = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(name, _)| name == workspace)
+                .map(|(_, meta)| (meta.root.clone(), meta.folders.clone()))
+        };
+        let Some((root, folders)) = found else {
+            anyhow::bail!("workspace not found: {workspace}");
+        };
+        crate::files::reader::trash_within(Path::new(&root), path, &folders)?;
         Ok(())
     }
 
@@ -1108,7 +1141,7 @@ impl WorkspaceService {
                 meta.sessions.iter().find(|s| s.id == session_id).map(|s| {
                     (
                         s.agent.clone(),
-                        account_for(&meta.accounts, &s.agent),
+                        session_account(&meta.accounts, s),
                         meta.root.clone(),
                         meta.folders.clone(),
                     )
@@ -1163,7 +1196,7 @@ impl WorkspaceService {
                 if seen.iter().any(|(p, _)| p.key() == provider.key()) {
                     continue;
                 }
-                let account = account_for(&meta.accounts, &session.agent);
+                let account = session_account(&meta.accounts, session);
                 seen.push((provider, provider_config_dir(&account, provider)));
             }
 
@@ -1328,11 +1361,32 @@ impl WorkspaceService {
             meta.folders = folders.clone();
             meta.root = root.clone();
             meta.instructions = instructions.clone();
+            // A tab pinned to an account the workspace no longer binds for its agent goes back to
+            // the workspace's first.
+            for spec in &mut meta.sessions {
+                let bound = |id: &String| {
+                    accounts
+                        .iter()
+                        .any(|a| a.agent == spec.agent && a.id == *id)
+                };
+                if spec.account.as_ref().is_some_and(|id| !bound(id)) {
+                    spec.account = None;
+                    spec.resume_id = None;
+                }
+            }
         }
+        let sessions_after: Vec<SessionSpec> = self
+            .metadata
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, meta)| meta.sessions.clone())
+            .unwrap_or_default();
         let mut warning = None;
-        for session in &sessions {
-            let account_changed = account_for(&old_accounts, &session.agent)
-                != account_for(&accounts, &session.agent);
+        for (session, after) in sessions.iter().zip(&sessions_after) {
+            let account_changed =
+                session_account(&old_accounts, session) != session_account(&accounts, after);
             if account_changed || folders_changed {
                 self.manager.dispose(&session.id);
                 warning = warning.or(self.start_session(
@@ -1341,7 +1395,7 @@ impl WorkspaceService {
                     &folders,
                     &accounts,
                     instructions.as_deref(),
-                    session,
+                    after,
                 ));
                 // Tell viewports to re-attach, so the terminal shows the relaunched agent.
                 let _ = self.reset_tx.send(session.id.clone());
@@ -1475,7 +1529,7 @@ impl WorkspaceService {
         let (cwd, extra_dirs) = session_dirs(root, folders);
         let command = basename(&parsed.command);
         let provider = crate::providers::provider(command);
-        let account = account_for(accounts, &session.agent);
+        let account = session_account(accounts, session);
         let mut args = parsed.args;
         if let Some(provider) = provider {
             // Name each extra folder, append the workspace instructions to the system prompt, and
@@ -2113,6 +2167,21 @@ fn session_dirs(root: &str, folders: &[String]) -> (String, Vec<String>) {
 }
 
 /// The account bound to an agent, or the built-in `personal` default when unbound.
+/// The account a session runs under: the one it was pinned to, or else its workspace's first for
+/// its agent.
+fn session_account(accounts: &[AgentAccount], session: &SessionSpec) -> String {
+    session
+        .account
+        .clone()
+        .unwrap_or_else(|| account_for(accounts, &session.agent))
+}
+
+/// What a session is pinned to when it is asked to run under `account`: nothing when that is its
+/// workspace's first account for the agent (it then follows that one), the account otherwise.
+fn pin_for(accounts: &[AgentAccount], agent: &str, account: Option<String>) -> Option<String> {
+    account.filter(|id| *id != account_for(accounts, agent))
+}
+
 fn account_for(accounts: &[AgentAccount], agent: &str) -> String {
     accounts
         .iter()
@@ -2155,6 +2224,7 @@ fn migrate(space: &mut PersistedSpace) -> bool {
             .or_else(|| space.accounts.first().map(|a| a.agent.clone()))
             .unwrap_or_else(|| "claude".to_string());
         space.sessions.push(SessionSpec {
+            account: None,
             id: new_session_id(),
             agent,
             title: None,
@@ -2271,7 +2341,7 @@ mod tests {
 
         let listing = service.list_dir("kazomi", "");
         assert!(listing.iter().any(|entry| entry.name == "readme.md"));
-        assert_eq!(service.read_file("kazomi", "readme.md").content, "hi");
+        assert_eq!(service.read_file("kazomi", "readme.md", 1024).content, "hi");
 
         service.remove_space("kazomi");
         assert!(service.summaries().is_empty());
@@ -2519,6 +2589,82 @@ mod tests {
                 .iter()
                 .any(|a| a.agent == "/bin/echo" && a.id == "work")
         );
+
+        hub.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_tab_runs_under_whichever_of_its_agents_accounts_it_picks() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+        let account = |hub: &WorkspaceService, id: &str| {
+            let summary = &hub.summaries()[0];
+            summary
+                .sessions
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap()
+                .account
+                .clone()
+        };
+
+        let hub = service();
+        hub.create_space(CreateSpaceInput {
+            name: "kazomi".into(),
+            root: root.path().to_string_lossy().into_owned(),
+            agent: "/bin/cat".into(),
+            account: "personal".into(),
+            folders: None,
+        })
+        .unwrap();
+        // The workspace binds two accounts to the agent: the first is what tabs follow.
+        let bindings = vec![
+            AgentAccount {
+                id: "personal".into(),
+                agent: "/bin/cat".into(),
+            },
+            AgentAccount {
+                id: "work".into(),
+                agent: "/bin/cat".into(),
+            },
+        ];
+        hub.update_space("kazomi", None, bindings.clone(), Vec::new(), None, None)
+            .unwrap();
+        let first = hub.summaries()[0].sessions[0].id.clone();
+        assert_eq!(account(&hub, &first), "personal");
+
+        // A new tab can start under the other one.
+        let second = hub
+            .open_session(
+                "kazomi",
+                "/bin/cat".into(),
+                Some("work".into()),
+                SessionMode::Terminal,
+            )
+            .unwrap();
+        assert_eq!(second.account, "work");
+        assert_eq!(account(&hub, &second.id), "work");
+
+        // And a tab can move to it, and back.
+        hub.set_session_agent(&first, "/bin/cat".into(), Some("work".into()));
+        assert_eq!(account(&hub, &first), "work");
+        hub.set_session_agent(&first, "/bin/cat".into(), Some("personal".into()));
+        assert_eq!(account(&hub, &first), "personal");
+
+        // Unbinding the account sends the tabs on it back to the workspace's first.
+        hub.update_space(
+            "kazomi",
+            None,
+            bindings[..1].to_vec(),
+            Vec::new(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(account(&hub, &second.id), "personal");
 
         hub.dispose();
         crate::home::set_soromi_home(None);

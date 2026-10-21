@@ -37,6 +37,25 @@ impl Notifier for MacNotifier {
     }
 }
 
+/// Linux desktops via `notify-send`, which every freedesktop notification server answers.
+/// Fire-and-forget; never crashes the daemon. The sound is the sound player's to make.
+pub struct NotifySendNotifier {
+    program: std::path::PathBuf,
+}
+
+impl Notifier for NotifySendNotifier {
+    fn notify(&self, notification: Notification) {
+        let _ = Command::new(&self.program)
+            .args(["--app-name=Soromi", "--"])
+            .arg(&notification.title)
+            .arg(&notification.message)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+}
+
 /// No-op notifier for unsupported platforms and tests.
 pub struct NoopNotifier;
 
@@ -46,9 +65,11 @@ impl Notifier for NoopNotifier {
 
 pub fn create_notifier() -> Arc<dyn Notifier> {
     if cfg!(target_os = "macos") {
-        Arc::new(MacNotifier)
-    } else {
-        Arc::new(NoopNotifier)
+        return Arc::new(MacNotifier);
+    }
+    match crate::system::first_on_path(&["notify-send"]) {
+        Some(program) if cfg!(target_os = "linux") => Arc::new(NotifySendNotifier { program }),
+        _ => Arc::new(NoopNotifier),
     }
 }
 

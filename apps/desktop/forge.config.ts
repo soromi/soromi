@@ -7,6 +7,18 @@ import { VitePlugin } from '@electron-forge/plugin-vite'
 import { FusesPlugin } from '@electron-forge/plugin-fuses'
 import { FuseV1Options, FuseVersion } from '@electron/fuses'
 
+/** What the Linux installers say of the app. */
+const LINUX_PACKAGE = {
+  name: 'soromi',
+  productName: 'Soromi',
+  genericName: 'Coding agents',
+  description: 'Run and follow your coding agents, from this computer or your phone.',
+  bin: 'Soromi',
+  icon: 'icons/icon.png',
+  categories: ['Development' as const],
+  homepage: 'https://soromi.dev',
+}
+
 const config: ForgeConfig = {
   packagerConfig: {
     name: 'Soromi',
@@ -16,7 +28,12 @@ const config: ForgeConfig = {
     // Bundled beside the app (Contents/Resources): the standalone daemon binary the shell spawns,
     // and the built frontend the shell serves. Build them first: `pnpm build:daemon:release` and
     // `pnpm build:gui`. Loaded from `process.resourcesPath` in `main.ts` when packaged.
-    extraResource: ['../../target/release/soromi-daemon', '../../packages/gui/dist'],
+    // The png is the window's and the notifications' icon on Linux, where the bundle has none.
+    extraResource: [
+      '../../target/release/soromi-daemon',
+      '../../packages/gui/dist',
+      'icons/icon.png',
+    ],
     osxSign: {},
     // CI passes the app-specific password via env (APPLE_ID set); locally we notarize from the
     // `soromi-notary` keychain profile (`xcrun notarytool store-credentials`), so no secrets are needed.
@@ -32,8 +49,10 @@ const config: ForgeConfig = {
   makers: [
     new MakerSquirrel({ setupIcon: 'icons/icon.ico' }),
     new MakerZIP({}, ['darwin']),
-    new MakerRpm({ options: { icon: 'icons/icon.png' } }),
-    new MakerDeb({ options: { icon: 'icons/icon.png' } }),
+    // The Linux packages are named for the app, not for the workspace package (`@soromi/desktop`),
+    // and point at the executable the packager names after the product.
+    new MakerRpm({ options: LINUX_PACKAGE }),
+    new MakerDeb({ options: { ...LINUX_PACKAGE, maintainer: 'Soromi' } }),
   ],
   plugins: [
     new VitePlugin({

@@ -154,6 +154,23 @@ test('a table keeps its cells and alignment, and its columns fit their longest t
   expect(getColumnWidths(table)).toEqual([240, 64])
 })
 
+test('a column is wide enough for its longest word, so an identifier is not cut in two', () => {
+  const [table] = parseMarkdown(
+    '| event | trigger |\n|---|---|\n| `customer.booking.created.for.a.vendor.account` | insert |',
+  ) as [TableNode]
+  const [event, trigger] = getColumnWidths(table)
+
+  // 45 characters at 8 points each and the cell's padding: past the cap for text that can wrap.
+  expect(event).toBe(45 * 8 + 24)
+  expect(trigger).toBe(7 * 8 + 24)
+})
+
+test('a word too long to be worth a column of its own is cut after all', () => {
+  const [table] = parseMarkdown(`| url |\n|---|\n| ${'x'.repeat(200)} |`) as [TableNode]
+
+  expect(getColumnWidths(table)).toEqual([420])
+})
+
 test('every node has a key, and keys within a parent are distinct', () => {
   const keys = new Set<string>()
   const visit = (value: unknown) => {

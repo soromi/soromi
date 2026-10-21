@@ -102,6 +102,15 @@ export type FilesConfig = {
   markdown: string[]
   /** What a long press on a row offers, by the path it copies. */
   menu: Record<PathKind, string>
+  /** Moving a file or folder to the computer's Trash, after asking. */
+  trash: {
+    action: string
+    hint: string
+    title: Record<FileNode['type'], string>
+    message: Record<FileNode['type'], (name: string) => string>
+    cancel: string
+    confirm: string
+  }
   /** The ways a document is shown, in the order they are offered. */
   modes: Array<SegmentedOption & { id: FileMode }>
   edit: {
@@ -124,6 +133,8 @@ export type FilesConfig = {
   copy: {
     empty: string
     binary: string
+    /** In place of a picture the computer would not send, being too large. */
+    largePicture: string
     truncated: string
   }
 }

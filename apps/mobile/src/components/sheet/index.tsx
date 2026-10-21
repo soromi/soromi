@@ -41,6 +41,7 @@ export const Sheet = (props: Props) => {
       // Drawn under the system bars, so the dimming covers the whole screen.
       statusBarTranslucent
       navigationBarTranslucent
+      supportedOrientations={SHEET.orientations}
       onRequestClose={props.onClose}
     >
       <KeyboardAvoidingView behavior="padding" style={styles.root}>

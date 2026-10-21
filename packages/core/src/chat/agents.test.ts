@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { agentLabel, agentOptionsFor, sessionAgentFor } from './agents'
+import { agentLabel, agentOptionsFor, isCurrentAgent, sessionAgentFor } from './agents'
 import { permissionLabel } from './permissions'
 
 const profiles = [
@@ -17,8 +17,25 @@ describe('agentOptionsFor', () => {
     ]
 
     expect(agentOptionsFor(bindings, profiles, false)).toEqual([
-      { agent: 'claude', accountLabel: 'work', label: 'Claude' },
+      { agent: 'claude', account: 'work', accountLabel: 'work', label: 'Claude' },
     ])
+  })
+
+  it('offers each account a workspace binds to a provider, its first first', () => {
+    const two = [
+      { name: 'work', providers: { claude: {} } },
+      { name: 'side', providers: { claude: {} } },
+    ]
+    const bindings = [
+      { id: 'side', agent: 'claude' },
+      { id: 'work', agent: 'claude' },
+      { id: 'side', agent: 'claude' },
+    ]
+    const options = agentOptionsFor(bindings, two, false)
+
+    expect(options.map((option) => option.account)).toEqual(['side', 'work'])
+    expect(isCurrentAgent(options[1], 'claude', 'work')).toBe(true)
+    expect(isCurrentAgent(options[0], 'claude', 'work')).toBe(false)
   })
 
   it('adds providers that have an account but no binding, when asked', () => {

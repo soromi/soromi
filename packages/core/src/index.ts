@@ -30,12 +30,19 @@ export {
   summarizeTools,
   toolDiff,
   toolHasBody,
+  toolInput,
   toolOpensByDefault,
   toolState,
   toolTarget,
   toolVerb,
 } from './chat/tools'
-export { agentLabel, agentOptionsFor, sessionAgentFor } from './chat/agents'
+export {
+  agentLabel,
+  agentOptionKey,
+  agentOptionsFor,
+  isCurrentAgent,
+  sessionAgentFor,
+} from './chat/agents'
 
 // Files
 export { flattenTree, unlistedDirs } from './files/tree'

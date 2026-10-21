@@ -275,24 +275,9 @@ where
         }
     });
 
-    // Reset task: when a session's agent is relaunched (folders/account changed), tell this
-    // viewport to re-attach so its terminal reflects the fresh process.
-    let reset_out = out.clone();
-    let reset_link = link.clone();
+    // Sessions whose agent was started over (the workspace's folders or accounts changed, or the
+    // session was moved to another agent). Dealt with in the loop below, where the connection is.
     let mut resets = hub.subscribe_resets();
-    let reset_task = tokio::spawn(async move {
-        loop {
-            match resets.recv().await {
-                Ok(session) => {
-                    if reset_link.is_ready() {
-                        let _ = reset_out.send(ServerMessage::SessionReset { session });
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
 
     // Devices task (local link only): push a fresh device list whenever a phone attaches / drops,
     // so the desktop's devices panel shows live connection state.
@@ -360,7 +345,7 @@ where
     // All this connection's background tasks. The guard aborts them and releases control on scope
     // exit, and crucially also on cancellation: revoking a device aborts this connection's task, so
     // the cleanup must run from `Drop`, not from code after the loop (which cancellation skips).
-    let mut tasks = vec![writer, change_task, dir_task, reset_task, control_task];
+    let mut tasks = vec![writer, change_task, dir_task, control_task];
     tasks.extend(devices_task);
     tasks.extend(routes_task);
     let _guard = ConnectionGuard {
@@ -395,6 +380,22 @@ where
     loop {
         let message = tokio::select! {
             message = source.next() => message,
+            // A session's agent was started over. What this viewport was following of it belongs
+            // to the process that is gone: it is put on the new one here, and told, so a terminal
+            // can clear itself and attach again.
+            reset = resets.recv() => {
+                match reset {
+                    Ok(session) => {
+                        if link.is_ready() {
+                            connection.session_restarted(&session);
+                            let _ = out.send(ServerMessage::SessionReset { session });
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+                continue;
+            }
             // A reply found the queue full: the client is too far behind to catch up. Dropping the
             // link makes it reconnect and start from a fresh snapshot.
             _ = stalled.notified() => {

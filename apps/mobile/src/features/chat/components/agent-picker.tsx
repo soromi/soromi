@@ -1,4 +1,4 @@
-import { agentOptionsFor } from '@soromi/core'
+import { agentOptionKey, agentOptionsFor, isCurrentAgent } from '@soromi/core'
 import { useCallback, useMemo, useState } from 'react'
 import { Alert } from 'react-native'
 
@@ -21,9 +21,10 @@ import { useDaemonAccounts, useDaemonBindings } from '@/states/daemon/daemon.sta
 import type { AgentPickerProps } from '../types'
 
 /**
- * Which provider and account the chat runs under. When the workspace can run more than one agent
- * it also switches between them, after asking: the chat restarts under the new one as a new
- * conversation, since providers do not share a transcript.
+ * Which provider and account the chat runs under. When the workspace offers more than one (another
+ * agent, or another of its accounts for this one) it also switches between them, after asking: the
+ * chat restarts under the new one as a new conversation, since neither providers nor accounts
+ * share a transcript.
  */
 export const AgentPicker = (props: AgentPickerProps) => {
   const [open, setOpen] = useState(false)
@@ -44,11 +45,12 @@ export const AgentPicker = (props: AgentPickerProps) => {
 
   const handleClose = useCallback(() => setOpen(false), [])
 
+  const account = props.account
   const handleSelect = useCallback(
     (value: string) => {
       setOpen(false)
-      const option = options.find((one) => one.agent === value)
-      if (!option || option.agent === agent) return
+      const option = options.find((one) => agentOptionKey(one.agent, one.account) === value)
+      if (!option || isCurrentAgent(option, agent, account)) return
 
       Alert.alert(CHAT.agent.confirm.title, getSwitchMessage(option), [
         { text: CHAT.agent.confirm.cancel, style: 'cancel' },
@@ -65,7 +67,7 @@ export const AgentPicker = (props: AgentPickerProps) => {
         },
       ])
     },
-    [options, agent, session],
+    [options, agent, account, session],
   )
 
   return (
@@ -80,12 +82,12 @@ export const AgentPicker = (props: AgentPickerProps) => {
       <Sheet visible={open} title={CHAT.agent.title} onClose={handleClose}>
         {options.map((option) => (
           <Option
-            key={option.agent}
-            value={option.agent}
+            key={agentOptionKey(option.agent, option.account)}
+            value={agentOptionKey(option.agent, option.account)}
             label={option.label}
             hint={option.accountLabel}
             leading={<ProviderMark provider={option.agent} size={20} />}
-            selected={option.agent === agent}
+            selected={isCurrentAgent(option, agent, account)}
             onSelect={handleSelect}
           />
         ))}

@@ -31,6 +31,7 @@ export const RootNavigator = () => {
   const styles = useThemedStyles(makeStyles)
   const layout = useLayout()
   const paired = useLinkPaired()
+  const wide = layout.wide
 
   useBanners()
 
@@ -40,13 +41,18 @@ export const RootNavigator = () => {
       headerTintColor: theme.text.heading,
       headerShadowVisible: false,
       contentStyle: { backgroundColor: theme.surface.page },
+      // Beside the sessions column a screen takes the place of the one before it, as a pane does
+      // on the desktop, and does not slide in over it. It is also what keeps the stack whole
+      // there: picking another session swaps the top screen, and a second swap arriving while the
+      // first was still sliding left Android with both on screen, one part-way across the other.
+      animation: wide ? NAVIGATION.animation.wide : NAVIGATION.animation.narrow,
     }),
-    [theme],
+    [theme, wide],
   )
 
   return (
     <View style={styles.root}>
-      {layout.wide && paired && <Sidebar />}
+      {wide && paired && <Sidebar />}
       <View style={styles.main}>
         <Stack screenOptions={screenOptions}>
           <Stack.Screen name="index" options={NAVIGATION.screens.sessions} />

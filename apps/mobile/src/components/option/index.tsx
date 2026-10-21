@@ -45,7 +45,9 @@ export const Option = ({ selected = false, ...props }: Props) => {
     >
       {props.leading}
       <View style={styles.text}>
-        <Text variant="bodySemiBold">{props.label}</Text>
+        <Text variant="bodySemiBold" tone={props.tone}>
+          {props.label}
+        </Text>
         {props.hint && (
           <Text variant="bodySm" tone="muted">
             {props.hint}

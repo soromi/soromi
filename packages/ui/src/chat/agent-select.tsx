@@ -9,6 +9,9 @@ import {
 } from '../components/ui/dropdown-menu'
 import { ProviderIcon } from '../icons/provider-icon'
 
+//Utils
+import { agentOptionKey, isCurrentAgent } from '@soromi/core'
+
 //Types
 import type { AgentOption } from '@soromi/core'
 
@@ -16,8 +19,8 @@ export type { AgentOption }
 
 /**
  * The composer's agent badge — which provider + account the chat runs under. With more than one
- * option it's a dropdown that switches the chat to another agent (Claude ⇄ Codex); with a single
- * option it's a passive badge, exactly as before. Switching restarts the session under the new agent
+ * option it's a dropdown that switches the chat to another agent (Claude ⇄ Codex) or to another of
+ * the workspace's accounts for the same one; with a single option it's a passive badge. Switching restarts the session under the new agent
  * (a fresh conversation — providers don't share a transcript), so `onChange` should confirm upstream.
  */
 export function AgentSelect({
@@ -64,10 +67,10 @@ export function AgentSelect({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         {options.map((option) => {
-          const active = option.agent === agent
+          const active = isCurrentAgent(option, agent, account)
           return (
             <DropdownMenuItem
-              key={option.agent}
+              key={agentOptionKey(option.agent, option.account)}
               onClick={() => !active && onChange(option.agent, option.account)}
               className="flex items-center gap-2"
             >

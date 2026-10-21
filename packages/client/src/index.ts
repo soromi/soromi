@@ -15,7 +15,9 @@ export { TakeoverBar } from './terminal/takeover'
 export { useClientStore } from './store/client-store'
 export {
   agentLabel,
+  agentOptionKey,
   agentOptionsFor,
+  isCurrentAgent,
   applyServerMessage,
   deferredFiles,
   groupChanges,

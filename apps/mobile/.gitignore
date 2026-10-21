@@ -9,6 +9,10 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Push credentials: each project that builds the app brings its own (see the README)
+google-services.json
+GoogleService-Info.plist
+
 # Native
 .kotlin/
 *.orig.*

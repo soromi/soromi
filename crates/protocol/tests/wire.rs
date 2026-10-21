@@ -455,6 +455,7 @@ fn server_file_content_flags() {
             content: "contents".into(),
             truncated: false,
             binary: false,
+            image: None,
         },
         json!({
             "type": "file-content",
@@ -464,6 +465,35 @@ fn server_file_content_flags() {
             "truncated": false,
             "binary": false
         }),
+    );
+    // A picture says what kind it is; its content is the bytes in base64.
+    assert_server(
+        ServerMessage::FileContent {
+            workspace: "kazomi".into(),
+            path: "logo.png".into(),
+            content: "iVBORw0".into(),
+            truncated: false,
+            binary: false,
+            image: Some("image/png".into()),
+        },
+        json!({
+            "type": "file-content", "workspace": "kazomi", "path": "logo.png",
+            "content": "iVBORw0", "truncated": false, "binary": false, "image": "image/png"
+        }),
+    );
+}
+
+#[test]
+fn a_tool_result_carries_its_pictures_only_when_it_has_some() {
+    assert_eq!(
+        serde_json::to_value(ChatEvent::ToolResult {
+            id: "t1".into(),
+            ok: true,
+            text: "done".into(),
+            files: Vec::new(),
+        })
+        .unwrap(),
+        json!({ "kind": "tool-result", "id": "t1", "ok": true, "text": "done" }),
     );
 }
 

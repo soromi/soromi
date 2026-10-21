@@ -53,7 +53,7 @@ const makeStyles = defineStyles((theme) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.sm2,
-    minHeight: 52,
+    minHeight: layout.header,
     paddingHorizontal: theme.spacing.md,
   },
   title: { flex: 1 },

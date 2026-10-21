@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams } from 'expo-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 //Components
 import { KeyboardView } from '@/components'
@@ -9,6 +9,11 @@ import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Features
 import { LinkBanner } from '@/features/layout/components/link-banner'
+import { PanelTabs } from '@/features/panel/components/tabs'
+
+//Helpers
+import { getHeaderActions } from '@/features/layout/helpers'
+import { toPanelView } from '@/features/panel/helpers'
 
 //Screens
 import { PanelBody } from '@/screens/shared/panel-body'
@@ -22,17 +27,26 @@ import { useDaemonWorkspaceName } from '@/states/daemon/daemon.state.hook'
  */
 export const PanelScreen = () => {
   const styles = useThemedStyles(makeStyles)
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const params = useLocalSearchParams<{ id: string; view?: string }>()
+  const id = params.id
   const workspace = useDaemonWorkspaceName(id)
+  // Opened on the view whose icon was tapped; its own header moves between them from there.
+  const [view, setView] = useState(() => toPanelView(params.view))
 
-  const options = useMemo(() => ({ title: workspace ?? '' }), [workspace])
+  const options = useMemo(
+    () => ({
+      title: workspace ?? '',
+      ...getHeaderActions(() => <PanelTabs active={view} onSelect={setView} />),
+    }),
+    [workspace, view],
+  )
 
   return (
     // A terminal is typed into: it stays above the keyboard.
     <KeyboardView style={styles.root}>
       <Stack.Screen options={options} />
       <LinkBanner />
-      <PanelBody session={id} />
+      <PanelBody session={id} view={view} />
     </KeyboardView>
   )
 }

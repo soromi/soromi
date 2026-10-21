@@ -67,8 +67,9 @@ Grab the latest build for your platform from the
   never mix.
 - **Work on just the folders you choose.** Select the repos or folders that matter and the agent
   stays focused on them.
-- **Browse files without leaving.** A read-only file tree and preview for quick reference; your
-  real editor stays your editor.
+- **Browse files without leaving.** A file tree and preview for quick reference, where a right
+  click (a long press on the phone) copies a path or moves a file or folder to the Trash after
+  asking; your real editor stays your editor.
 - **Skills at a click.** See your agent's commands and skills in a sidebar and drop one into the
   terminal.
 
@@ -115,6 +116,11 @@ a skill, and answer permission prompts with a tap.
 > **Status:** the phone client is a native mobile app (`apps/mobile`), in development and not
 > released yet. Today it can be run from source with Expo: it pairs, lists sessions live, and
 > follows and continues a chat. The earlier browser client has been removed.
+>
+> Push notifications need credentials of your own, which are not in this repository: a Firebase
+> project for Android and an Apple push key for iOS. See
+> [`apps/mobile/README.md`](apps/mobile/README.md#push-notifications). Without them the app works
+> and notifies only while it is open.
 
 Control is exclusive and hands off cleanly. One device drives the terminals at a time: it types and
 its window decides their size. Every other device keeps watching live, read-only, and takes over

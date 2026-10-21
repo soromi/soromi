@@ -17,6 +17,17 @@ export const FILES: FilesConfig = {
     absolute: 'Copy path',
     relative: 'Copy relative path',
   },
+  trash: {
+    action: 'Move to Trash',
+    hint: 'You can restore it from the computer’s Trash.',
+    title: { file: 'Move file to Trash?', dir: 'Move folder to Trash?' },
+    message: {
+      file: (name: string) => `“${name}” goes to the computer’s Trash.`,
+      dir: (name: string) => `“${name}” and everything in it go to the computer’s Trash.`,
+    },
+    cancel: 'Cancel',
+    confirm: 'Move to Trash',
+  },
   modes: [
     { id: 'preview', label: 'Preview' },
     { id: 'raw', label: 'Raw' },
@@ -45,6 +56,7 @@ export const FILES: FilesConfig = {
   copy: {
     empty: 'No folders.',
     binary: 'Binary file. Not shown.',
+    largePicture: 'This picture is too large to send to the phone. Open it on the computer.',
     truncated: 'This is the start of a large file; the rest was left out.',
   },
 }

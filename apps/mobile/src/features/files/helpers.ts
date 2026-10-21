@@ -57,7 +57,7 @@ export const isMarkdown = (path: string): boolean => {
  * start of a large file) and small enough for a text box.
  */
 export const isEditable = (file: FileContent): boolean =>
-  !file.binary && !file.truncated && file.content.length <= FILES.edit.maxChars
+  !file.binary && !file.image && !file.truncated && file.content.length <= FILES.edit.maxChars
 
 /**
  * What the toolbar says of the file. A save under way or failed comes first; then whether there
@@ -71,7 +71,7 @@ export const getFileStatus = (arg: {
 }): FileStatus | null => {
   if (arg.save?.state === 'saving') return 'saving'
   if (arg.dirty) return arg.save?.state === 'failed' ? 'failed' : 'unsaved'
-  if (arg.file.binary) return null
+  if (arg.file.binary || arg.file.image) return null
   if (!isEditable(arg.file)) return 'large'
   if (!arg.online) return 'offline'
 

@@ -193,12 +193,13 @@ impl Provider for Claude {
                     true,
                     MILLION,
                 ),
+                // Fable's window is 1M by default: its alias needs no `[1m]` to get it.
                 super::model_option(
                     Some("fable"),
                     "Fable",
-                    "Fable 5.1 · most capable for your hardest, longest-running tasks",
+                    "Fable 5.1 with 1M context · most capable for your hardest, longest-running tasks",
                     true,
-                    STANDARD,
+                    MILLION,
                 ),
                 super::model_option(
                     Some("sonnet"),

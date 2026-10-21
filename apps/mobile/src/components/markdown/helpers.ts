@@ -203,19 +203,31 @@ export const toPlainText = (nodes: InlineNode[]): string =>
     })
     .join('')
 
+/** The length of the longest run of a text with no space in it: what cannot wrap. */
+const getLongestWord = (text: string): number =>
+  text.split(/\s+/).reduce((most, word) => Math.max(most, word.length), 0)
+
+const getTextWidth = (characters: number): number =>
+  characters * MARKDOWN.column.perCharacter + MARKDOWN.column.padding
+
 /**
- * How wide to draw each column of a table, from the longest text in it. A table scrolls sideways,
- * so columns take the room their content wants, within limits, rather than share the screen.
+ * How wide to draw each column of a table. A table scrolls sideways, so columns take the room
+ * their content wants, within limits, rather than share the screen: as wide as the longest text
+ * in them up to where it is better wrapped, and never narrower than their longest word, so an
+ * identifier or a path is not cut in two.
  */
 export const getColumnWidths = (table: TableNode): number[] =>
   table.header.map((cell, column) => {
-    const longest = table.rows.reduce(
-      (most, row) => Math.max(most, toPlainText(row[column] ?? []).length),
-      toPlainText(cell).length,
+    const texts = [cell, ...table.rows.map((row) => row[column] ?? [])].map(toPlainText)
+    const longest = Math.max(...texts.map((text) => text.length))
+    const word = Math.max(...texts.map(getLongestWord))
+    const forText = Math.min(
+      Math.max(getTextWidth(longest), MARKDOWN.column.min),
+      MARKDOWN.column.max,
     )
-    const wanted = longest * MARKDOWN.column.perCharacter + MARKDOWN.column.padding
+    const forWord = Math.min(getTextWidth(word), MARKDOWN.column.maxWord)
 
-    return Math.min(Math.max(wanted, MARKDOWN.column.min), MARKDOWN.column.max)
+    return Math.max(forText, forWord)
   })
 
 /** Whether a link's address is one the app will open. */

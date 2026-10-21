@@ -32,6 +32,10 @@ const OUTPUT_MAX_BATCH: usize = 64 * 1024;
 /// Streaming chat text is merged over this window: about twenty updates a second at most.
 const DELTA_WINDOW: Duration = Duration::from_millis(50);
 const DELTA_MAX_BATCH: usize = 16 * 1024;
+/// The largest picture a paired device is sent to show (see `Connection::image_limit`).
+const DEVICE_IMAGE_LIMIT: u64 = 2 * 1024 * 1024;
+/// The largest picture the app on this computer is sent to show.
+const LOCAL_IMAGE_LIMIT: u64 = 32 * 1024 * 1024;
 
 /// Per-connection message routing. A viewport lists and opens workspaces, attaches to one,
 /// then its input/resize drives that session while output and status stream back. Owns the
@@ -105,6 +109,17 @@ impl Connection {
     pub fn set_device(&mut self, device: String, routes: watch::Receiver<Vec<String>>) {
         self.device = Some(device);
         self.routes = Some(routes);
+    }
+
+    /// The largest picture this client is sent to show. A device's link crosses the relay, which
+    /// takes a message of a few megabytes at most, and the picture grows by a third in base64 and
+    /// again in its encryption; the app on this computer has no such limit.
+    fn image_limit(&self) -> u64 {
+        if self.is_device() {
+            DEVICE_IMAGE_LIMIT
+        } else {
+            LOCAL_IMAGE_LIMIT
+        }
     }
 
     /// Whether the client is a paired device rather than the app on this computer.
@@ -375,13 +390,14 @@ impl Connection {
                 });
             }
             ClientMessage::ReadFile { workspace, path } => {
-                let file = self.hub.read_file(&workspace, &path);
+                let file = self.hub.read_file(&workspace, &path, self.image_limit());
                 self.send(ServerMessage::FileContent {
                     workspace,
                     path,
                     content: file.content,
                     truncated: file.truncated,
                     binary: file.binary,
+                    image: file.image,
                 });
             }
             ClientMessage::WriteFile {
@@ -394,6 +410,14 @@ impl Connection {
                     message: format!("couldn't save {path}: {error}"),
                 }),
             },
+            ClientMessage::TrashPath { workspace, path } => {
+                match self.hub.trash_path(&workspace, &path) {
+                    Ok(()) => self.send(ServerMessage::PathTrashed { workspace, path }),
+                    Err(error) => self.send(ServerMessage::Error {
+                        message: format!("couldn't move {path} to the Trash: {error}"),
+                    }),
+                }
+            }
             ClientMessage::OpenShell {
                 workspace,
                 shell,
@@ -659,6 +683,16 @@ impl Connection {
         self.update_watching();
         self.refused = false;
         self.link.reset();
+    }
+
+    /// A session's agent was started over while this viewport was following it. A chat is moved
+    /// onto the new process at once and sent the conversation afresh: left alone, the viewport
+    /// would go on listening to the old one, and show nothing of what is said from then on. A
+    /// terminal is left to its viewport, which clears its screen before it attaches again.
+    pub fn session_restarted(&mut self, session_id: &str) {
+        if self.attached.contains_key(session_id) && self.hub.get_chat(session_id).is_some() {
+            self.attach(session_id, None);
+        }
     }
 
     /// The slot this connection tags a session's terminal frames with, assigned on first attach.

@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react'
-import { ScrollView } from 'react-native'
+import { ScrollView, View } from 'react-native'
 
 //Components
-import { Markdown, Text } from '@/components'
+import { Markdown, Picture, Text } from '@/components'
 
 //Config
 import { defineStyles, useThemedStyles } from '@/config/theme'
@@ -26,7 +26,7 @@ import type { FileMode, FileViewProps } from '../types'
 
 /**
  * A file, drawn for what it is and editable in place: a document as a page or as its source, code
- * with its line numbers, or a note that it cannot be shown. Editing swaps the view for a text box
+ * with its line numbers, a picture as itself, or a note that it cannot be shown. Editing swaps the view for a text box
  * holding a draft, which the toolbar saves to the computer.
  */
 export const FileView = (props: FileViewProps) => {
@@ -45,6 +45,22 @@ export const FileView = (props: FileViewProps) => {
     setMode('raw')
     begin()
   }, [begin])
+
+  if (file.image) {
+    if (file.truncated) {
+      return (
+        <Text variant="bodySm" tone="muted" style={styles.message}>
+          {FILES.copy.largePicture}
+        </Text>
+      )
+    }
+
+    return (
+      <View style={styles.picture}>
+        <Picture mediaType={file.image} data={file.content} label={props.path} />
+      </View>
+    )
+  }
 
   if (file.binary) {
     return (
@@ -87,6 +103,7 @@ export const FileView = (props: FileViewProps) => {
 }
 
 const makeStyles = defineStyles((theme) => ({
+  picture: { flex: 1, padding: theme.spacing.md },
   message: { padding: theme.spacing.xl, textAlign: 'center' },
   document: { gap: theme.spacing.md, padding: theme.spacing.md },
 }))

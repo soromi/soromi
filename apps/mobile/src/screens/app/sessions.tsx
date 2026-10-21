@@ -1,6 +1,7 @@
 import { Redirect, Stack } from 'expo-router'
 import { useMemo } from 'react'
 import { View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 //Components
 import { Loader } from '@/components'
@@ -19,6 +20,9 @@ import { SessionList } from '@/features/sessions/components/list'
 import { SessionPlaceholder } from '@/features/sessions/components/placeholder'
 import { ViewToggle } from '@/features/sessions/components/view-toggle'
 import { SettingsAction } from '@/features/settings/components/action'
+
+//Helpers
+import { getHeaderActions } from '@/features/layout/helpers'
 
 //Hooks
 import { useLayout } from '@/hooks/use-layout'
@@ -40,21 +44,29 @@ export const SessionsScreen = () => {
   const online = useLinkOnline()
   const view = usePreferencesView()
   const wide = layout.wide
+  const insets = useSafeAreaInsets()
 
   const options = useMemo(
     () => ({
       // The column has the title and these actions when it is there.
       headerShown: !wide,
       headerTitle: () => <Brand />,
-      headerRight: () => (
+      ...getHeaderActions(() => (
         <View style={styles.actions}>
           <RouteBadge />
           <ViewToggle />
           <SettingsAction />
         </View>
-      ),
+      )),
     }),
     [styles, wide],
+  )
+
+  // With no header of its own (the column has it), nothing else keeps the screen clear of the
+  // status bar: the banners at its top would sit under the clock and the battery.
+  const inset = useMemo(
+    () => (wide ? { paddingTop: insets.top, paddingRight: insets.right } : null),
+    [wide, insets.top, insets.right],
   )
 
   // The keychain has not been read yet: nothing can be said about pairing.
@@ -68,7 +80,7 @@ export const SessionsScreen = () => {
   if (!paired) return <Redirect href={routes.pairing.pair} />
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, inset]}>
       <Stack.Screen options={options} />
       <LinkBanner />
       <ControlBar />

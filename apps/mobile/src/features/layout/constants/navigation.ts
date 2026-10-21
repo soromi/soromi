@@ -2,6 +2,10 @@
 import type { NavigationConfig } from '../types'
 
 export const NAVIGATION: NavigationConfig = {
+  animation: {
+    narrow: 'default',
+    wide: 'none',
+  },
   screens: {
     sessions: { title: 'Soromi' },
     settings: { title: 'Settings' },

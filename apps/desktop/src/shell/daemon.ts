@@ -24,14 +24,14 @@ function freePort(): Promise<number> {
 }
 
 /**
- * The login shell's PATH. A Finder/dock launch inherits only a minimal PATH, but the daemon launches
- * agents (claude, etc.) and needs the same PATH a terminal has, so we compute it here and pass it
- * into the daemon child's env.
+ * The login shell's PATH. A launch from Finder or the dock (or, on Linux, from the desktop's app
+ * menu) inherits only a minimal PATH, but the daemon launches agents (claude, etc.) and needs the
+ * same PATH a terminal has, so we compute it here and pass it into the daemon child's env.
  */
 function loginShellPath(): string {
-  if (process.platform !== 'darwin') return process.env.PATH || ''
+  if (process.platform === 'win32') return process.env.PATH || ''
   try {
-    const sh = process.env.SHELL || '/bin/zsh'
+    const sh = process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
     const out = execFileSync(sh, ['-ilc', 'printf %s "$PATH"'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],

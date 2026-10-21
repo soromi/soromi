@@ -85,22 +85,59 @@ about "SDK < 41", and the build fails.
   installed on the build machine.
 - The Node and pnpm versions the build uses are pinned in `eas.json`, to the ones the repo uses.
 
-Only Android is set up. An iOS build needs an Apple developer account and its own profile.
+### iOS and iPadOS
+
+One app for iPhone and iPad (`supportsTablet`), signed by EAS with the Apple developer account it
+is given the first time: it creates the certificate, the provisioning profile and the push key.
+
+```bash
+pnpm build:mobile:ios                          # from the repo root: a build to install on your own devices
+pnpm --dir apps/mobile build:ios:preview       # the same, by its own name
+pnpm --dir apps/mobile build:ios               # for TestFlight and the App Store
+```
+
+- **A preview build only installs on devices Apple has been told about.** Register each iPhone
+  or iPad once, before building: `eas device:create` (run in this folder) gives a link to open
+  on the device. A device added later needs a new build.
+- **A production build** is for TestFlight: `eas submit --platform ios` uploads it. Apple then
+  asks whether the app uses encryption, which it does (the link to the computer is end-to-end
+  encrypted), so answer that for the account rather than have a setting here answer it.
+- The first time the app reaches the computer over the local network, iOS asks for permission
+  ("find devices on local networks"). Refused, the app still works, through the relay.
 
 ### Push notifications
 
-The code is in place; each platform needs its credentials before a build can receive a push.
-Without them the app works as before and only notifies while it is open.
+The app is told of a finished task two ways: over its link while it is open, and by a push
+notification while it is closed or behind another app. The second needs credentials, and they are
+**not in this repository**: they name a Firebase project and an Apple developer account, so each
+project that builds the app brings its own. Without them the app builds and works, and notifies
+only while it is open.
 
-- **Android.** A Firebase project with an Android app for `dev.soromi.mobile`. Put its
-  `google-services.json` in this folder and name it in `app.json`
-  (`"android": { "googleServicesFile": "./google-services.json" }`), then give EAS the project's
-  service account key for sending: `eas credentials` → Android → Google Service Account → FCM V1.
-- **iOS.** An iOS build profile in `eas.json`, and a push key, which `eas credentials` (or the
-  first `eas build --platform ios`) offers to create on the Apple developer account.
+**Android** needs Firebase, because Google only delivers to an app registered there:
 
-Pushes are sent by the daemon on the user's computer, straight to Expo's push service; nothing of
-ours sits in between.
+1. In the [Firebase console](https://console.firebase.google.com), create a project and add an
+   Android app with the package name in `app.json` (`dev.soromi.app`, or yours if you changed
+   it).
+2. Download its `google-services.json` into this folder. It is git-ignored; `app.config.js` picks
+   it up when it is there.
+3. Give it to EAS as a file, since a cloud build does not see ignored files:
+
+   ```bash
+   eas env:set --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json \
+     --environment production --environment preview --visibility secret
+   ```
+
+4. In the Firebase project's settings, under Service accounts, generate a private key, and hand it
+   to EAS for sending: `eas credentials` → Android → Google Service Account → FCM V1. That key is
+   a secret: keep it out of the repository.
+
+**iOS and iPadOS** need no Firebase and no file. They need an Apple push key, which the first
+`eas build --platform ios` offers to create on the Apple developer account (or `eas credentials`
+at any time). Push needs a real device: the simulator gets none.
+
+Pushes are sent by the daemon on the user's computer, straight to Expo's push service, which
+passes them to Apple or Google with the credentials above; nothing of ours sits in between. The
+daemon needs no setup for it: the phone hands it a token when it connects.
 
 ## Patterns
 
@@ -132,7 +169,7 @@ types`, never back. **Features never import each other.** What two of them need 
 | `app/` | Route files. `_layout.tsx` sets up providers and renders the navigator. |
 | `screens/` | A screen composes features and components, reads the stores it needs, and owns navigation parameters. Grouped by area: `app/` (needs a pairing), `pairing/`. A screen is the one place two features meet; what two screens share of that (the sessions column, a session's panel) is in `shared/`. |
 | `features/` | One folder per domain (`sessions`, `chat`, `terminal`, `files`, `git`, `skills`, `panel`, `settings`, `pairing`, `layout`). Its components, hooks, constants, types and pure helpers. No stores and no services live here. |
-| `components/` | Primitives built on `StyleSheet`: `Text`, `Button`, `IconButton`, `Icon`, `Chip`, `Input`, `Option`, `Sheet`, `Segmented`, `KeyboardView`, `Loader`, `Logo`, `Markdown`, `ProviderMark`, `StatusDot`, `Terminal`, `WorkingMark`. They know nothing about sessions or the daemon. |
+| `components/` | Primitives built on `StyleSheet`: `Text`, `Button`, `IconButton`, `Icon`, `Chip`, `Input`, `Option`, `Sheet`, `Segmented`, `KeyboardView`, `Loader`, `Logo`, `Markdown`, `Picture`, `ProviderMark`, `StatusDot`, `Terminal`, `WorkingMark`. They know nothing about sessions or the daemon. |
 | `config/` | How the app is wired: settings, routes, the theme, runtime setup. |
 | `services/` | The transport to the daemon (`link.ts`), the keychain (`keychain.ts`), the photo library (`photos.ts`), the clipboard (`clipboard.ts`), network changes (`network.ts`) and the phone's notifications (`notifications.ts`). |
 | `states/` | State. The phone's own (`link`, `chat`, and `preferences`, which unpairing leaves alone), what it has looked at on the computer (`workspace`), and the daemon's mirror (`daemon`). |
@@ -231,9 +268,12 @@ which layout that is, from the breakpoints in `config/layout.ts`:
 | Width | Layout |
 |---|---|
 | under 768 | One thing at a time, full width: the sessions, then a conversation, then its panel. |
-| 768 and up (`wide`) | The sessions keep a column of their own at the left (`screens/shared/sidebar`), and the stack is what is open beside it. A session's panel is a pane at the right that slides over the conversation. |
+| 768 and up (`wide`) | The sessions keep a column of their own at the left (`screens/shared/sidebar`), and the stack is what is open beside it. A session draws its own top row (`ScreenHeader`: title at the left, the panel's icons at the right) in place of the navigator's header, and its panel is a pane at the right, the height of the screen, that slides over the conversation. |
 | 1100 and up (`docked`) | The panel sits beside the conversation instead of over it. |
 
+- **The columns of a wide screen share one top row.** The sessions', a session's and its panel's
+  are all `layout.header` tall, below the status bar, so the panel opens with its icons on the
+  line where the session's were, as on the desktop.
 - **Never branch on the platform or the device type for layout.** A large phone on its side is
   wide; a tablet sharing its screen with another app is not.
 - **The navigator keeps its place in the tree** whichever layout is on (`screens/root.tsx`), so
@@ -244,6 +284,9 @@ which layout that is, from the breakpoints in `config/layout.ts`:
 - **The home has two views**, a list and a grid of cards, switched from its header and kept in
   `preferences`. The grid has as many cards to a row as fit (`useLayout().columns`). The sessions
   column of a wide screen is always a list.
+- **Screens do not slide in the wide layout.** There a screen takes the place of the one before
+  it, as a pane does, and swapping the top screen while an earlier swap was still animating left
+  Android showing both. The animation is chosen in `screens/root.tsx` by the layout.
 - **Going to a session** is `useOpenSession()`, which knows that beside the sessions column a
   session takes the place of the one open rather than stacking on it.
 - **Reading widths are capped**: a conversation's column (`layout.column`) and a sheet
@@ -261,6 +304,14 @@ which layout that is, from the breakpoints in `config/layout.ts`:
   A new one is added to `components/icon`, imported on its own path so the bundle carries only
   the icons in use. An action that is an icon alone is an `IconButton`, which requires the `label`
   a screen reader says.
+- **What goes at the right of a header goes through `getHeaderActions`**
+  (`features/layout/helpers`), never straight into `headerRight`. iOS 26 puts anything in a
+  navigation bar on a pane of glass and morphs it between screens; the helper hands our buttons
+  over as items that ask for none. It is the one place that looks at the platform, and it is
+  about a system API, not about layout.
+- **A session's panel is reached by its views' icons** (`features/panel/components/tabs`): files,
+  skills, changes, terminals. They sit in the session's header, where each opens the panel on
+  that view, and at the top of the panel, where they move between views; never both at once.
 - **A choice among a few is a `Chip` that opens a `Sheet` of `Option`s** (the model, the permission
   mode, the account), each picker keeping its own open state.
 - **Styles are a factory outside the component**, applied with a hook:
@@ -336,6 +387,10 @@ type file, since its types are `@soromi/core`'s):
   A tap on either opens the session it is about. A build without push credentials gets no token
   and simply has the first way. What is pushed is the banner's text (the workspace's name and
   what happened) and the session's id; unlike the link, it is readable by the push service.
+- **Pictures come as base64 and are drawn by `Picture`**: an open file that is an image (any
+  kind the platform decodes, and SVG, which is rendered), and what a tool returned (a screenshot
+  the agent read, shown large in its tool row). The computer sends a phone pictures of up to
+  2 MB, which is what fits through the relay; a larger one says so.
 - **A workspace can hold several repositories**: its root, the folders it is made of, the
   directories right under the root. The daemon lists them with each git status, and the Git view
   offers them (`features/git/components/repo-picker`) when there is more than one; a root that

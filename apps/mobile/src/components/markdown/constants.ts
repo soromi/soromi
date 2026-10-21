@@ -13,5 +13,6 @@ export const MARKDOWN: MarkdownConfig = {
     padding: 24,
     min: 64,
     max: 240,
+    maxWord: 420,
   },
 }

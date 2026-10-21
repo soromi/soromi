@@ -1,10 +1,12 @@
 //Types
-import type { ToolKind } from '@soromi/protocol'
+import type { ChatFile, ToolKind } from '@soromi/protocol'
 
 /** What a tool call came back with. */
 export interface ToolResult {
   ok: boolean
   text: string
+  /** The pictures it returned (reading a screenshot, say), bytes fetched once on screen. */
+  files?: ChatFile[]
 }
 
 /** One tool call of the agent's, with its result once that has arrived. */
@@ -40,9 +42,31 @@ const VERBS: Partial<Record<ToolKind, string>> = {
   plan: 'Plan',
 }
 
-/** The verb that leads a tool row, past tense like a work log; a tool of no known kind keeps its name. */
+/**
+ * The verb that leads a tool row, past tense like a work log. A tool of no known kind keeps its
+ * name; one from an MCP server (`mcp__tablepro__execute_query`) is named by server and tool.
+ */
 export function toolVerb(kind: ToolKind, name: string): string {
-  return VERBS[kind] ?? name
+  const known = VERBS[kind]
+  if (known) return known
+  const [prefix, server, ...tool] = name.split('__')
+  if (prefix === 'mcp' && server && tool.length > 0) return `${server} · ${tool.join('__')}`
+
+  return name
+}
+
+/**
+ * What was sent to a tool of no known kind (an MCP tool, say), laid out to be read: JSON over
+ * lines and indented, anything else as it came. `undefined` for the kinds drawn their own way.
+ */
+export function toolInput(tool: ToolItem): string | undefined {
+  if (tool.kind !== 'other' || !tool.body) return undefined
+  try {
+    return JSON.stringify(JSON.parse(tool.body), null, 2)
+  } catch {
+    // Cut short by the daemon, or not JSON at all: shown as it is.
+    return tool.body
+  }
 }
 
 function baseName(path: string | undefined): string | undefined {
@@ -92,16 +116,23 @@ export function diffStat(diff: ToolDiffLine[]): { add: number; del: number } {
  */
 export function toolHasBody(tool: ToolItem): boolean {
   if (tool.kind === 'skill') return false
-  const shown = tool.kind === 'edit' || tool.kind === 'write' || tool.kind === 'run'
+  // What a tool of no known kind was sent is worth opening even before it answers: it is the only
+  // way to see what was asked of it.
+  const shown =
+    tool.kind === 'edit' || tool.kind === 'write' || tool.kind === 'run' || tool.kind === 'other'
   return Boolean((shown && tool.body) || tool.result)
 }
 
 /**
  * Whether a tool row starts open. A change is the point, so edits and writes do; an error does so
- * the failure shows. Commands and reads stay closed: their output is context, not the answer.
+ * the failure shows; and so does one that came back with a picture, which is there to be looked
+ * at. Commands and reads stay closed otherwise: their output is context, not the answer.
  */
 export function toolOpensByDefault(tool: ToolItem): boolean {
-  return tool.kind === 'edit' || tool.kind === 'write' || (tool.result != null && !tool.result.ok)
+  if (tool.kind === 'edit' || tool.kind === 'write') return true
+  if (!tool.result) return false
+
+  return !tool.result.ok || (tool.result.files?.length ?? 0) > 0
 }
 
 /** A short summary of a run of tool calls: the verbs and how many of each, "Ran 6 · Read 2". */

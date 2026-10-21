@@ -7,6 +7,9 @@ export type FileContent = {
   truncated: boolean
   /** The file is not text; `content` is empty. */
   binary: boolean
+  /** The file is a picture of this media type: `content` is its bytes in base64, empty when the
+   * computer would not send one so large (`truncated`). */
+  image?: string
 }
 
 /** One file's diff, as `git diff` printed it. */
@@ -74,6 +77,8 @@ export type WorkspaceActions = {
   toggleGroup: (workspace: string) => void
   setListing: (workspace: string, path: string, entries: DirEntry[]) => void
   toggleDir: (workspace: string, path: string) => void
+  /** A file or folder went to the computer's Trash: the tree lets go of it. */
+  forgetPath: (workspace: string, path: string) => void
   setFile: (workspace: string, path: string, file: FileContent) => void
   /** A file's new content was sent to the computer to be written. */
   startSave: (workspace: string, path: string, content: string) => void

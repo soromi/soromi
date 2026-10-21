@@ -7,6 +7,11 @@ use soromi_protocol::{AgentAccount, PermissionMode, SessionMode};
 pub struct SessionSpec {
     pub id: String,
     pub agent: String,
+    /// The account this tab runs under, when it is not the workspace's first for its agent: a
+    /// workspace can bind more than one account to an agent, and each tab picks among them.
+    /// Absent, the tab follows the workspace's first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The agent's own conversation id (captured from its session-start hook), used to resume

@@ -7,4 +7,4 @@ import type { ToolKind } from "./ToolKind";
  * in place of the raw terminal. The daemon tails the agent's JSONL transcript (Claude first) and
  * parses each line into these; `id` ties a tool result back to its call.
  */
-export type ChatEvent = { "kind": "user", text: string, files?: Array<ChatFile>, } | { "kind": "assistant", text: string, } | { "kind": "thinking", text: string, } | { "kind": "tool", id: string, name: string, path?: string, body?: string, toolKind: ToolKind, } | { "kind": "tool-result", id: string, ok: boolean, text: string, } | { "kind": "notice", text: string, };
+export type ChatEvent = { "kind": "user", text: string, files?: Array<ChatFile>, } | { "kind": "assistant", text: string, } | { "kind": "thinking", text: string, } | { "kind": "tool", id: string, name: string, path?: string, body?: string, toolKind: ToolKind, } | { "kind": "tool-result", id: string, ok: boolean, text: string, files?: Array<ChatFile>, } | { "kind": "notice", text: string, };

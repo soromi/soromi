@@ -50,6 +50,11 @@ export function Markdown({
         // Shrink streamdown's default heading scale so prose reads as chat, not a document.
         '[&_h1]:text-[16px] [&_h1]:font-semibold [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:text-[12.5px] [&_h3]:font-semibold',
         '[&_a]:text-[var(--soromi-accent)]',
+        // Prose may break anywhere so a long path cannot push a bubble wide. In a table that rule
+        // lets a column shrink to one letter, and a narrow one is then cut mid-word while its
+        // neighbours sit half empty. There a word stays whole: columns are at least as wide as
+        // their longest one, and a table too wide for the message scrolls sideways.
+        '[&_table]:[overflow-wrap:break-word]',
         className,
       )}
     >

@@ -39,7 +39,11 @@ const routeToWorkspace = (message: ServerMessage): void => {
         content: message.content,
         truncated: message.truncated,
         binary: message.binary,
+        image: message.image,
       })
+      break
+    case 'path-trashed':
+      workspace.forgetPath(message.workspace, message.path)
       break
     case 'file-saved':
       workspace.finishSave(message.workspace, message.path)

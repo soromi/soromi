@@ -1,8 +1,7 @@
-import { useCallback, useState } from 'react'
 import { View } from 'react-native'
 
 //Components
-import { Loader, Segmented } from '@/components'
+import { Loader } from '@/components'
 
 //Config
 import { defineStyles, useThemedStyles } from '@/config/theme'
@@ -14,29 +13,24 @@ import { ControlBar } from '@/features/layout/components/control-bar'
 import { SkillList } from '@/features/skills/components/list'
 import { Shells } from '@/features/terminal/components/shells'
 
-//Constants
-import { PANEL } from '@/features/panel/constants/panel'
-
 //State
 import { useDaemonSession, useDaemonWorkspaceName } from '@/states/daemon/daemon.state.hook'
 
 //Type
-import type { PanelView } from '@/features/panel/types'
 import type { PanelBodyProps } from './types'
 
 /**
  * What sits beside a session on the desktop: the files of the workspace it runs in, its commands
- * and skills, the workspace's uncommitted changes, and terminals in it, one at a time. A phone shows this as a
- * screen of its own; a tablet as a pane beside the conversation.
+ * and skills, the workspace's uncommitted changes, and terminals in it, one at a time. A phone
+ * shows this as a screen of its own; a tablet as a pane beside the conversation. Either one
+ * says which view, and has the icons that move between them.
  */
 export const PanelBody = (props: PanelBodyProps) => {
   const styles = useThemedStyles(makeStyles)
   const id = props.session
   const workspace = useDaemonWorkspaceName(id)
   const session = useDaemonSession(id)
-  const [view, setView] = useState<PanelView>(PANEL.initial)
-
-  const handleView = useCallback((next: string) => setView(next as PanelView), [])
+  const view = props.view
 
   // The workspace is known once the daemon's list has arrived.
   const waiting = (
@@ -47,9 +41,6 @@ export const PanelBody = (props: PanelBodyProps) => {
 
   return (
     <>
-      <View style={styles.views}>
-        <Segmented options={PANEL.views} value={view} onChange={handleView} />
-      </View>
       {view === 'skills' && <SkillList session={id} usable={session?.mode === 'chat'} />}
       {view === 'files' && (workspace ? <FileTree workspace={workspace} /> : waiting)}
       {view === 'git' && (workspace ? <Changes workspace={workspace} /> : waiting)}
@@ -64,7 +55,6 @@ export const PanelBody = (props: PanelBodyProps) => {
   )
 }
 
-const makeStyles = defineStyles((theme) => ({
+const makeStyles = defineStyles(() => ({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  views: { paddingHorizontal: theme.spacing.md, paddingVertical: theme.spacing.sm },
 }))

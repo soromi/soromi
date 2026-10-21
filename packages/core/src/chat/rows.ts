@@ -35,7 +35,9 @@ function rowKey(event: ChatEvent): string {
 export function buildRows(events: ChatEvent[]): ChatRow[] {
   const resultById = new Map<string, ToolResult>()
   for (const event of events) {
-    if (event.kind === 'tool-result') resultById.set(event.id, { ok: event.ok, text: event.text })
+    if (event.kind === 'tool-result') {
+      resultById.set(event.id, { ok: event.ok, text: event.text, files: event.files })
+    }
   }
 
   const rows: ChatRow[] = []

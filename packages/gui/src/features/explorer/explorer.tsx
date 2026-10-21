@@ -13,16 +13,13 @@ import { GitPanel } from '@/features/git/git-panel'
 import { SkillList } from '@/features/skills/skill-list'
 import { TerminalPanel } from '@/features/terminal/terminal-panel'
 
-//Icons
-import FilesSvg from '@/assets/icons/files.svg?react'
-import GitBranchSvg from '@/assets/icons/git-branch.svg?react'
-import SkillsSvg from '@/assets/icons/skills.svg?react'
-import TerminalSvg from '@/assets/icons/terminal.svg?react'
+import { ExplorerTabs } from './explorer-tabs'
 
 /**
- * The right-hand Explorer panel: the Files / Skills tabs over the tree or skills list, moved out of
- * the left sidebar. Closable (× in its header, or the toggle in the tab bar) and resizable from its
- * left edge; the width and open state are persisted.
+ * The right-hand Explorer panel: the files tree, the skills list, the git changes or the terminals,
+ * one at a time, picked from the icons in its header. Closable (× in its header) and resizable from
+ * its left edge; the width and open state are persisted. While it is closed the same icons sit in
+ * the session's header, where each opens it on that view (see `TerminalDeck`).
  */
 export function Explorer() {
   const {
@@ -94,11 +91,9 @@ export function Explorer() {
       <div className="flex h-full flex-col" style={{ width: explorerWidth }}>
         <div
           data-drag-region
-          className="box-border flex h-[40px] flex-none items-center justify-between border-[var(--soromi-border-subtle)] border-b px-[13px]"
+          className="box-border flex h-[40px] flex-none items-center justify-between border-[var(--soromi-border-subtle)] border-b pr-[13px] pl-[9px]"
         >
-          <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
-            Explorer
-          </span>
+          <ExplorerTabs active={sidebarMode} onSelect={setSidebarMode} />
           <button
             type="button"
             title="Close"
@@ -120,42 +115,15 @@ export function Explorer() {
           </button>
         </div>
 
-        <div className="flex flex-none gap-1 overflow-x-auto px-3 pt-[11px] pb-[9px]">
-          <SectionTab
-            label="Files"
-            active={sidebarMode === 'files'}
-            onClick={() => setSidebarMode('files')}
-            icon={<FilesSvg width={14} height={14} />}
-          />
-          <SectionTab
-            label="Skills"
-            active={sidebarMode === 'skills'}
-            onClick={() => setSidebarMode('skills')}
-            icon={<SkillsSvg width={14} height={14} />}
-          />
-          <SectionTab
-            label="Git"
-            active={sidebarMode === 'git'}
-            onClick={() => setSidebarMode('git')}
-            icon={<GitBranchSvg width={14} height={14} />}
-          />
-          <SectionTab
-            label="Terminal"
-            active={sidebarMode === 'terminal'}
-            onClick={() => setSidebarMode('terminal')}
-            icon={<TerminalSvg width={14} height={14} />}
-          />
-        </div>
-
         {/* The Terminal tab manages its own scrolling (parked xterm panes), so it isn't wrapped in the
             shared overflow container the other tabs use. */}
         {sidebarMode === 'terminal' ? (
           // A flex column so the terminal panes get a real height (the xterm surface fills flex:1).
-          <div className="flex min-h-0 flex-1 flex-col px-1 pb-2">
+          <div className="flex min-h-0 flex-1 flex-col px-1 pt-2 pb-2">
             {active && <TerminalPanel />}
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+          <div className="min-h-0 flex-1 overflow-auto px-2 pt-2 pb-3">
             {active &&
               (sidebarMode === 'files' ? (
                 <FileTree />
@@ -168,33 +136,5 @@ export function Explorer() {
         )}
       </div>
     </aside>
-  )
-}
-
-/** A Files/Skills toggle tab: a green pill when active. */
-function SectionTab({
-  label,
-  active,
-  onClick,
-  icon,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex flex-none cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-[11px] py-1.5 font-semibold text-[12.5px] text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
-        active &&
-          'bg-[var(--soromi-accent-dim)] text-[var(--soromi-accent)] hover:bg-[var(--soromi-accent-dim)] hover:text-[var(--soromi-accent)]',
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   )
 }

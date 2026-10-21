@@ -1,11 +1,17 @@
 //Types
 import type { AccountProfile, AgentAccount } from '@soromi/protocol'
 
-/** One agent a session can run under: a provider (`claude`, `codex`, …) and the account it binds to. */
+/**
+ * One agent a session can run under: a provider (`claude`, `codex`, …) and the account it runs it
+ * with. A workspace can bind more than one account to a provider: each is an option of its own.
+ */
 export interface AgentOption {
   /** The provider key (`claude`, `codex`, `grok`). */
   agent: string
-  /** The account to bind when switching to it; omit when the workspace already binds this agent. */
+  /**
+   * The account to run under, sent when picking the option. Omitted only for a binding listed
+   * before the account profiles have loaded, when the daemon resolves it.
+   */
   account?: string
   /** The account name shown in the menu (e.g. `bookr`). */
   accountLabel: string
@@ -23,11 +29,12 @@ const accountHasProvider = (profiles: AccountProfile[], account: string, agent: 
   profiles.find((p) => p.name === account)?.providers?.[agent] != null
 
 /**
- * The agents a workspace can run. Its bound agents come first — but only the *real* ones: a binding
- * whose account doesn't exist or doesn't configure that provider is a phantom (workspace settings
- * used to bind every provider to a default account) and is dropped. With `includeUnbound`, providers
- * the user has an account for but hasn't bound here are appended (binding that account when picked).
- * Deduped by provider. Drives the composer's agent switcher and the "New session" menu.
+ * The agents a workspace can run, one option per account: its bindings come first, in their order
+ * (a provider's first is the one its tabs follow), but only the *real* ones: a binding whose
+ * account doesn't exist or doesn't configure that provider is a phantom (workspace settings used to
+ * bind every provider to a default account) and is dropped. With `includeUnbound`, providers the
+ * user has an account for but hasn't bound here are appended (binding that account when picked).
+ * Drives the composer's agent switcher and the "New session" menu.
  *
  * Until the account profiles load, bindings are kept as-is so the list isn't briefly empty.
  */
@@ -38,12 +45,19 @@ export function agentOptionsFor(
 ): AgentOption[] {
   const out: AgentOption[] = []
   const seen = new Set<string>()
+  const listed = new Set<string>()
   for (const binding of bindings) {
-    if (seen.has(binding.agent)) continue
+    const key = agentOptionKey(binding.agent, binding.id)
+    if (listed.has(key)) continue
     if (profiles.length > 0 && !accountHasProvider(profiles, binding.id, binding.agent)) continue
+    listed.add(key)
     seen.add(binding.agent)
-    // Already bound: the daemon resolves the account, so no `account` to send.
-    out.push({ agent: binding.agent, accountLabel: binding.id, label: agentLabel(binding.agent) })
+    out.push({
+      agent: binding.agent,
+      account: binding.id,
+      accountLabel: binding.id,
+      label: agentLabel(binding.agent),
+    })
   }
   if (includeUnbound) {
     for (const profile of profiles) {
@@ -61,6 +75,14 @@ export function agentOptionsFor(
   }
   return out
 }
+
+/** What tells options apart: a provider can be offered under more than one account. */
+export const agentOptionKey = (agent: string, account: string | undefined) =>
+  `${agent}\n${account ?? ''}`
+
+/** Whether an option is the one a session runs now: its provider, under its account. */
+export const isCurrentAgent = (option: AgentOption, agent: string, account: string | undefined) =>
+  option.agent === agent && option.accountLabel === account
 
 /** The agent a new session starts under, and the account to bind when the workspace binds none. */
 export interface SessionAgent {

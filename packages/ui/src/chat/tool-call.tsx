@@ -14,12 +14,16 @@ import {
   diffStat,
   toolDiff,
   toolHasBody,
+  toolInput,
   toolOpensByDefault,
   toolState,
   toolTarget,
   toolVerb,
 } from '@soromi/core'
 import { type ComponentType, useState } from 'react'
+
+//Components
+import { ResultImages } from './attachments'
 
 //Types
 import type { ToolItem, ToolResult, ToolState } from '@soromi/core'
@@ -57,6 +61,8 @@ export function ToolCall(tool: ToolCallProps) {
   const [open, setOpen] = useState(toolOpensByDefault(tool))
 
   const target = toolTarget(tool)
+  // What a tool of no known kind (an MCP tool) was sent, laid out to be read when opened.
+  const input = toolInput(tool)
   // A skill row is a clean marker (icon + name); its "Launching skill …" result is noise, so the
   // row stays a non-expandable one-liner rather than hiding that behind a chevron.
   const hasBody = toolHasBody(tool)
@@ -119,8 +125,15 @@ export function ToolCall(tool: ToolCallProps) {
             <pre className={cn(PANEL, 'text-[var(--soromi-text-dim)]')}>{body}</pre>
           ) : kind === 'run' && body ? (
             <pre className={cn(PANEL, 'text-[var(--soromi-text-dim)]')}>{`$ ${body}`}</pre>
+          ) : input ? (
+            <pre className={cn(PANEL, 'text-[var(--soromi-text-dim)]')}>{input}</pre>
           ) : null}
 
+          {result?.files && result.files.length > 0 && (
+            <div className="border-[var(--soromi-border)] border-t first:border-t-0">
+              <ResultImages files={result.files} />
+            </div>
+          )}
           {result?.text && (
             <div className="border-[var(--soromi-border)] border-t">
               <pre

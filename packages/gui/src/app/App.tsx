@@ -106,11 +106,15 @@ export function App() {
             message.truncated,
           )
           break
+        case 'path-trashed':
+          ui.pathTrashed(message.workspace, message.path)
+          break
         case 'file-content':
           ui.setFileContent(message.workspace, message.path, {
             content: message.content,
             truncated: message.truncated,
             binary: message.binary,
+            image: message.image,
           })
           break
         case 'update-available':

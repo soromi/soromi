@@ -98,6 +98,9 @@ export type MarkdownConfig = {
     perCharacter: number
     padding: number
     min: number
+    /** The widest a column grows for the sake of its text, which wraps past this. */
     max: number
+    /** The widest it grows so that a single word (a path, an identifier) is not cut in two. */
+    maxWord: number
   }
 }

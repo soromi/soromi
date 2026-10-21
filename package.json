@@ -22,6 +22,7 @@
     "dev:relay": "pnpm --filter @soromi/relay dev",
     "dev:mobile": "pnpm --dir apps/mobile start",
     "build:mobile": "pnpm --dir apps/mobile build:android",
+    "build:mobile:ios": "pnpm --dir apps/mobile build:ios:preview",
     "check:mobile": "pnpm --dir apps/mobile typecheck && pnpm --dir apps/mobile test && pnpm --dir apps/mobile bundle",
     "app:mac": "pnpm --filter @soromi/desktop package",
     "gen:protocol": "cargo test -p soromi-protocol --features ts",

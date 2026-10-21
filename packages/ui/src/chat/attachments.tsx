@@ -181,6 +181,37 @@ const KIND_META: Record<
   file: { icon: FileIcon, accent: 'text-[var(--soromi-text-faint)]' },
 }
 
+/**
+ * The pictures a tool returned (a screenshot it read, say), drawn at a size to be looked at rather
+ * than as thumbnails: the picture is the result. Each holds its place until its bytes arrive.
+ */
+export function ResultImages({ files }: { files: ChatFile[] }) {
+  const images = files.filter((file) => kindOf(file) === 'image')
+  if (images.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-2 p-2">
+      {images.map((file, index) =>
+        file.deferred ? (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: a result's pictures have no stable id.
+            key={index}
+            className="h-40 w-40 animate-pulse rounded-lg bg-[var(--soromi-bg-hover)]"
+          />
+        ) : (
+          <img
+            // biome-ignore lint/suspicious/noArrayIndexKey: a result's pictures have no stable id.
+            key={index}
+            src={dataUrl(file)}
+            alt={file.filename ?? 'result'}
+            className="max-h-[420px] max-w-full rounded-lg border border-[var(--soromi-border)] object-contain"
+          />
+        ),
+      )}
+    </div>
+  )
+}
+
 /** An image attachment: a square thumbnail (hover for the filename). */
 export function ImagePreview({ file }: { file: ChatFile }) {
   // The bytes are fetched after the message; hold the thumbnail's place until they arrive.

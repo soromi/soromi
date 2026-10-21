@@ -10,7 +10,9 @@ import { useLayout } from '@/hooks/use-layout'
 /**
  * Goes to a session's conversation. On a phone that is one more screen to come back from. Beside
  * the sessions column it takes the place of whatever was open: the column is how you move between
- * sessions there, so there is nothing to come back to.
+ * sessions there, so there is nothing to come back to. The two steps reach the navigator as one
+ * change (the top screen is swapped), which is why screens do not animate in that layout: see
+ * `screens/root`.
  */
 export const useOpenSession = () => {
   const router = useRouter()

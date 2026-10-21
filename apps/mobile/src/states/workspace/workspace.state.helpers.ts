@@ -15,6 +15,21 @@ export const getDiffKey = (
   staged: boolean,
 ): string => `${workspace}\n${folder}\n${path}\n${staged ? 'staged' : 'worktree'}`
 
+/** Whether `candidate` is `path` itself or something inside it. */
+export const isWithin = (candidate: string, path: string): boolean =>
+  candidate === path || candidate.startsWith(`${path}/`)
+
+/** The folder a path is in, relative to the workspace root: `''` for one at the top. */
+export const getParentPath = (path: string): string =>
+  path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+
+/** A record of paths without the ones `drop` picks. */
+export const withoutPaths = <T>(
+  record: Record<string, T> | undefined,
+  drop: (path: string) => boolean,
+): Record<string, T> =>
+  Object.fromEntries(Object.entries(record ?? {}).filter(([path]) => !drop(path)))
+
 /** A new terminal's id. The app names it, and the daemon knows it by that name from then on. */
 export const newShellId = (): string => {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))

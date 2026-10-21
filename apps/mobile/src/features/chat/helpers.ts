@@ -59,10 +59,10 @@ export const getWorkingMeta = (elapsed: number, tokens: number | null): string =
 export const getElapsedSeconds = (since: number, now: number): number =>
   Math.max(0, Math.floor((now - since) / 1000))
 
-/** Where a session's files and skills are shown. */
-export const getPanelHref = (session: string): Href => ({
+/** Where a session's panel is shown, opened on one of its views (files, skills, changes…). */
+export const getPanelHref = (session: string, view: string): Href => ({
   pathname: routes.app.panel,
-  params: { id: session },
+  params: { id: session, view },
 })
 
 /** Whether there is anything to send: something written, or a picture. */

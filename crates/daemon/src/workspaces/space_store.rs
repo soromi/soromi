@@ -47,6 +47,7 @@ mod tests {
                 agent: "claude".into(),
             }],
             sessions: vec![crate::workspaces::config::SessionSpec {
+                account: None,
                 id: "s1".into(),
                 agent: "claude".into(),
                 title: None,

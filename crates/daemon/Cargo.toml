@@ -44,6 +44,7 @@ alacritty_terminal = "0.26"
 base64 = "0.22"
 getrandom = "0.2"
 if-addrs = "0.15.0"
+trash = "5.2.9"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

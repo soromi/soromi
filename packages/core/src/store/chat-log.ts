@@ -39,13 +39,19 @@ export interface DeferredFile {
   index: number
 }
 
+/** The events that carry files: a prompt's attachments, the pictures a tool returned. */
+type WithFiles = Extract<ChatEvent, { kind: 'user' | 'tool-result' }>
+
+const hasFiles = (event: ChatEvent | undefined): event is WithFiles =>
+  event?.kind === 'user' || event?.kind === 'tool-result'
+
 /** Every attached file in the log still waiting for its bytes. */
 export function deferredFiles(log: ChatLog): DeferredFile[] {
   const { cursor } = log
   if (!cursor) return []
   const waiting: DeferredFile[] = []
   log.events.forEach((event, at) => {
-    if (event.kind !== 'user') return
+    if (!hasFiles(event)) return
     const seq = cursor.seq - (log.events.length - 1 - at)
     event.files?.forEach((file, index) => {
       if (file.deferred) waiting.push({ seq, index })
@@ -69,7 +75,7 @@ export function withFile(
   if (log.cursor?.log !== run) return log.events
   const at = indexOf(log, seq)
   const event = log.events[at]
-  if (event?.kind !== 'user' || !event.files?.[index]) return log.events
+  if (!hasFiles(event) || !event.files?.[index]) return log.events
 
   const files = event.files.map((held, i) => (i === index ? file : held))
   const events = [...log.events]

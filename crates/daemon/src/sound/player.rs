@@ -36,16 +36,18 @@ const REQUEST: &[u8] = include_bytes!("../../assets/sounds/request.wav");
 const QUESTION: &[u8] = include_bytes!("../../assets/sounds/question.wav");
 const COMPLETE: &[u8] = include_bytes!("../../assets/sounds/complete.wav");
 
-/// macOS cues via `afplay`. The embedded wavs are written to a temp cache once, so a file path
-/// exists to play. Fire-and-forget; never crashes the daemon.
-pub struct MacSoundPlayer {
+/// Cues played by a program that takes a sound file: `afplay` on macOS; on Linux whichever of
+/// PipeWire's, PulseAudio's or ALSA's players the system has. The embedded wavs are written to a
+/// temp cache once, so a file path exists to play. Fire-and-forget; never crashes the daemon.
+pub struct FileSoundPlayer {
+    program: PathBuf,
     request: PathBuf,
     question: PathBuf,
     complete: PathBuf,
 }
 
-impl MacSoundPlayer {
-    fn new() -> Self {
+impl FileSoundPlayer {
+    fn new(program: PathBuf) -> Self {
         let dir = std::env::temp_dir().join("soromi-sounds");
         let _ = fs::create_dir_all(&dir);
         let write = |name: &str, bytes: &[u8]| {
@@ -54,6 +56,7 @@ impl MacSoundPlayer {
             path
         };
         Self {
+            program,
             request: write("request.wav", REQUEST),
             question: write("question.wav", QUESTION),
             complete: write("complete.wav", COMPLETE),
@@ -61,14 +64,14 @@ impl MacSoundPlayer {
     }
 }
 
-impl SoundPlayer for MacSoundPlayer {
+impl SoundPlayer for FileSoundPlayer {
     fn play(&self, cue: Cue) {
         let path = match cue {
             Cue::Request => &self.request,
             Cue::Question => &self.question,
             Cue::Complete => &self.complete,
         };
-        let _ = Command::new("afplay")
+        let _ = Command::new(&self.program)
             .arg(path)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -86,9 +89,11 @@ impl SoundPlayer for NoopSoundPlayer {
 
 pub fn create_sound_player() -> Arc<dyn SoundPlayer> {
     if cfg!(target_os = "macos") {
-        Arc::new(MacSoundPlayer::new())
-    } else {
-        Arc::new(NoopSoundPlayer)
+        return Arc::new(FileSoundPlayer::new(PathBuf::from("afplay")));
+    }
+    match crate::system::first_on_path(&["pw-play", "paplay", "aplay"]) {
+        Some(program) if cfg!(target_os = "linux") => Arc::new(FileSoundPlayer::new(program)),
+        _ => Arc::new(NoopSoundPlayer),
     }
 }
 

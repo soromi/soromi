@@ -1,3 +1,4 @@
+import type { TextTone } from '@/config/theme/tokens'
 import type { ReactNode } from 'react'
 
 export type Props = {
@@ -11,5 +12,7 @@ export type Props = {
   /** Something before the label: a provider's mark, say. */
   leading?: ReactNode
   disabled?: boolean
+  /** The label's colour: `danger` for a choice that removes something. */
+  tone?: TextTone
   onSelect: (value: string) => void
 }

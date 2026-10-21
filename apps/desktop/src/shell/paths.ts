@@ -7,9 +7,11 @@ import { app } from 'electron'
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 
-/** The app icons directory and the default icon. */
+/** The app icons directory and the default icon: bundled into Resources when packaged. */
 export const ICON_DIR = path.resolve(__dirname, '..', '..', 'icons')
-export const APP_ICON = path.join(ICON_DIR, 'icon.png')
+export const APP_ICON = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(ICON_DIR, 'icon.png')
 
 /** The built frontend: bundled into Resources/dist when packaged, read from the gui package in dev. */
 export const RENDERER_DIST = app.isPackaged

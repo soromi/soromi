@@ -1,4 +1,4 @@
-import { agentOptionsFor, sessionAgentFor } from '@soromi/core'
+import { agentOptionKey, agentOptionsFor, sessionAgentFor } from '@soromi/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable } from 'react-native'
 
@@ -55,9 +55,10 @@ export const NewSession = (props: NewSessionProps) => {
     open(opened.id)
   }, [sessions, open])
 
+  // Each option is a provider under one of the workspace's accounts for it, picked by both.
   const start = useCallback(
-    (agent: string | undefined) => {
-      const choice = options.find((option) => option.agent === agent)
+    (key: string | undefined) => {
+      const choice = options.find((option) => agentOptionKey(option.agent, option.account) === key)
       const under = sessionAgentFor(bindings, profiles, choice)
       pending.current = { known: sessions.map((session) => session.id), at: Date.now() }
       LinkService.send({
@@ -73,15 +74,15 @@ export const NewSession = (props: NewSessionProps) => {
 
   const handlePress = useCallback(() => {
     if (options.length > 1) setPicking(true)
-    else start(options[0]?.agent)
+    else start(options[0] && agentOptionKey(options[0].agent, options[0].account))
   }, [options, start])
 
   const handleClose = useCallback(() => setPicking(false), [])
 
   const handleSelect = useCallback(
-    (agent: string) => {
+    (key: string) => {
       setPicking(false)
-      start(agent)
+      start(key)
     },
     [start],
   )
@@ -111,8 +112,8 @@ export const NewSession = (props: NewSessionProps) => {
       <Sheet visible={picking} title={SESSIONS.create.title} onClose={handleClose}>
         {options.map((option) => (
           <Option
-            key={option.agent}
-            value={option.agent}
+            key={agentOptionKey(option.agent, option.account)}
+            value={agentOptionKey(option.agent, option.account)}
             label={option.label}
             hint={option.accountLabel}
             leading={<ProviderMark provider={option.agent} size={20} />}

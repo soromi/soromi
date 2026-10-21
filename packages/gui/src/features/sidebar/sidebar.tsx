@@ -22,7 +22,7 @@ import {
 } from '@soromi/ui'
 
 //Store
-import { agentOptionsFor } from '@/shared/agent-options'
+import { agentOptionKey, agentOptionsFor } from '@/shared/agent-options'
 import { ProviderIcon } from '@/shared/provider-icon'
 import { useAppStore } from '@/stores/app-store'
 
@@ -860,7 +860,7 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
               <DropdownMenuContent align="start" className="w-[190px]">
                 {newSessionAgents.map((choice) => (
                   <DropdownMenuItem
-                    key={choice.agent}
+                    key={agentOptionKey(choice.agent, choice.account)}
                     onSelect={() => onNewSession(workspace.name, 'chat', choice)}
                     className="flex items-center gap-2"
                   >

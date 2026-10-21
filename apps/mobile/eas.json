@@ -10,17 +10,29 @@
     },
     "preview": {
       "extends": "base",
+      "environment": "preview",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
       }
     },
     "production": {
       "extends": "base",
+      "environment": "production",
       "autoIncrement": true,
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
       }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

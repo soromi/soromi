@@ -68,6 +68,15 @@ test('a fetched file takes the place of its stub', () => {
   ])
 })
 
+test('a picture a tool returned is fetched and put in place like an attachment', () => {
+  const returned: ChatEvent = { kind: 'tool-result', id: 't1', ok: true, text: '', files: [stub] }
+  const log: ChatLog = { events: [says('a'), returned], cursor: { log: 'a', seq: 5 } }
+
+  expect(deferredFiles(log)).toEqual([{ seq: 5, index: 0 }])
+  const events = withFile(log, 'a', 5, 0, image)
+  expect(events[1]).toEqual({ ...returned, files: [image] })
+})
+
 test('a file for another run of the log, or an event not held, changes nothing', () => {
   const log: ChatLog = { events: [shows('a', [stub]), says('b')], cursor: { log: 'a', seq: 5 } }
 

@@ -164,7 +164,9 @@ impl ChatLog {
             return None;
         }
         match inner.events.get((seq as usize).checked_sub(1)?)? {
-            ChatEvent::User { files, .. } => files.get(index).cloned(),
+            ChatEvent::User { files, .. } | ChatEvent::ToolResult { files, .. } => {
+                files.get(index).cloned()
+            }
             _ => None,
         }
     }
@@ -175,25 +177,42 @@ fn replay(events: &[ChatEvent]) -> Vec<ChatEvent> {
     events.iter().map(for_viewer).collect()
 }
 
-/// A copy of an event as a viewer is sent it: with the bytes of attached files left out and each
-/// file marked as deferred. A pasted image is megabytes of base64; a viewer scrolling past it has
+/// A copy of an event as a viewer is sent it: with the bytes of attached files (a prompt's, or the
+/// pictures a tool returned) left out and each file marked as deferred. A pasted image is megabytes of base64; a viewer scrolling past it has
 /// no use for that, and one that shows it asks for it (`ChatFetchFile`).
 fn for_viewer(event: &ChatEvent) -> ChatEvent {
     match event {
         ChatEvent::User { text, files } => ChatEvent::User {
             text: text.clone(),
-            files: files
-                .iter()
-                .map(|file| ChatFile {
-                    media_type: file.media_type.clone(),
-                    data: String::new(),
-                    filename: file.filename.clone(),
-                    deferred: true,
-                })
-                .collect(),
+            files: stubs(files),
+        },
+        // A picture a tool returned is sent the same way: it is as large as a pasted one.
+        ChatEvent::ToolResult {
+            id,
+            ok,
+            text,
+            files,
+        } => ChatEvent::ToolResult {
+            id: id.clone(),
+            ok: *ok,
+            text: text.clone(),
+            files: stubs(files),
         },
         other => other.clone(),
     }
+}
+
+/// Attached files without their bytes, each marked as fetched on demand.
+fn stubs(files: &[ChatFile]) -> Vec<ChatFile> {
+    files
+        .iter()
+        .map(|file| ChatFile {
+            media_type: file.media_type.clone(),
+            data: String::new(),
+            filename: file.filename.clone(),
+            deferred: true,
+        })
+        .collect()
 }
 
 /// A random id for one run of a log.

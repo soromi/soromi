@@ -616,8 +616,11 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::providers::ChatFrame;
+    use crate::sessions::chat_log::LogFrame;
 
     fn claude() -> &'static dyn Provider {
         crate::providers::provider("claude").expect("claude provider")
@@ -628,6 +631,50 @@ mod tests {
             ChatFrame::Events(events) => events,
             _ => Vec::new(),
         }
+    }
+
+    /// A chat session whose agent is a shell command reading what it is sent.
+    fn session(script: &str) -> StreamJsonSession {
+        StreamJsonSession::spawn(
+            claude(),
+            "/bin/sh",
+            &["-c".to_string(), script.to_string()],
+            "/",
+            None,
+            Vec::new(),
+            PermissionMode::default(),
+        )
+        .expect("the agent starts")
+    }
+
+    #[tokio::test]
+    async fn a_message_with_a_picture_is_shown_to_whoever_is_watching() {
+        let chat = session("cat > /dev/null");
+        let (_, mut feed) = chat.chat_log().attach(None, 50);
+        // A pasted screenshot: megabytes of base64.
+        let picture = ChatFile {
+            media_type: "image/png".into(),
+            data: "A".repeat(3 * 1024 * 1024),
+            filename: Some("shot.png".into()),
+            deferred: false,
+        };
+
+        chat.send_turn("look at this", &[picture]).await;
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), feed.recv())
+            .await
+            .expect("the message is announced")
+            .expect("an open feed");
+        let LogFrame::Event { seq, event } = frame else {
+            panic!("expected the message");
+        };
+        assert_eq!(seq, 1);
+        let ChatEvent::User { text, files } = event else {
+            panic!("expected the user's message");
+        };
+        assert_eq!(text, "look at this");
+        // Announced without the picture's bytes, which are asked for separately.
+        assert!(files[0].deferred && files[0].data.is_empty());
     }
 
     #[test]
@@ -665,6 +712,7 @@ mod tests {
                 id: "t1".into(),
                 ok: true,
                 text: "out".into(),
+                files: Vec::new(),
             }]
         );
     }

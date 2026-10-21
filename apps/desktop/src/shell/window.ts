@@ -33,9 +33,12 @@ export function createMainWindow(daemonPort: number): BrowserWindow {
     // already insets its top bar on macOS (isMac -> pl-[76px]).
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 12, y: 13 },
-    // The window icon is used on Windows/Linux (macOS uses the bundle's .icns). In dev the bundle
-    // doesn't exist, so point at the source png.
-    ...(app.isPackaged ? {} : { icon: APP_ICON }),
+    // Elsewhere the app menu is a bar across the top of the window, which the app's own top bar
+    // already does the work of: it stays out of the way until Alt is pressed, as Linux apps do.
+    autoHideMenuBar: process.platform !== 'darwin',
+    // The window icon is used on Windows/Linux, where nothing else gives the window one; macOS
+    // uses the bundle's .icns (and, in dev, where there is no bundle, the source png).
+    ...(process.platform !== 'darwin' || !app.isPackaged ? { icon: APP_ICON } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

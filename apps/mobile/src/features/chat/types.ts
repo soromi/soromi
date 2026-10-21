@@ -109,8 +109,8 @@ export type EmptyProps = {
   chat: boolean
 }
 
-export type PanelActionProps = {
-  onPress: () => void
+export type ResultImageProps = {
+  file: ChatFile
 }
 
 export type ToolbarProps = {
@@ -243,8 +243,6 @@ export type ChatConfig = {
     /** How much of what is being approved is shown. */
     bodyLines: number
   }
-  /** The header's way to a session's files and skills, for a screen reader. */
-  panel: string
   working: {
     separator: string
     /** Before the token count: it is what the turn has taken in. */
@@ -305,6 +303,8 @@ export type ChatConfig = {
   files: {
     /** The side of a picture in a message, in points. */
     thumb: number
+    /** The height of a picture a tool returned: large enough to look at. */
+    result: number
     /** What a file with no name is called. */
     unnamed: string
   }

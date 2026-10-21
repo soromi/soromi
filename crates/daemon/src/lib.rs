@@ -17,6 +17,7 @@ pub mod sessions;
 pub mod skills;
 pub mod sound;
 pub mod status;
+pub mod system;
 pub mod transcript;
 pub mod transport;
 pub mod updates;

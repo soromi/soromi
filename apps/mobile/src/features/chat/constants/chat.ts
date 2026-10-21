@@ -43,7 +43,7 @@ export const CHAT: ChatConfig = {
   agent: {
     title: 'Agent',
     confirm: {
-      title: 'Switch agent?',
+      title: 'Switch agent or account?',
       lead: 'This chat will restart under ',
       trail: ', as a new conversation. The current one stays on your computer.',
       cancel: 'Cancel',
@@ -57,7 +57,6 @@ export const CHAT: ChatConfig = {
     deny: 'Deny',
     bodyLines: 6,
   },
-  panel: 'Files and skills',
   working: {
     separator: ' · ',
     arrow: '↓',
@@ -121,6 +120,7 @@ export const CHAT: ChatConfig = {
   },
   files: {
     thumb: 132,
+    result: 280,
     unnamed: 'Attachment',
   },
   row: {

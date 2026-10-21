@@ -10,6 +10,9 @@ import { WORKSPACE } from './workspace.state.constants'
 import {
   getDiffKey,
   getFileKey,
+  getParentPath,
+  isWithin,
+  withoutPaths,
   getShellAfter,
   getShellTitle,
   newShellId,
@@ -56,6 +59,28 @@ export const WorkspaceStore = create<WorkspaceType>()((set, get) => ({
           tree: {
             ...state.tree,
             expanded: { ...state.tree.expanded, [workspace]: { ...open, [path]: !open[path] } },
+          },
+        }
+      }),
+    forgetPath: (workspace, path) =>
+      set((state) => {
+        const parent = getParentPath(path)
+        const gone = (candidate: string) => isWithin(candidate, path)
+
+        return {
+          tree: {
+            // Without its listing, the folder the path was in is asked for again.
+            listings: {
+              ...state.tree.listings,
+              [workspace]: withoutPaths(
+                state.tree.listings[workspace],
+                (candidate) => candidate === parent || gone(candidate),
+              ),
+            },
+            expanded: {
+              ...state.tree.expanded,
+              [workspace]: withoutPaths(state.tree.expanded[workspace], gone),
+            },
           },
         }
       }),

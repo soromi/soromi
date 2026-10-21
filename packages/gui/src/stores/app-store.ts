@@ -23,6 +23,8 @@ export interface FileContent {
   content: string
   truncated: boolean
   binary: boolean
+  /** A picture of this media type: `content` is its bytes in base64 (empty if too large to send). */
+  image?: string
 }
 
 /** The sidebar's resizable width, clamped and remembered across sessions. */
@@ -235,13 +237,14 @@ interface UiState {
   setListing: (workspace: string, path: string, entries: DirEntry[]) => void
   /** Drops a workspace's cached tree, so it re-fetches (e.g. after its folders changed). */
   resetTree: (workspace: string) => void
+  /** Forgets a path that was moved to the Trash: its parent re-lists, and its open file closes. */
+  pathTrashed: (workspace: string, path: string) => void
   toggleTreeNode: (workspace: string, path: string) => void
   setSidebarMode: (mode: SidebarMode) => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setSidebarWidth: (width: number) => void
   setExplorerOpen: (open: boolean) => void
-  toggleExplorer: () => void
   setExplorerWidth: (width: number) => void
   setWorkspaceColor: (name: string, color: string) => void
   setNotice: (notice: string | null) => void
@@ -461,6 +464,27 @@ export const useAppStore = create<UiState>()((set) => ({
       const { [workspace]: _e, ...treeExpanded } = state.treeExpanded
       return { treeListings, treeExpanded }
     }),
+  pathTrashed: (workspace, path) =>
+    set((state) => {
+      const gone = (p: string) => p === path || p.startsWith(`${path}/`)
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+      const without = <T>(record: Record<string, T> | undefined, drop: (p: string) => boolean) =>
+        Object.fromEntries(Object.entries(record ?? {}).filter(([p]) => !drop(p)))
+      return {
+        // Dropping the parent's listing makes the tree fetch it again, now without the path.
+        treeListings: {
+          ...state.treeListings,
+          [workspace]: without(state.treeListings[workspace], (p) => p === parent || gone(p)),
+        },
+        treeExpanded: {
+          ...state.treeExpanded,
+          [workspace]: without(state.treeExpanded[workspace], gone),
+        },
+        overlays: state.overlays.filter(
+          (o) => !(o.type === 'file' && o.workspace === workspace && gone(o.path)),
+        ),
+      }
+    }),
   toggleTreeNode: (workspace, path) =>
     set((state) => {
       const current = state.treeExpanded[workspace] ?? {}
@@ -495,14 +519,6 @@ export const useAppStore = create<UiState>()((set) => ({
     } catch {}
     set({ explorerOpen })
   },
-  toggleExplorer: () =>
-    set((state) => {
-      const explorerOpen = !state.explorerOpen
-      try {
-        localStorage.setItem(EXPLORER_OPEN_KEY, explorerOpen ? '1' : '0')
-      } catch {}
-      return { explorerOpen }
-    }),
   setExplorerWidth: (width) => {
     const explorerWidth = clampExplorerWidth(width)
     try {

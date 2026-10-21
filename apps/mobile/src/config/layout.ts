@@ -9,6 +9,11 @@ export const layout = {
     /** From here up a session's panel sits beside the conversation; below, it slides over it. */
     docked: 1100,
   },
+  /**
+   * The height of the row at the top of each column of a wide screen (the sessions', a session's,
+   * its panel's), below the status bar. One height, so what is in them lines up across columns.
+   */
+  header: 52,
   /** The width of the sessions column. */
   sidebar: 320,
   /** The width of a session's panel (files, skills, changes) when it is beside the conversation. */

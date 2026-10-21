@@ -10,16 +10,17 @@
     "backgroundColor": "#121213",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.soromi.mobile",
+      "bundleIdentifier": "dev.soromi.app",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Soromi connects straight to your computer when both are on the same network, instead of going through the relay.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "dev.soromi.mobile",
+      "package": "dev.soromi.app",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -31,11 +32,18 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Soromi uses the camera to scan the pairing code shown on your computer."
+          "cameraPermission": "Soromi uses the camera to scan the pairing code shown on your computer.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [

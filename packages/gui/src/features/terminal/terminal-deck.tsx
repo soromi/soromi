@@ -12,27 +12,34 @@ import { colors } from '@/config/theme'
 
 //Components
 import { ChatPane } from './chat-pane'
+import { ExplorerTabs } from '@/features/explorer/explorer-tabs'
 import { ProviderIcon } from '@/shared/provider-icon'
 
 //Types
 import type { Transport } from '@soromi/client'
 import type { SessionSummary } from '@soromi/protocol'
+import type { SidebarMode } from '@/stores/app-store'
 
 /**
  * The active workspace's terminals. Each visited session keeps a live pane (parked when hidden), so
  * switching sessions or workspaces is instant and preserves scrollback. Sessions are navigated from
  * the sidebar's workspace cards now — there is no tab strip; the header just names the one in view
- * (its provider glyph + title) and offers a new session and the Explorer toggle.
+ * (its provider glyph + title) and, while the Explorer is closed, offers its views as icons.
  */
 export function TerminalDeck({ transport }: { transport: Transport }) {
-  const { active, activeSession, explorerOpen, toggleExplorer } = useAppStore(
+  const { active, activeSession, explorerOpen, setExplorerOpen, setSidebarMode } = useAppStore(
     useShallow((s) => ({
       active: s.active,
       activeSession: s.activeSession,
       explorerOpen: s.explorerOpen,
-      toggleExplorer: s.toggleExplorer,
+      setExplorerOpen: s.setExplorerOpen,
+      setSidebarMode: s.setSidebarMode,
     })),
   )
+  const openExplorer = (mode: SidebarMode) => {
+    setSidebarMode(mode)
+    setExplorerOpen(true)
+  }
   const workspaces = useClientStore((s) => s.workspaces)
   const [visited, setVisited] = useState<string[]>([])
 
@@ -86,28 +93,11 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
           </div>
           <div data-drag-region className="min-w-0 flex-1" />
           {/* The Terminal/Chat mode toggle lives in the status bar now (see StatusBar). */}
+          {/* While the Explorer is closed, its views sit here: each icon opens it on that view. */}
           {!explorerOpen && (
-            <button
-              type="button"
-              title="Explorer"
-              onClick={toggleExplorer}
-              className="mr-1 flex h-[28px] w-[28px] cursor-pointer appearance-none items-center justify-center self-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="4" width="18" height="16" rx="2.5" />
-                <path d="M15 4v16" />
-              </svg>
-            </button>
+            <div className="mr-1 flex items-center self-center">
+              <ExplorerTabs active={null} onSelect={openExplorer} />
+            </div>
           )}
         </div>
       )}

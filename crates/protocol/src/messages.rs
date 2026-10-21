@@ -657,6 +657,13 @@ pub enum ClientMessage {
         path: String,
         content: String,
     },
+    /// Moves a file or folder of a workspace to the computer's Trash, where it can be restored from.
+    /// The workspace's root and the folders it is made of are refused. Replied with `PathTrashed`,
+    /// or an `Error`.
+    TrashPath {
+        workspace: String,
+        path: String,
+    },
     /// Open an ad-hoc shell PTY for a workspace, rooted at `folder` (workspace-relative; "" = root).
     /// The client mints `shell` as `shell:<uuid>`, then `Attach`es to it like any session. These
     /// shells are not persisted and are not workspace tabs.
@@ -887,6 +894,18 @@ pub enum ServerMessage {
         content: String,
         truncated: bool,
         binary: bool,
+        /// The file is a picture of this media type (`image/png`, …), to be shown rather than read:
+        /// `content` holds its bytes in base64, or nothing when it is larger than this viewport is
+        /// sent (`truncated`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        image: Option<String>,
+    },
+    /// A `TrashPath` succeeded: the file or folder at `path` is in the Trash, and whatever showed it
+    /// (an open file, its rows in the tree) can let it go. Its folder's listing follows as usual.
+    PathTrashed {
+        workspace: String,
+        path: String,
     },
     /// A `WriteFile` succeeded — the editor clears its unsaved state for this file.
     FileSaved {
@@ -1190,8 +1209,16 @@ pub enum ChatEvent {
         #[serde(default)]
         tool_kind: ToolKind,
     },
-    /// The result of a tool call, tied to it by `id`.
-    ToolResult { id: String, ok: bool, text: String },
+    /// The result of a tool call, tied to it by `id`. `files` are the pictures it returned (reading
+    /// a screenshot, say), sent like a prompt's: without their bytes, fetched with `ChatFetchFile`.
+    ToolResult {
+        id: String,
+        ok: bool,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[cfg_attr(feature = "ts", ts(as = "Option<Vec<ChatFile>>", optional))]
+        files: Vec<ChatFile>,
+    },
     /// A system notice, not conversation (e.g. the turn was interrupted). Rendered as a centered
     /// marker, not a user/assistant message.
     Notice { text: String },

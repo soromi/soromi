@@ -217,6 +217,7 @@ mod tests {
             id: id.into(),
             ok: true,
             text: "…".into(),
+            files: Vec::new(),
         }
     }
 

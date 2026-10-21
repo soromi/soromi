@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
-import { FileTree as FileTreeView, cn, flattenTree } from '@soromi/ui'
+import { ConfirmDialog, FileTree as FileTreeView, cn, flattenTree } from '@soromi/ui'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -48,6 +48,7 @@ export function FileTree() {
     useShallow((s) => ({ toggleTreeNode: s.toggleTreeNode, openFile: s.openFile })),
   )
   const [menu, setMenu] = useState<MenuTarget | null>(null)
+  const [trashTarget, setTrashTarget] = useState<MenuTarget | null>(null)
 
   // Fetch the root listing whenever it is missing: on first show, and again after the cache is
   // cleared. Cached listings persist per workspace, so switching back is instant.
@@ -106,19 +107,44 @@ export function FileTree() {
         onContextMenu={onContextMenu}
         emptyLabel="No folders."
       />
-      {menu && <ContextMenu workspace={active} menu={menu} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          workspace={active}
+          menu={menu}
+          onTrash={() => setTrashTarget(menu)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      <ConfirmDialog
+        open={trashTarget !== null}
+        onOpenChange={(open) => !open && setTrashTarget(null)}
+        title={trashTarget?.type === 'dir' ? 'Move folder to Trash' : 'Move file to Trash'}
+        destructive
+        confirmLabel="Move to Trash"
+        onConfirm={() => {
+          if (trashTarget)
+            transport.send({ type: 'trash-path', workspace: active, path: trashTarget.path })
+          setTrashTarget(null)
+        }}
+      >
+        Move "{trashTarget?.name}"{trashTarget?.type === 'dir' ? ' and everything in it' : ''} to
+        the Trash? You can restore it from there.
+      </ConfirmDialog>
     </>
   )
 }
 
-/** The custom right-click popup: read-only actions plus removing a workspace folder. */
+/** The custom right-click popup: copy/reveal actions, moving to the Trash, removing a folder. */
 function ContextMenu({
   workspace,
   menu,
+  onTrash,
   onClose,
 }: {
   workspace: string
   menu: MenuTarget
+  /** Asks to move the path to the Trash (the caller confirms first). */
+  onTrash: () => void
   onClose: () => void
 }) {
   const transport = useTransport()
@@ -137,6 +163,13 @@ function ContextMenu({
   // A workspace folder is a top-level node whose path is one of the declared folders (never `.`).
   const isWorkspaceFolder = (summary?.folders ?? []).includes(menu.path) && menu.path !== '.'
   const canRemoveFolder = isWorkspaceFolder && (summary?.folders.length ?? 0) > 1
+
+  // A workspace folder can only leave the workspace; anything inside it can go to the Trash.
+  const danger = isWorkspaceFolder
+    ? canRemoveFolder
+      ? { label: 'Remove from workspace', action: () => removeFolder() }
+      : null
+    : { label: 'Move to Trash', action: onTrash }
 
   const run = (action: () => void) => {
     action()
@@ -182,15 +215,15 @@ function ContextMenu({
             Reveal in Finder
           </button>
         )}
-        {canRemoveFolder && (
+        {danger && (
           <>
             <div className="my-1 h-px bg-[var(--soromi-border)]" />
             <button
               type="button"
               className={cn(MENU_ITEM, 'text-[#f87171]')}
-              onClick={() => run(removeFolder)}
+              onClick={() => run(danger.action)}
             >
-              Remove from workspace
+              {danger.label}
             </button>
           </>
         )}

@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { FlatList, View } from 'react-native'
 
 //Components
-import { KeyboardView, Segmented } from '@/components'
+import { KeyboardView, ProviderMark, Segmented } from '@/components'
 
 //Config
 import { layout } from '@/config/layout'
@@ -16,11 +16,12 @@ import { Composer } from '@/features/chat/components/composer'
 import { ContextBanner } from '@/features/chat/components/context'
 import { LoadEarlier } from '@/features/chat/components/earlier'
 import { ChatEmpty } from '@/features/chat/components/empty'
-import { PanelAction } from '@/features/chat/components/panel-action'
 import { ChatRow } from '@/features/chat/components/row'
 import { WorkingIndicator } from '@/features/chat/components/working'
 import { ControlBar } from '@/features/layout/components/control-bar'
 import { LinkBanner } from '@/features/layout/components/link-banner'
+import { ScreenHeader } from '@/features/layout/components/screen-header'
+import { PanelTabs } from '@/features/panel/components/tabs'
 import { TerminalPane } from '@/features/terminal/components/pane'
 
 //Constants
@@ -28,6 +29,7 @@ import { TERMINAL } from '@/features/terminal/constants/terminal'
 
 //Helpers
 import { getPanelHref, getRowKey, toRows } from '@/features/chat/helpers'
+import { getHeaderActions } from '@/features/layout/helpers'
 
 //Hooks
 import { useAttach } from '@/features/chat/hooks/use-attach'
@@ -52,13 +54,15 @@ import { useLinkOnline } from '@/states/link/link.state.hook'
 //Type
 import type { ChatRow as Row } from '@soromi/core'
 import type { ListRenderItemInfo } from 'react-native'
+import type { PanelView } from '@/features/panel/types'
 import type { TerminalView } from '@/features/terminal/types'
 
 /**
  * One session's conversation, drawn as the desktop draws it: messages, tool calls that open to
  * their output or diff (a long run of them folded into one line), and the agent's reasoning, live,
- * with a box to send the next message. The header leads to the session's files, skills and changes:
- * a screen of their own on a phone, a pane beside the conversation on a tablet.
+ * with a box to send the next message. The header has the session's files, skills, changes and
+ * terminals as icons, each opening the panel there: a screen of its own on a phone, a pane beside
+ * the conversation on a tablet.
  */
 export const SessionScreen = () => {
   const styles = useThemedStyles(makeStyles)
@@ -73,8 +77,9 @@ export const SessionScreen = () => {
   const router = useRouter()
   const screen = useLayout()
   const wide = screen.wide
-  // The panel as a pane beside the conversation, which is how a wide screen shows it.
-  const [panel, setPanel] = useState(false)
+  // The panel as a pane beside the conversation, which is how a wide screen shows it: the view it
+  // is on, or `null` while it is closed.
+  const [panel, setPanel] = useState<PanelView | null>(null)
   // A session that runs in a terminal can be read as a conversation or used as the terminal it is.
   const [view, setView] = useState<TerminalView>(TERMINAL.initial)
 
@@ -92,25 +97,43 @@ export const SessionScreen = () => {
 
   const rows = useMemo(() => toRows(events, streaming), [events, streaming])
 
-  const handlePanel = useCallback(() => {
-    if (wide) setPanel((open) => !open)
-    else router.push(getPanelHref(id))
-  }, [wide, router, id])
+  const handlePanel = useCallback(
+    (view: PanelView) => {
+      if (wide) setPanel(view)
+      else router.push(getPanelHref(id, view))
+    },
+    [wide, router, id],
+  )
 
-  const handlePanelClose = useCallback(() => setPanel(false), [])
+  const handlePanelClose = useCallback(() => setPanel(null), [])
 
   const handleView = useCallback((next: string) => setView(next as TerminalView), [])
 
   const showsTerminal = session?.mode === 'terminal' && view === 'terminal'
 
+  // On a phone the navigator's header: the title, the way back, and the panel's views, each
+  // opening it there. On a wide screen the app draws the top row itself (see below), so that the
+  // panel can open beside it on the same line.
   const options = useMemo(
     () => ({
       title,
-      // Beside the sessions column there is nothing to go back to: the column is the way around.
-      headerBackVisible: !wide,
-      headerRight: () => <PanelAction onPress={handlePanel} />,
+      headerShown: !wide,
+      ...getHeaderActions(() => <PanelTabs active={null} onSelect={handlePanel} />),
     }),
     [title, wide, handlePanel],
+  )
+
+  const agent = session?.agent
+  // The title at the left with its provider's mark, as on the desktop, and the panel's views at
+  // the right until the panel is up: then it has them itself, on this line.
+  const header = useMemo(
+    () =>
+      wide ? (
+        <ScreenHeader title={title} leading={agent ? <ProviderMark provider={agent} /> : null}>
+          {!panel && <PanelTabs active={null} onSelect={handlePanel} />}
+        </ScreenHeader>
+      ) : null,
+    [wide, title, agent, panel, handlePanel],
   )
 
   const renderItem = useCallback((info: ListRenderItemInfo<Row>) => <ChatRow row={info.item} />, [])
@@ -129,59 +152,68 @@ export const SessionScreen = () => {
 
   return (
     <View style={styles.root}>
-      <KeyboardView style={styles.chat}>
-        <Stack.Screen options={options} />
-        <LinkBanner />
-        <ControlBar />
-        {session?.mode === 'terminal' && (
-          <View style={styles.views}>
-            <Segmented options={TERMINAL.views} value={view} onChange={handleView} />
-          </View>
-        )}
-        {session?.mode === 'terminal' && view === 'terminal' && <TerminalPane session={id} />}
-        <View style={[styles.column, showsTerminal && styles.hidden]}>
-          {rows.length === 0 ? (
-            // Kept out of the list: an inverted list draws its own empty state upside down.
-            <View style={styles.empty}>
-              <ChatEmpty chat={chat} />
-              {status}
+      <View style={styles.main}>
+        {header}
+        <KeyboardView style={styles.chat}>
+          <Stack.Screen options={options} />
+          <LinkBanner />
+          <ControlBar />
+          {session?.mode === 'terminal' && (
+            <View style={styles.views}>
+              <Segmented options={TERMINAL.views} value={view} onChange={handleView} />
             </View>
-          ) : (
-            <FlatList
-              inverted
-              data={rows}
-              keyExtractor={getRowKey}
-              contentContainerStyle={styles.list}
-              keyboardShouldPersistTaps="handled"
-              renderItem={renderItem}
-              ListHeaderComponent={status}
-              ListFooterComponent={earlier}
-            />
           )}
-          <Agents session={id} agents={session?.subagents} enabled={inControl} />
-          {session && chat && (
-            <ContextBanner
+          {session?.mode === 'terminal' && view === 'terminal' && <TerminalPane session={id} />}
+          <View style={[styles.column, showsTerminal && styles.hidden]}>
+            {rows.length === 0 ? (
+              // Kept out of the list: an inverted list draws its own empty state upside down.
+              <View style={styles.empty}>
+                <ChatEmpty chat={chat} />
+                {status}
+              </View>
+            ) : (
+              <FlatList
+                inverted
+                data={rows}
+                keyExtractor={getRowKey}
+                contentContainerStyle={styles.list}
+                keyboardShouldPersistTaps="handled"
+                renderItem={renderItem}
+                ListHeaderComponent={status}
+                ListFooterComponent={earlier}
+              />
+            )}
+            <Agents session={id} agents={session?.subagents} enabled={inControl} />
+            {session && chat && (
+              <ContextBanner
+                session={id}
+                agent={session.agent}
+                model={session.model ?? null}
+                tokens={tokens}
+                enabled={inControl && online && !working}
+              />
+            )}
+            {approvals?.map((approval) => (
+              <Approval key={approval.id} session={id} approval={approval} enabled={inControl} />
+            ))}
+            <Composer
               session={id}
-              agent={session.agent}
-              model={session.model ?? null}
-              tokens={tokens}
-              enabled={inControl && online && !working}
+              chat={chat}
+              working={working}
+              inControl={inControl}
+              online={online}
             />
-          )}
-          {approvals?.map((approval) => (
-            <Approval key={approval.id} session={id} approval={approval} enabled={inControl} />
-          ))}
-          <Composer
-            session={id}
-            chat={chat}
-            working={working}
-            inControl={inControl}
-            online={online}
-          />
-        </View>
-      </KeyboardView>
+          </View>
+        </KeyboardView>
+      </View>
       {wide && panel && (
-        <PanelPane session={id} docked={screen.docked} onClose={handlePanelClose} />
+        <PanelPane
+          session={id}
+          view={panel}
+          docked={screen.docked}
+          onView={setPanel}
+          onClose={handlePanelClose}
+        />
       )}
     </View>
   )
@@ -189,6 +221,7 @@ export const SessionScreen = () => {
 
 const makeStyles = defineStyles((theme) => ({
   root: { flex: 1, flexDirection: 'row', backgroundColor: theme.surface.page },
+  main: { flex: 1 },
   chat: { flex: 1 },
   // A conversation is read in a column: on a wide screen it stops growing and sits in the middle.
   column: { flex: 1, width: '100%', maxWidth: layout.column, alignSelf: 'center' },

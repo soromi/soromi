@@ -83,11 +83,15 @@ function ModeButton({
   )
 }
 
-/** Rendered markdown in a centered reading column, at document scale (larger than the chat bubble). */
+/**
+ * Rendered markdown in a centered column, at document scale (larger than the chat bubble). The
+ * column is wide enough for the tables and code a plan is full of; past it, lines get too long
+ * to read, so it stops growing and sits in the middle.
+ */
 function MarkdownPreview({ value }: { value: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto">
-      <div className="mx-auto max-w-3xl px-6 py-5">
+      <div className="mx-auto max-w-[1200px] px-8 py-5">
         <Markdown className="!text-[13.5px] [&_h1]:!mt-6 [&_h1]:!text-[23px] [&_h1]:!font-bold [&_h2]:!mt-5 [&_h2]:!text-[18px] [&_h2]:!font-semibold [&_h3]:!mt-4 [&_h3]:!text-[15px] [&_h3]:!font-semibold [&_ol]:!my-3 [&_p]:!my-3 [&_pre]:!my-3 [&_ul]:!my-3">
           {value}
         </Markdown>

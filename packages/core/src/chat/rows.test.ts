@@ -6,6 +6,7 @@ import {
   summarizeTools,
   toolDiff,
   toolHasBody,
+  toolInput,
   toolOpensByDefault,
   toolState,
   toolTarget,
@@ -76,6 +77,7 @@ describe('a tool call', () => {
   it('is named for what it did, and shows what it did it to', () => {
     expect(toolVerb('edit', 'Edit')).toBe('Edited')
     expect(toolVerb('other', 'DesignSync')).toBe('DesignSync')
+    expect(toolVerb('other', 'mcp__tablepro__execute_query')).toBe('tablepro · execute_query')
     expect(toolTarget(edit)).toBe('a.ts')
     expect(toolTarget(run)).toBe('grep -rn x .')
     expect(toolTarget({ name: 'Skill', kind: 'skill', body: 'claude-api' })).toBe('claude-api')
@@ -99,15 +101,35 @@ describe('a tool call', () => {
     expect(toolOpensByDefault(edit)).toBe(true)
     expect(toolOpensByDefault(run)).toBe(false)
     expect(toolOpensByDefault({ ...run, result: { ok: false, text: 'boom' } })).toBe(true)
+    // A picture that came back is there to be seen.
+    const picture = { mediaType: 'image/png', data: '', deferred: true }
+    expect(toolOpensByDefault({ ...run, result: { ok: true, text: '', files: [picture] } })).toBe(
+      true,
+    )
   })
 
   it('has something to open unless it is a skill, or a read still under way', () => {
     expect(toolHasBody(run)).toBe(true)
+    // What an MCP tool was sent can be read while it runs.
+    expect(toolHasBody({ name: 'mcp__db__query', kind: 'other', body: '{"sql":"select 1"}' })).toBe(
+      true,
+    )
     expect(toolHasBody({ name: 'Read', kind: 'read', path: 'a.ts' })).toBe(false)
     expect(toolHasBody({ name: 'Read', kind: 'read', result: { ok: true, text: 'x' } })).toBe(true)
     expect(toolHasBody({ name: 'Skill', kind: 'skill', result: { ok: true, text: 'x' } })).toBe(
       false,
     )
+  })
+
+  it('lays out what an MCP tool was sent, and leaves anything else as it came', () => {
+    const query: ToolItem = {
+      name: 'mcp__db__query',
+      kind: 'other',
+      body: '{"connection_id":"07AE","max_rows":5}',
+    }
+    expect(toolInput(query)).toBe('{\n  "connection_id": "07AE",\n  "max_rows": 5\n}')
+    expect(toolInput({ ...query, body: '{"cut short' })).toBe('{"cut short')
+    expect(toolInput({ name: 'Bash', kind: 'run', body: 'ls' })).toBeUndefined()
   })
 
   it('is counted by verb when a run of them is summed up', () => {
