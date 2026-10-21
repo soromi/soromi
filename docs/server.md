@@ -31,7 +31,7 @@ That is all of it. The script ([`scripts/install.sh`](../scripts/install.sh)):
    - shows a QR code to pair your phone: scan it in the Soromi app, or paste the code under it.
 
 Run the same line again to update Soromi; the service picks up the new build. Options, as
-environment variables before `sh`: `SOROMI_VERSION=v1.2.0` for a given release, `SOROMI_BIN_DIR`
+environment variables before `sh`: `SOROMI_VERSION=1.2.0` for a given release, `SOROMI_BIN_DIR`
 for another folder, `SOROMI_NO_SETUP=1` to install only.
 
 Agents are installed and logged in as usual. With no browser on the server, Claude Code shows a

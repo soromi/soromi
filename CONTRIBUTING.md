@@ -45,7 +45,7 @@ Read alongside each package's `README.md` (what that package is for).
   `packages/protocol/src/generated/`. Change the Rust serde definitions, regenerate, and keep the
   wire-conformance tests (`crates/protocol/tests/wire.rs`) in sync.
 - **Biome is authoritative for formatting and linting.** Single quotes, no semicolons,
-  width 100, trailing commas. Never hand-format; run `pnpm format` or `pnpm check:fix`.
+  width 100, trailing commas. Never hand-format; run `pnpm check:fix`.
 - **Naming:** files `kebab-case.ts` (React components may be `PascalCase.tsx`); types and
   components `PascalCase`; values and functions `camelCase`.
 - **Tests are colocated** as `*.test.ts` next to the code, run with Vitest. Add or adjust
@@ -63,9 +63,8 @@ Read alongside each package's `README.md` (what that package is for).
 Before handing off any change, this must be green:
 
 ```bash
-pnpm format        # biome format --write
+pnpm check:fix     # biome format + lint, fixing what it can
 pnpm typecheck     # tsc across all packages
-pnpm lint          # biome lint
 pnpm test          # vitest
 pnpm build         # turbo build
 ```

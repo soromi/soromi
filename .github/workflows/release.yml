@@ -10,7 +10,8 @@ on:
 permissions:
   contents: write
 
-# Builds everything a release ships and attaches it to the tag's draft release, through the same
+# Pushed by `pnpm release` (scripts/release.mjs). Builds everything a release ships and publishes
+# it as the tag's GitHub release, with the changelog entry as its notes, through the same
 # `scripts/build.mjs` / `scripts/linux/build.sh` used locally (`pnpm build:desktop:mac` and co.):
 #   - macOS (Apple Silicon): the desktop app (.zip) and the `soromi` binary (.tar.gz), both signed
 #     and notarized when the secrets below are set.
@@ -131,28 +132,45 @@ jobs:
     needs: [mac, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: apps/desktop/CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      # This version's changelog entry (written by `pnpm release`), then how to pick a download.
+      - name: Write the release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## $version" '$0 == heading { on = 1; next } on && /^## / { exit } on' \
+            apps/desktop/CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ### Downloads
+
+          - **Desktop:** `Soromi-*-macos-arm64.zip` (Apple Silicon), `.deb` / `.rpm` for Linux.
+          - **Server / command line:** `soromi-*-<os>-<arch>.tar.gz`, the daemon and the `soromi`
+            command on their own. See `docs/server.md`.
+
+          Every file has a `.sha256` beside it. macOS builds are Developer ID signed and notarized
+          when the release secrets are configured.
+          EOF
+
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: out/release
           merge-multiple: true
 
-      - name: Attach artifacts to the release
+      # Published straight away: this job only runs once every build has succeeded.
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
           name: Soromi ${{ github.ref_name }}
-          draft: true
+          draft: false
           prerelease: false
-          body: |
-            Download the build for your platform from the assets below.
-
-            - **Desktop:** `Soromi-*-macos-arm64.zip` (Apple Silicon), `.deb` / `.rpm` for Linux.
-            - **Server / command line:** `soromi-*-<os>-<arch>.tar.gz`, the daemon and the `soromi`
-              command on their own. See `docs/server.md`.
-
-            Every file has a `.sha256` beside it. macOS builds are Developer ID signed and notarized
-            when the release secrets are configured.
+          make_latest: true
+          body_path: notes.md
           files: out/release/*

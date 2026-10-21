@@ -9,7 +9,7 @@
 # updates Soromi in place.
 #
 # Settings, as environment variables:
-#   SOROMI_VERSION   a release tag to install instead of the latest (e.g. v1.2.0)
+#   SOROMI_VERSION   a release tag to install instead of the latest (e.g. 1.2.0)
 #   SOROMI_BIN_DIR   where to put `soromi` (default: ~/.local/bin)
 #   SOROMI_NO_SETUP  1 to install only, without `soromi setup`
 #   SOROMI_ARCHIVE   a build already on disk (a soromi-*.tar.gz), instead of downloading one

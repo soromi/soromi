@@ -320,7 +320,7 @@ Requires **Node 22+**, **pnpm 10**, and a stable **Rust** toolchain.
 pnpm install         # install workspace deps
 pnpm build           # build every package + the desktop bundle (turbo)
 pnpm typecheck       # type-check the TypeScript packages
-pnpm lint            # lint with biome
+pnpm check           # format + lint with biome (pnpm check:fix to fix)
 pnpm test            # run the vitest suite
 pnpm gen:protocol    # regenerate the TypeScript protocol types from the Rust crate
 ```
@@ -342,7 +342,7 @@ pnpm dev:desktop     # the full app (Electron: builds the daemon + gui, then lau
 Or iterate on the two processes separately:
 
 ```bash
-pnpm daemon          # the Rust daemon (serves the local WebSocket)
+pnpm dev:daemon      # the Rust daemon (serves the local WebSocket)
 pnpm dev             # the GUI dev server against that daemon
 ```
 
