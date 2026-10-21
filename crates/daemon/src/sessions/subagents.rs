@@ -113,7 +113,7 @@ impl Subagents {
             tool: Some(tool.to_string()),
             task: None,
             background: false,
-            agent: agent(name.unwrap_or("sub-agent")),
+            agent: agent(Some(tool), name.unwrap_or("sub-agent")),
         });
         true
     }
@@ -167,7 +167,9 @@ impl Subagents {
             tool: tool.map(str::to_string),
             task: Some(task.to_string()),
             background,
-            agent: agent(name.as_deref().unwrap_or(UNNAMED)),
+            // Known by the call that started it when that is known, as the session would have
+            // listed it; otherwise by its own id.
+            agent: agent(tool.or(Some(task)), name.as_deref().unwrap_or(UNNAMED)),
         });
         true
     }
@@ -190,8 +192,9 @@ impl Subagents {
     }
 }
 
-fn agent(name: &str) -> SubAgent {
+fn agent(id: Option<&str>, name: &str) -> SubAgent {
     SubAgent {
+        id: id.map(str::to_string),
         name: name.to_string(),
         status: Status::Thinking,
         started_at: Some(now_secs()),

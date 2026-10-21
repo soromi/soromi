@@ -2,6 +2,8 @@
 // agent's parsed transcript (prose, reasoning, tool calls). A subpath export (like `code-viewer`) so
 // `streamdown` + `shiki` stay out of the main bundle and load only where the chat view is used.
 
+export { AgentLogView } from './agent-log'
+export type { AgentLogViewProps } from './agent-log'
 export { AgentSelect } from './agent-select'
 export type { AgentOption } from './agent-select'
 export { contextLimitFor, setModelCatalog } from './model-catalog'

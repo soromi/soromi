@@ -1,3 +1,4 @@
+import { USAGE_REFRESH_MS } from '@soromi/core'
 import { useEffect, useState } from 'react'
 
 //Transport
@@ -5,9 +6,6 @@ import { useTransport } from '../transport/transport-context'
 
 //Types
 import type { AgentUsage } from '@soromi/protocol'
-
-/** Auto-refresh cadence, matching the daemon's usage cache window. */
-const REFRESH_MS = 15 * 60 * 1000
 
 /**
  * Loads plan usage for a workspace and keeps it fresh. Served from the daemon's cache on open, then
@@ -45,7 +43,7 @@ export function useUsage(workspace: string | null): {
 
     const timer = setInterval(() => {
       transport.send({ type: 'request-usage', workspace, force: false })
-    }, REFRESH_MS)
+    }, USAGE_REFRESH_MS)
 
     return () => clearInterval(timer)
   }, [workspace, transport])

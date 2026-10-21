@@ -197,7 +197,7 @@ function ContextMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       <div
-        className="fixed min-w-[180px] select-none rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] p-1 shadow-[0_8px_24px_rgb(0_0_0/40%)]"
+        className="fixed min-w-[180px] select-none rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] p-1 [box-shadow:var(--soromi-shadow-popover)]"
         style={{ top: menu.y, left: menu.x }}
       >
         <button type="button" className={MENU_ITEM} onClick={() => run(() => copyText(absolute))}>
@@ -220,7 +220,7 @@ function ContextMenu({
             <div className="my-1 h-px bg-[var(--soromi-border)]" />
             <button
               type="button"
-              className={cn(MENU_ITEM, 'text-[#f87171]')}
+              className={cn(MENU_ITEM, 'text-[var(--soromi-danger)]')}
               onClick={() => run(danger.action)}
             >
               {danger.label}

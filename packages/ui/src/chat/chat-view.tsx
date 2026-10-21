@@ -15,6 +15,7 @@ import { Approval } from './approval'
 import { ChatRow } from './chat-row'
 import { Composer } from './composer'
 import { ContextBanner } from './context-banner'
+import { QueuePanel } from './queue-panel'
 import { StreamingTail } from './streaming-tail'
 import { WorkingIndicator } from './working-indicator'
 
@@ -31,6 +32,7 @@ import type {
   ChatEvent,
   ChatFile,
   PermissionMode,
+  QueuedTurn,
   SlashCommand,
   SubAgent,
   ToolApproval,
@@ -57,10 +59,20 @@ export interface ChatViewProps {
   /** Sends a follow-up (with any pasted/attached files). The app decides the transport (terminal
    * input vs. a chat turn). */
   onSend: (text: string, files?: ChatFile[]) => void
+  /** Queues a follow-up typed while the agent works, for when its turn ends. Absent: one is sent at
+   * once, which steers the turn (a terminal session's input). */
+  onQueue?: (text: string, files?: ChatFile[]) => void
+  /** The messages queued so far, oldest first, and whether a stop is holding them. */
+  queued?: QueuedTurn[]
+  queuePaused?: boolean
+  /** Takes a queued message out: `send` sends it now, otherwise it is dropped. */
+  onUnqueue?: (id: string, send: boolean) => void
   /** Interrupts the running turn (the composer's stop button, shown while `working`). */
   onStop?: () => void
   /** Sub-agents the agent is running this turn (`Task` calls); shown as a panel over the composer. */
   subagents?: SubAgent[]
+  /** Opens a sub-agent's own log (its prompt, tools and replies). Absent: the rows are not links. */
+  onOpenAgent?: (agent: SubAgent) => void
   /** The provider's slash commands ("actions"), for the composer's `/` menu. Empty/absent hides it. */
   commands?: SlashCommand[]
   /** Tool calls awaiting the user's allow/deny (headless chat permission prompts). */
@@ -116,8 +128,13 @@ export function ChatView({
   placeholder = 'Reply to the agent…',
   emptyLabel,
   onSend,
+  onQueue,
+  queued,
+  queuePaused = false,
+  onUnqueue,
   onStop,
   subagents,
+  onOpenAgent,
   commands,
   approvals,
   onApproval,
@@ -304,7 +321,15 @@ export function ChatView({
             onClear={() => runCommand('/clear')}
           />
         )}
-        <AgentsPanel subagents={subagents ?? []} onStop={onStop} />
+        <AgentsPanel subagents={subagents ?? []} onStop={onStop} onOpen={onOpenAgent} />
+        {onUnqueue && (
+          <QueuePanel
+            queued={queued ?? []}
+            paused={queuePaused}
+            disabled={disabled}
+            onUnqueue={onUnqueue}
+          />
+        )}
         <Composer
           disabled={disabled || commandPending !== null}
           disabledLabel={
@@ -317,6 +342,7 @@ export function ChatView({
           working={working}
           placeholder={placeholder}
           onSend={onSend}
+          onQueue={onQueue}
           onStop={onStop}
           commands={commands ?? []}
           permissionMode={permissionMode}

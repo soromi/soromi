@@ -1,4 +1,4 @@
-import { contextLimit } from '@soromi/core'
+import { agentLogKey, contextLimit } from '@soromi/core'
 import { useStore } from 'zustand'
 
 //State
@@ -10,9 +10,27 @@ import { DaemonStore } from './daemon.state'
 export const useDaemonWorkspaces = () => useStore(DaemonStore, (state) => state.workspaces)
 
 /**
+ * @description One workspace by name, as the computer last listed it; `undefined` if it has none
+ * by that name
+ */
+export const useDaemonWorkspace = (name: string) =>
+  useStore(DaemonStore, (state) => state.workspaces.find((workspace) => workspace.name === name))
+
+/**
  * @description Whether the first workspace list has arrived
  */
 export const useDaemonReady = () => useStore(DaemonStore, (state) => state.ready)
+
+/**
+ * @description The computer the phone is paired with, and what runs its daemon (the desktop app,
+ * a terminal, a service); `null` until it has said
+ */
+export const useDaemonHost = () => useStore(DaemonStore, (state) => state.host)
+
+/**
+ * @description The release of Soromi the computer runs; `null` until it has said
+ */
+export const useDaemonVersion = () => useStore(DaemonStore, (state) => state.daemonVersion)
 
 /**
  * @description One session's summary, wherever it lives
@@ -33,6 +51,43 @@ export const useDaemonWorkspaceRoot = (workspace: string) =>
  */
 export const useDaemonWorkspaceFolders = (workspace: string) =>
   useStore(DaemonStore, (state) => state.workspaces.find((w) => w.name === workspace)?.folders)
+
+/**
+ * @description A workspace's terminals, as the daemon lists them for every device; `undefined`
+ * when it has none
+ */
+export const useDaemonWorkspaceShells = (workspace: string) =>
+  useStore(DaemonStore, (state) => state.workspaces.find((w) => w.name === workspace)?.shells)
+
+/**
+ * @description The plan usage of a workspace's agents, as the computer last read it; `undefined`
+ * until it answers
+ */
+export const useDaemonUsage = (workspace: string) =>
+  useStore(DaemonStore, (state) => state.usage[workspace])
+
+/**
+ * @description What a watched background agent of a session did, as far as the daemon has sent
+ * it; `undefined` until it answers
+ */
+export const useDaemonAgentLog = (session: string, agent: string) =>
+  useStore(DaemonStore, (state) => state.agentLogs[agentLogKey(session, agent)])
+
+/**
+ * @description One of a session's background agents while the session lists it as at work;
+ * `undefined` once it has stopped
+ */
+export const useDaemonListedAgent = (session: string, agent: string) =>
+  useStore(DaemonStore, (state) => {
+    for (const workspace of state.workspaces) {
+      const listed = workspace.sessions
+        .find((one) => one.id === session)
+        ?.subagents?.find((sub) => sub.id === agent)
+      if (listed) return listed
+    }
+
+    return undefined
+  })
 
 /**
  * @description The name of the workspace a session belongs to
@@ -103,6 +158,13 @@ export const useDaemonApprovals = (id: string) =>
  */
 export const useDaemonHasEarlier = (id: string) =>
   useStore(DaemonStore, (state) => state.chatEarlier[id] ?? false)
+
+/**
+ * @description A workspace's earlier conversations as the daemon last listed them, with the
+ * search they answer; `undefined` until it has
+ */
+export const useDaemonConversations = (workspace: string) =>
+  useStore(DaemonStore, (state) => state.conversations[workspace])
 
 /**
  * @description A session's slash commands and skills, once the daemon has sent them

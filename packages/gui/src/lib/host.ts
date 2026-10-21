@@ -12,6 +12,7 @@ type ElectronHost = {
   openExternal: (url: string) => void
   revealInFinder: (path: string) => void
   focusWindow: () => Promise<void>
+  setAppearance: (appearance: 'dark' | 'light') => void
   onNotificationClick: (handler: (workspace: string | null, session: string | null) => void) => void
   showNotification: (
     title: string,
@@ -25,6 +26,14 @@ const electron: ElectronHost | undefined =
   typeof window !== 'undefined'
     ? (window.__SOROMI_ELECTRON__ as ElectronHost | undefined)
     : undefined
+
+/**
+ * Tells the shell the app's appearance, so its window opens in that color next time and its native
+ * parts (menus, dialogs) match. Nothing to do in a browser.
+ */
+export function setAppearance(appearance: 'dark' | 'light') {
+  electron?.setAppearance(appearance)
+}
 
 /** Opens a URL in the user's browser, falling back to a new tab in the browser. */
 export function openExternal(url: string) {

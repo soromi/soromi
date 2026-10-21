@@ -25,7 +25,7 @@ import type { PaneProps } from '../types'
 export const TerminalPane = (props: PaneProps) => {
   const styles = useThemedStyles(makeStyles)
   const insets = useSafeAreaInsets()
-  const terminal = useTerminal(props.session, props.shell)
+  const terminal = useTerminal(props.session)
 
   // Clear of the home indicator.
   const inset = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom])

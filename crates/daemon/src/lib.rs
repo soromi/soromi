@@ -4,10 +4,12 @@
 //! layout so the two can be diffed during the migration.
 
 pub mod accounts;
+pub mod cli;
 pub mod config;
 pub mod files;
 pub mod home;
 pub mod hooks;
+pub mod instance;
 pub mod keep_awake;
 pub mod notifications;
 pub mod pairing;

@@ -1,1 +1,2 @@
-export type ColorScheme = 'dark'
+/** The app's appearance. */
+export type ColorScheme = 'dark' | 'light'

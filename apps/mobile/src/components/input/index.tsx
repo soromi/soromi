@@ -17,6 +17,7 @@ export const Input = ({ mono = false, bare = false, ...props }: Props) => {
   return (
     <TextInput
       placeholderTextColor={theme.text.muted}
+      keyboardAppearance={theme.scheme}
       {...props}
       style={[
         styles.base,

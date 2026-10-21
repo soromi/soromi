@@ -122,6 +122,15 @@ a skill, and answer permission prompts with a tap.
 > [`apps/mobile/README.md`](apps/mobile/README.md#push-notifications). Without them the app works
 > and notifies only while it is open.
 
+The daemon also runs on its own on a Linux server, with no desktop. One line in an SSH session
+installs it, runs it as a service and shows the QR code to pair the phone:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/soromi/soromi/main/scripts/install.sh | sh
+```
+
+See [`docs/server.md`](docs/server.md).
+
 Control is exclusive and hands off cleanly. One device drives the terminals at a time: it types and
 its window decides their size. Every other device keeps watching live, read-only, and takes over
 with one explicit action, so two devices never fight over the same terminal.
@@ -138,6 +147,9 @@ middle can read your session:
 - **🚪 No open ports.** The daemon *dials out* to the relay; it never listens for inbound
   connections. Nothing on your machine is exposed to the internet, so there's no port to scan or
   firewall to open.
+- **🔐 A locked local port.** The desktop app and the `soromi` commands reach the daemon on
+  `localhost` with a token only your user can read, so another account on the machine, or a web
+  page open in your browser, can't drive it.
 - **🎟️ Relay access key never leaves the daemon.** The relay is gated by an access key so randoms
   can't abuse it, but that key lives only in the daemon (config / `SOROMI_RELAY_ACCESS_KEY` /
   Settings) and is sent as a WebSocket header when dialing, never in a URL. Only the daemon can
@@ -150,10 +162,11 @@ middle can read your session:
   the device) and still see nothing, because the session is end-to-end encrypted.
 - **🔑 No downgrade.** An invalid or missing key is refused rather than silently falling back to
   plaintext. Plaintext relay exists only for local development.
-- **🏠 Self-hostable.** Point the relay URL at your own infrastructure from Settings (or
-  `~/.soromi/config.json`), no rebuild required. The relay is a small, separate,
-  content-blind service you can run yourself; public builds create rooms on the public relay with
-  zero config, while self-hosters set their own access key on the relay and in Settings.
+- **☁️ Close to you, on Cloudflare.** The relay is a small Cloudflare Worker
+  ([`packages/relay`](packages/relay)): each room runs near the daemon that opened it, and both
+  ends connect through their nearest Cloudflare location. Deploy it to your own account and point
+  the relay URL at it from Settings (or `~/.soromi/config.json`), no rebuild required, with your
+  own access key on the Worker and in Settings.
 
 ## Why?
 

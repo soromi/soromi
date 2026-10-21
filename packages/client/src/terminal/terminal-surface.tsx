@@ -1,7 +1,7 @@
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { Terminal } from '@xterm/xterm'
+import { type ITheme, Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import clsx from 'clsx'
 import { useEffect, useRef } from 'react'
@@ -19,9 +19,9 @@ interface TerminalSurfaceProps {
   transport: Transport
   session: string
   active: boolean
-  /** Terminal colors, supplied by the host so the engine stays theme-agnostic. */
-  background: string
-  foreground: string
+  /** Terminal colors, supplied by the host so the engine stays theme-agnostic. A change (the app
+   * switched appearance) is applied to the terminal as it stands. */
+  theme: ITheme
   /** Font size in px. Hosts can shrink it to fit more columns in a narrow pane. Defaults to 13. */
   fontSize?: number
 }
@@ -39,8 +39,7 @@ export function TerminalSurface({
   transport,
   session,
   active,
-  background,
-  foreground,
+  theme,
   fontSize = 13,
 }: TerminalSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -49,6 +48,10 @@ export function TerminalSurface({
   // Whether this viewport controls the terminals: when it gains control it must re-fit and claim
   // the size (until then the pane showed the terminal at the size of whoever was in control).
   const inControl = useClientStore((s) => s.controlHolder === null)
+  // The colors a new terminal starts with; a change after that is applied below, in place, so
+  // switching appearance keeps the scrollback.
+  const themeRef = useRef(theme)
+  themeRef.current = theme
 
   useEffect(() => {
     const container = containerRef.current
@@ -62,7 +65,7 @@ export function TerminalSurface({
       // Cap scrollback per terminal; parked tabs each keep their own buffer, so this bounds memory.
       // The daemon keeps the real history, so this is only how far back this viewport can scroll.
       scrollback: 1000,
-      theme: { background, foreground },
+      theme: themeRef.current,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -154,7 +157,13 @@ export function TerminalSurface({
       termRef.current = null
       fitRef.current = null
     }
-  }, [transport, session, background, foreground, fontSize])
+  }, [transport, session, fontSize])
+
+  // The app switched appearance: the terminal takes the new colors as it stands.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.theme = theme
+  }, [theme])
 
   // A terminal that is only being watched takes no keystrokes.
   useEffect(() => {

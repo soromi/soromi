@@ -31,6 +31,7 @@ export const CardRow = (props: CardRowProps) => {
           key={getSessionKey(session)}
           session={session}
           peers={props.peers}
+          now={props.now}
           onMenu={props.onMenu}
         />
       ))}

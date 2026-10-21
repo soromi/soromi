@@ -6,4 +6,9 @@ import type { Status } from "./Status";
  * `status` reuses the agent statuses (`thinking` = running, `done` = finished, `blocked` = errored).
  * `started_at` is the Unix-seconds timestamp it began, so viewers can show a live elapsed time.
  */
-export type SubAgent = { name: string, status: Status, started_at: number | null, };
+export type SubAgent = { 
+/**
+ * What a viewport asks for its log by (`WatchAgent`): the tool call that started it, or the
+ * id its provider gave it. Absent when neither is known.
+ */
+id?: string, name: string, status: Status, started_at: number | null, };

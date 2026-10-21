@@ -10,7 +10,7 @@ import type { SubAgent } from '@soromi/protocol'
 const DOT: Record<string, string> = {
   thinking: 'bg-[var(--soromi-warn)]',
   'waiting-input': 'bg-[var(--soromi-warn)]',
-  blocked: 'bg-[#e08585]',
+  blocked: 'bg-[var(--soromi-danger-soft)]',
   done: 'bg-[var(--soromi-accent)]',
   idle: 'bg-[var(--soromi-text-faint)]',
 }
@@ -54,9 +54,18 @@ const Chevron = ({ open }: { open: boolean }) => (
 /**
  * The "N agents working in the background" panel shown over the chat composer while the agent has
  * live sub-agents (`Task` calls). Collapsed by default; expands to a list of each sub-agent with its
- * elapsed time. `onStop` interrupts the turn (stopping the background work).
+ * elapsed time. `onStop` interrupts the turn (stopping the background work). With `onOpen`, a
+ * sub-agent whose log can be asked for (it has an `id`) opens it on a click.
  */
-export function AgentsPanel({ subagents, onStop }: { subagents: SubAgent[]; onStop?: () => void }) {
+export function AgentsPanel({
+  subagents,
+  onStop,
+  onOpen,
+}: {
+  subagents: SubAgent[]
+  onStop?: () => void
+  onOpen?: (agent: SubAgent) => void
+}) {
   const [open, setOpen] = useState(false)
   const now = useNowSeconds(subagents.length > 0)
 
@@ -81,7 +90,7 @@ export function AgentsPanel({ subagents, onStop }: { subagents: SubAgent[]; onSt
           <button
             type="button"
             onClick={onStop}
-            className="cursor-pointer appearance-none rounded-lg border border-[var(--soromi-border)] bg-transparent px-3 py-1.5 font-medium text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[#e08585] hover:text-[#e08585]"
+            className="cursor-pointer appearance-none rounded-lg border border-[var(--soromi-border)] bg-transparent px-3 py-1.5 font-medium text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[var(--soromi-danger-soft)] hover:text-[var(--soromi-danger-soft)]"
           >
             Stop
           </button>
@@ -90,25 +99,37 @@ export function AgentsPanel({ subagents, onStop }: { subagents: SubAgent[]; onSt
 
       {open && (
         <div className="flex flex-col rounded-[12px] border border-[var(--soromi-border)] px-4 py-1.5">
-          {subagents.map((agent, index) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: sub-agents have no stable id; order is stable per turn.
-              key={index}
-              className="flex items-center gap-3 py-2.5"
-            >
-              <span
-                className={cn('h-2 w-2 flex-none rounded-full', DOT[agent.status] ?? DOT.thinking)}
-              />
-              <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--soromi-text)]">
-                {agent.name}
-              </span>
-              {agent.started_at != null && (
-                <span className="flex-none text-[13px] text-[var(--soromi-text-faint)] tabular-nums">
-                  {formatElapsed(now - agent.started_at)}
+          {subagents.map((agent, index) => {
+            const opens = Boolean(onOpen && agent.id)
+            return (
+              <button
+                type="button"
+                key={agent.id ?? `at-${index}`}
+                disabled={!opens}
+                onClick={() => onOpen?.(agent)}
+                title={opens ? 'Show what this agent is doing' : undefined}
+                className={cn(
+                  '-mx-2 flex appearance-none items-center gap-3 rounded-lg border-none bg-transparent px-2 py-2.5 text-left',
+                  opens ? 'cursor-pointer hover:bg-[var(--soromi-bg-hover)]' : 'cursor-default',
+                )}
+              >
+                <span
+                  className={cn(
+                    'h-2 w-2 flex-none rounded-full',
+                    DOT[agent.status] ?? DOT.thinking,
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--soromi-text)]">
+                  {agent.name}
                 </span>
-              )}
-            </div>
-          ))}
+                {agent.started_at != null && (
+                  <span className="flex-none text-[13px] text-[var(--soromi-text-faint)] tabular-nums">
+                    {formatElapsed(now - agent.started_at)}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

@@ -307,12 +307,12 @@ function statusColor(letter: string): string {
     case 'A':
       return 'text-[var(--soromi-ok)]'
     case 'D':
-      return 'text-[#f47070]'
+      return 'text-[var(--soromi-danger)]'
     case 'M':
-      return 'text-[#e0b341]'
+      return 'text-[var(--soromi-amber)]'
     case 'R':
     case 'C':
-      return 'text-[#6b93d6]'
+      return 'text-[var(--soromi-info)]'
     default:
       return 'text-[var(--soromi-text-faint)]'
   }

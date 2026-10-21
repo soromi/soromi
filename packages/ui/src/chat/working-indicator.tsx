@@ -43,9 +43,12 @@ function useElapsed(since: number | null | undefined): number {
 export function WorkingIndicator({
   since,
   tokens,
+  interruptible = true,
 }: {
   since?: number | null
   tokens?: number | null
+  /** Whether Esc stops this work from where it is shown (not from a read-only agent log). */
+  interruptible?: boolean
 }) {
   const word = useWorkingWord()
   const elapsed = useElapsed(since)
@@ -64,9 +67,11 @@ export function WorkingIndicator({
           · ↓ {formatTokens(tokens)} tokens
         </span>
       )}
-      <span className="text-[var(--soromi-text-faint)]">
-        · <kbd className="font-sans">esc</kbd> to interrupt
-      </span>
+      {interruptible && (
+        <span className="text-[var(--soromi-text-faint)]">
+          · <kbd className="font-sans">esc</kbd> to interrupt
+        </span>
+      )}
     </div>
   )
 }

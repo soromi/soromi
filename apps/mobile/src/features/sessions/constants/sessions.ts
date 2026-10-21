@@ -8,6 +8,7 @@ export const SESSIONS: SessionsConfig = {
     blocked: 'Needs attention',
     done: 'Finished',
   },
+  separator: ' · ',
   modes: {
     chat: 'Chat',
     terminal: 'Terminal',
@@ -23,6 +24,29 @@ export const SESSIONS: SessionsConfig = {
   group: {
     open: 'Show sessions',
     close: 'Hide sessions',
+    settings: 'Workspace settings',
+    more: 'More for this workspace',
+  },
+  count: { none: 'No sessions', one: 'session', many: 'sessions' },
+  home: {
+    attention: 'Needs you',
+    workspaces: 'Workspaces',
+    open: 'Opens its sessions',
+  },
+  attention: { statuses: ['blocked', 'waiting-input', 'done'] },
+  workspace: {
+    sessions: 'Sessions',
+    empty: 'No sessions yet. Start one above.',
+    missing: 'This workspace is no longer on your computer.',
+  },
+  earlier: {
+    label: 'Earlier conversations',
+    hint: 'Carry on one this workspace had before',
+  },
+  usage: {
+    label: 'Usage',
+    hint: 'How much of their plans the agents have used',
+    tones: { room: 'body', filling: 'warn', full: 'danger' },
   },
   create: {
     label: 'New session',
@@ -32,6 +56,8 @@ export const SESSIONS: SessionsConfig = {
   },
   menu: {
     rename: 'Rename',
+    switchTo: { chat: 'Switch to chat', terminal: 'Switch to terminal' },
+    switchHint: 'It restarts in the other mode on your computer, and the conversation carries on.',
     renameHint: 'Leave it empty to go back to the account’s name.',
     title: 'Session name',
     save: 'Save',

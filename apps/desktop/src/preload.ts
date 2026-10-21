@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('__SOROMI_ELECTRON__', {
     void ipcRenderer.invoke('reveal', target)
   },
   focusWindow: (): Promise<void> => ipcRenderer.invoke('focus-window'),
+  setAppearance: (appearance: 'dark' | 'light'): void => {
+    void ipcRenderer.invoke('set-appearance', appearance)
+  },
   showNotification: (
     title: string,
     body: string,

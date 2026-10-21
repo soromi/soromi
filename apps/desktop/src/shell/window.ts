@@ -3,12 +3,28 @@
 // shared frontend expects.
 
 import * as path from 'node:path'
-import { app, BrowserWindow, nativeImage } from 'electron'
+import { app, BrowserWindow, nativeImage, nativeTheme, shell } from 'electron'
+import { backgroundFor, loadAppearance } from './appearance'
+import { type DaemonLink, daemonUrl } from './daemon'
 import { isQuitting } from './lifecycle'
 import { APP_ICON } from './paths'
 import { loadRenderer } from './serve'
+import { loadWindowState, trackWindowState } from './window-state'
 
 let mainWindow: BrowserWindow | null = null
+
+/** What a link may hand to the system: web pages and mail. Nothing that opens a local file or runs
+ * an app. */
+const EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
+
+/** Opens a link in the user's default browser (or mail app), if it is one that belongs there. */
+function openInBrowser(url: string): void {
+  try {
+    if (EXTERNAL_SCHEMES.has(new URL(url).protocol)) void shell.openExternal(url)
+  } catch {
+    // Not a URL at all: nothing to open.
+  }
+}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
@@ -23,12 +39,17 @@ export function showMainWindow(): void {
 }
 
 /** Creates the main window, wires its lifecycle, and loads the renderer pointed at the daemon. */
-export function createMainWindow(daemonPort: number): BrowserWindow {
+export function createMainWindow(daemon: DaemonLink): BrowserWindow {
+  // Opens as it was left; the first time, filling the screen (from a centered 1200x800, which is
+  // what un-maximizing it then returns to).
+  const state = loadWindowState()
+  // In the appearance last chosen, so a light app does not open on a dark window.
+  const appearance = loadAppearance()
+  nativeTheme.themeSource = appearance
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    ...(state.bounds ?? { width: 1200, height: 800 }),
     show: false,
-    backgroundColor: '#09090a',
+    backgroundColor: backgroundFor(appearance),
     // Unified title bar: traffic lights overlay our own top bar, native title hidden. The frontend
     // already insets its top bar on macOS (isMac -> pl-[76px]).
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -45,7 +66,7 @@ export function createMainWindow(daemonPort: number): BrowserWindow {
       nodeIntegration: false,
       // Passed to the preload via process.argv so it can expose them before any page script runs.
       additionalArguments: [
-        `--soromi-daemon-url=ws://localhost:${daemonPort}`,
+        `--soromi-daemon-url=${daemonUrl(daemon)}`,
         `--soromi-version=${app.getVersion()}`,
       ],
     },
@@ -60,9 +81,20 @@ export function createMainWindow(daemonPort: number): BrowserWindow {
     }
   })
 
-  // A file dropped outside the composer's dropzone would otherwise navigate the window to that file.
-  // Block navigations — the SPA never navigates; external links open via the shell.
-  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
+  // A link the page opens in a new window (a chat message's links do) goes to the user's default
+  // browser: the app never opens windows of its own for the web.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openInBrowser(url)
+    return { action: 'deny' }
+  })
+
+  // The SPA never navigates, so every navigation is blocked: a file dropped outside the composer's
+  // dropzone would otherwise replace the app with that file. A link that would have navigated the
+  // window opens in the browser instead.
+  mainWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault()
+    openInBrowser(event.url)
+  })
 
   // The frontend marks draggable regions with `data-drag-region`; under Electron dragging is a
   // CSS concern, so map that attribute to the app-region and keep interactive children clickable.
@@ -74,8 +106,12 @@ export function createMainWindow(daemonPort: number): BrowserWindow {
     )
   })
 
+  trackWindowState(mainWindow)
   loadRenderer(mainWindow)
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.once('ready-to-show', () => {
+    if (state.maximized) mainWindow?.maximize()
+    mainWindow?.show()
+  })
   return mainWindow
 }
 

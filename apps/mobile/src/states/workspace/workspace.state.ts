@@ -3,9 +3,6 @@ import { repoKey } from '@soromi/core'
 //State
 import { create } from '../create'
 
-//Constants
-import { WORKSPACE } from './workspace.state.constants'
-
 //Helpers
 import {
   getDiffKey,
@@ -13,9 +10,6 @@ import {
   getParentPath,
   isWithin,
   withoutPaths,
-  getShellAfter,
-  getShellTitle,
-  newShellId,
 } from './workspace.state.helpers'
 
 //Type
@@ -25,21 +19,21 @@ import type { WorkspaceType } from './workspace.state.type'
  * What the phone has looked at inside the computer's workspaces: folder listings, opened files,
  * git status and diffs. It is a cache of the daemon's answers, filled by the link as they arrive,
  * so coming back to a folder or a file shows it at once. It also holds which workspaces are folded
- * away in the session list, for as long as the app runs, and the terminals opened from here, which
- * the computer keeps running until they are closed.
+ * away in the session list, for as long as the app runs, and which of a workspace's terminals is
+ * on screen.
  */
-export const WorkspaceStore = create<WorkspaceType>()((set, get) => ({
+export const WorkspaceStore = create<WorkspaceType>()((set) => ({
   tree: { listings: {}, expanded: {} },
   files: { contents: {}, saves: {} },
   git: { status: {}, diffs: {}, folder: {}, repos: {} },
   groups: { collapsed: {} },
-  shells: { lists: {}, active: {} },
+  renames: { to: {} },
+  shells: { active: {} },
+  browse: { listing: null },
   actions: {
-    toggleGroup: (workspace) =>
+    setCollapsed: (workspace, collapsed) =>
       set((state) => ({
-        groups: {
-          collapsed: { ...state.groups.collapsed, [workspace]: !state.groups.collapsed[workspace] },
-        },
+        groups: { collapsed: { ...state.groups.collapsed, [workspace]: collapsed } },
       })),
     setListing: (workspace, path, entries) =>
       set((state) => ({
@@ -149,43 +143,9 @@ export const WorkspaceStore = create<WorkspaceType>()((set, get) => ({
           diffs: { ...state.git.diffs, [getDiffKey(workspace, folder, path, staged)]: diff },
         },
       })),
-    setShells: (lists) => set((state) => ({ shells: { ...state.shells, lists } })),
-    openShell: (workspace, folder) => {
-      const peers = get().shells.lists[workspace] ?? []
-      const shell = {
-        id: newShellId(),
-        folder,
-        title: getShellTitle(folder, WORKSPACE.shells.root, peers),
-      }
-      set((state) => ({
-        shells: {
-          lists: { ...state.shells.lists, [workspace]: [...peers, shell] },
-          active: { ...state.shells.active, [workspace]: shell.id },
-        },
-      }))
-
-      return shell
-    },
-    closeShell: (workspace, id) =>
-      set((state) => {
-        const shells = state.shells.lists[workspace] ?? []
-        const active = { ...state.shells.active }
-        if (active[workspace] === id) {
-          const next = getShellAfter(shells, id)
-          if (next) active[workspace] = next
-          else delete active[workspace]
-        }
-
-        return {
-          shells: {
-            lists: {
-              ...state.shells.lists,
-              [workspace]: shells.filter((shell) => shell.id !== id),
-            },
-            active,
-          },
-        }
-      }),
+    setFolderListing: (listing) => set({ browse: { listing } }),
+    setRenamed: (from, to) =>
+      set((state) => ({ renames: { to: { ...state.renames.to, [from]: to } } })),
     selectShell: (workspace, id) =>
       set((state) => ({
         shells: { ...state.shells, active: { ...state.shells.active, [workspace]: id } },

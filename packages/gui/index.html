@@ -12,13 +12,28 @@
         margin: 0;
       }
       body {
-        background: #09090a;
+        /* The shell's color in either appearance (theme.css sets it), so nothing flashes dark in
+           light mode before the app draws. */
+        background: var(--soromi-bg-shell, #09090a);
         /* Light text on a dark background renders heavy with subpixel AA (everything looks bold);
            grayscale smoothing thins it so real bold stands out. */
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
+      /* The same, light, until theme.css arrives. */
+      :root.so-light body {
+        background: var(--soromi-bg-shell, #f3f3f1);
+      }
     </style>
+    <script>
+      // The appearance last chosen (the app store's `soromi.theme`), applied before anything is
+      // drawn; the app applies it again as it starts. So a light app never opens on a dark page.
+      try {
+        if (localStorage.getItem('soromi.theme') === 'light') {
+          document.documentElement.classList.add('so-light')
+        }
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

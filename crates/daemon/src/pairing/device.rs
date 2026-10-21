@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::home::soromi_home;
 
 const DEVICES_FILE: &str = "devices.json";
+/// The longest name a device is listed under; a longer one it gives itself is cut there.
+const NAME_CHARS: usize = 40;
 
 /// A paired remote device: its own relay room and end-to-end key. Persisted under `~/.soromi/`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,22 @@ impl Device {
             key: random_key(),
         }
     }
+}
+
+/// A name a device gave itself, as it is kept: one line, its spaces collapsed, nothing unprintable,
+/// at most `NAME_CHARS` characters. `None` when nothing is left of it.
+pub fn device_label(raw: &str) -> Option<String> {
+    let name: String = raw
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(NAME_CHARS)
+        .collect();
+    let name = name.trim();
+
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Loads persisted devices (empty on first run or on any read/parse error).
@@ -60,4 +78,24 @@ fn random_key() -> String {
     getrandom::getrandom(&mut buf).expect("system RNG");
 
     base64::engine::general_purpose::STANDARD.encode(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_a_device_gives_itself_is_kept_tidy() {
+        assert_eq!(device_label("Pixel 9 Pro").as_deref(), Some("Pixel 9 Pro"));
+        assert_eq!(
+            device_label("  Juan's\n  Galaxy\tS25 ").as_deref(),
+            Some("Juan's Galaxy S25")
+        );
+        assert_eq!(
+            device_label(&"x".repeat(80)).map(|name| name.len()),
+            Some(40)
+        );
+        assert_eq!(device_label("  \u{7}  "), None);
+        assert_eq!(device_label(""), None);
+    }
 }

@@ -1,20 +1,10 @@
 export const config = {
-  /** Listen port (all interfaces). */
-  port: Number(process.env.PORT ?? 8787),
   /** The header the daemon sends its access key in. */
   accessHeader: 'x-soromi-access',
-  /** Largest frame the relay will forward; real frames are small terminal I/O / E2EE blobs. */
-  maxFrameBytes: 4 * 1024 * 1024,
-  /**
-   * How much may wait to be written to one peer. A peer further behind than this is not draining
-   * its socket; it is dropped so it reconnects and starts from a fresh snapshot, and so the relay
-   * does not buffer for it without bound.
-   */
-  maxBufferedBytes: 8 * 1024 * 1024,
-  /** Ping every peer this often; drop it if the previous ping went unanswered. */
-  heartbeatMs: 30_000,
   /** Reject absurd room ids. */
   maxRoomIdLength: 128,
+  /** How the Worker tells a room which role a peer joins in, once it has decided. */
+  roleHeader: 'x-soromi-role',
 }
 
 /** Close codes the relay sends, so a peer can tell why it was turned away. */

@@ -14,17 +14,22 @@ export type { DirEntry } from './generated/DirEntry'
 export type { EntryKind } from './generated/EntryKind'
 export type { GitChange } from './generated/GitChange'
 export type { GitStatusInfo } from './generated/GitStatusInfo'
+export type { HostInfo } from './generated/HostInfo'
 export type { IncompatibleAction } from './generated/IncompatibleAction'
+export type { Launcher } from './generated/Launcher'
 export type { ModelOption } from './generated/ModelOption'
 export type { ProviderModels } from './generated/ProviderModels'
 export type { KeepAwakeMode } from './generated/KeepAwakeMode'
+export type { PastConversation } from './generated/PastConversation'
 export type { PermissionMode } from './generated/PermissionMode'
 export type { ProviderConfig } from './generated/ProviderConfig'
+export type { QueuedTurn } from './generated/QueuedTurn'
 export type { RemoteConfig } from './generated/RemoteConfig'
 export type { RemoteDefaults } from './generated/RemoteDefaults'
 export type { ServerMessage } from './generated/ServerMessage'
 export type { SessionMode } from './generated/SessionMode'
 export type { SessionSummary } from './generated/SessionSummary'
+export type { ShellSummary } from './generated/ShellSummary'
 export type { SlashCommand } from './generated/SlashCommand'
 export type { SubAgent } from './generated/SubAgent'
 export type { Skill } from './generated/Skill'
@@ -38,7 +43,7 @@ export type { WorkspaceSummary } from './generated/WorkspaceSummary'
 
 /** The wire protocol version this client speaks, announced in `hello`. Mirrors `PROTOCOL_VERSION`
  * in `crates/protocol/src/lib.rs` (a Rust test fails if the two drift). */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 /** Opcode of a binary terminal-output frame: `[TERMINAL_OUTPUT][slot, big-endian u16][utf-8]`. */
 export const TERMINAL_OUTPUT = 0x01

@@ -5,6 +5,9 @@ import { deferredFiles, useClientStore } from '@soromi/client'
 import { cn } from '@soromi/ui'
 import { ChatView, contextLimitFor } from '@soromi/ui/chat'
 
+//Store
+import { useAppStore } from '@/stores/app-store'
+
 //Components
 import { agentOptionsFor } from '@/shared/agent-options'
 import { ProviderIcon } from '@/shared/provider-icon'
@@ -46,6 +49,7 @@ export function ChatPane({
     s.workspaces.find((w) => w.sessions.some((x) => x.id === session)),
   )
   const summary = workspace?.sessions.find((x) => x.id === session)
+  const openAgent = useAppStore((s) => s.openAgent)
   // The agents this chat can switch to: only *this* workspace's real bound agents (phantom bindings
   // filtered out via the profiles) — never accounts from other workspaces. To use another provider,
   // bind it to this workspace in its settings. `list-accounts` (fired by the sidebar) loads profiles.
@@ -117,8 +121,15 @@ export function ChatPane({
         onSend={(text, files) =>
           transport.send({ type: 'chat-turn', session, text, files: files ?? [] })
         }
+        onQueue={(text, files) =>
+          transport.send({ type: 'chat-queue', session, text, files: files ?? [] })
+        }
+        queued={summary?.queued}
+        queuePaused={summary?.queuePaused}
+        onUnqueue={(id, send) => transport.send({ type: 'chat-unqueue', session, id, send })}
         onStop={() => transport.send({ type: 'chat-interrupt', session })}
         subagents={summary?.subagents ?? []}
+        onOpenAgent={(agent) => agent.id && openAgent(session, agent.id, agent.name)}
         commands={commands ?? NO_COMMANDS}
         approvals={approvals}
         onApproval={(id, allow) =>

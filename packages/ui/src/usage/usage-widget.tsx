@@ -1,3 +1,11 @@
+import {
+  usageAgentName,
+  usageFill,
+  usageManageUrl,
+  usageResets,
+  usageSoonestReset,
+  usageWindowLabel,
+} from '@soromi/core'
 import { useMemo, useState } from 'react'
 
 //Components
@@ -9,45 +17,14 @@ import { cn } from '../lib/utils'
 //Types
 import type { AgentUsage } from '@soromi/protocol'
 
-/** Per-agent brand: display name, accent color for bars/logo, and where "Manage plan" points. */
-const BRANDS: Record<
-  string,
-  { label: string; color: string; manageUrl: string; logo: 'claude' | 'codex' }
-> = {
-  claude: {
-    label: 'Claude',
-    color: '#c96442',
-    manageUrl: 'https://claude.ai/settings/usage',
-    logo: 'claude',
-  },
-  codex: {
-    label: 'Codex',
-    color: '#6b82ac',
-    manageUrl: 'https://chatgpt.com/codex/settings/usage',
-    logo: 'codex',
-  },
+/** Per-agent artwork: the accent color for bars/logo, and which logo. Names and links are core's. */
+const BRANDS: Record<string, { color: string; logo: 'claude' | 'codex' }> = {
+  claude: { color: '#c96442', logo: 'claude' },
+  codex: { color: '#6b82ac', logo: 'codex' },
 }
-
-/** Friendlier names for the rolling windows the daemon reports. */
-const WINDOW_LABELS: Record<string, string> = { '5h': 'Session · 5h', '7d': 'Weekly' }
 
 /** Fixed dot colors for the status-bar usage trigger, by position (matches the design). */
 const USAGE_DOT = ['#d97757', '#8fa2c4']
-
-/** A compact "3h 12m" until a unix-seconds instant, or empty when unknown or past. */
-function formatCountdown(resetsAt: number): string {
-  const seconds = Math.round(resetsAt - Date.now() / 1000)
-  if (seconds <= 0) return 'soon'
-
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-
-  if (days > 0) return `${days}d ${hours}h`
-  if (hours > 0) return `${hours}h ${minutes}m`
-
-  return `${minutes}m`
-}
 
 type WindowView = { key: string; label: string; percent: number; width: string }
 type AgentView = {
@@ -87,16 +64,16 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
 
         return {
           agent: usage.agent,
-          label: brand?.label ?? usage.agent,
+          label: usageAgentName(usage.agent),
           color: brand?.color ?? 'var(--soromi-accent)',
           logo: brand?.logo ?? 'claude',
           plan: usage.plan ?? null,
           note: usage.note ?? null,
           windows: usage.windows.map((window) => ({
             key: window.label,
-            label: WINDOW_LABELS[window.label] ?? window.label,
+            label: usageWindowLabel(window.label),
             percent: Math.round(window.percent),
-            width: `${Math.min(100, Math.max(0, window.percent))}%`,
+            width: `${usageFill(window.percent) * 100}%`,
           })),
         }
       }),
@@ -104,15 +81,12 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
   )
 
   const soonestReset = useMemo(() => {
-    const resets = agents.flatMap((a) =>
-      a.windows.map((w) => w.resetsAt ?? Number.POSITIVE_INFINITY),
-    )
-    const min = Math.min(...resets)
+    const at = usageSoonestReset(agents)
 
-    return Number.isFinite(min) ? formatCountdown(min) : null
+    return at === null ? null : usageResets(at, Date.now() / 1000)
   }, [agents])
 
-  const manageUrl = useMemo(() => BRANDS[agents[0]?.agent ?? '']?.manageUrl ?? null, [agents])
+  const manageUrl = useMemo(() => usageManageUrl(agents[0]?.agent ?? ''), [agents])
 
   const triggerStats = useMemo(
     () =>
@@ -153,7 +127,7 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
         {triggerStats.map((stat, i) => (
           <span
             key={stat.agent}
-            className="inline-flex items-center gap-[5px] font-semibold text-[#c6c6c6] text-xs"
+            className="inline-flex items-center gap-[5px] font-semibold text-[var(--soromi-text-dim)] text-xs"
           >
             <span
               className="h-[6px] w-[6px] rounded-full"
@@ -187,14 +161,12 @@ export function UsageWidget({ agents, loading, disabled, onRefresh, onManage }: 
           {/** biome-ignore lint/a11y/noStaticElementInteractions: click-away backdrop. */}
           {/** biome-ignore lint/a11y/useKeyWithClickEvents: click-away backdrop. */}
           <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-10 left-1 z-[61] w-80 overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-rail)] shadow-[0_20px_60px_rgb(0_0_0/50%)]">
+          <div className="absolute bottom-10 left-1 z-[61] w-80 overflow-hidden rounded-[14px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-rail)] [box-shadow:var(--soromi-shadow-float)]">
             <div className="flex items-center justify-between border-[var(--soromi-border)] border-b px-3.5 pt-[13px] pb-[11px]">
               <span className="font-semibold text-[12.5px] text-[var(--soromi-text)]">Usage</span>
               <div className="flex items-center gap-1.5">
                 {soonestReset && (
-                  <span className="text-[var(--soromi-text-faint)] text-xs">
-                    Resets in {soonestReset}
-                  </span>
+                  <span className="text-[var(--soromi-text-faint)] text-xs">{soonestReset}</span>
                 )}
                 <button
                   type="button"

@@ -1,4 +1,4 @@
-import { Paperclip, Square } from 'lucide-react'
+import { ListPlus, Paperclip, Square } from 'lucide-react'
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 //Components
@@ -25,6 +25,9 @@ export interface ComposerProps {
   working: boolean
   placeholder: string
   onSend: (text: string, files?: ChatFile[]) => void
+  /** Queues a message typed while the agent works, to be sent when its turn ends. Absent: such a
+   * message is sent at once, and steers the running turn. */
+  onQueue?: (text: string, files?: ChatFile[]) => void
   onStop?: () => void
   /** The provider's slash commands, for the `/` menu (empty hides it). */
   commands: SlashCommand[]
@@ -62,6 +65,7 @@ export function Composer({
   working,
   placeholder,
   onSend,
+  onQueue,
   onStop,
   commands,
   permissionMode,
@@ -85,8 +89,11 @@ export function Composer({
   // The `/` command menu (state + keyboard) lives in this hook; it also tracks the composer text.
   // Gated off while a turn runs so a follow-up starting with "/" isn't hijacked.
   const slash = useSlashMenu(commands, !working, write)
-  // With content, the button sends a follow-up (steers the turn); empty while working it stops.
+  // With content, the button sends a follow-up (queued, or steering the turn); empty while working
+  // it stops.
   const hasContent = !empty
+  // A message typed while the agent works waits for its turn to end, where the session can queue.
+  const queues = working && !!onQueue
 
   // Restore this session's saved draft on mount (a chat switch remounts the pane).
   useEffect(() => {
@@ -99,9 +106,10 @@ export function Composer({
     const message = richRef.current?.getMessage() ?? { text: '', files: [] }
     const text = message.text.trim()
     if (!text && message.files.length === 0) return
-    // Sending while the agent is working steers the current turn (the daemon queues the message on the
-    // agent's stdin) — it does not interrupt.
-    onSend(text, message.files)
+    // While the agent works, the message is queued for when its turn ends (`onQueue`), or, where
+    // the session cannot queue, sent at once, which steers the turn. Neither interrupts it.
+    if (queues) onQueue?.(text, message.files)
+    else onSend(text, message.files)
     slash.reset()
     richRef.current?.clear()
     if (draftKey) drafts.delete(draftKey)
@@ -117,7 +125,7 @@ export function Composer({
   }
   // The Stop button is shown whenever the agent is working — a persistent cancel that's also the
   // clearest "it's busy" signal right where you're typing (the transcript's working indicator is easy
-  // to miss). Send stays available so a typed follow-up can still steer the running turn.
+  // to miss). Send stays available so a typed follow-up can be queued (or steer the running turn).
   const showStop = working && !!onStop
   const showSend = !working || hasContent
 
@@ -135,7 +143,15 @@ export function Composer({
         <RichTextInput
           ref={richRef}
           disabled={disabled}
-          placeholder={disabled ? disabledLabel : working ? 'Send a follow-up…' : placeholder}
+          placeholder={
+            disabled
+              ? disabledLabel
+              : queues
+                ? 'Queue a follow-up for when it finishes…'
+                : working
+                  ? 'Send a follow-up…'
+                  : placeholder
+          }
           onSubmit={submit}
           onChange={({ text, empty: isEmpty }) => {
             setEmpty(isEmpty)
@@ -189,7 +205,7 @@ export function Composer({
                 type="button"
                 onClick={onStopClick}
                 title="Stop the agent (Esc)"
-                className="flex size-6 flex-none cursor-pointer appearance-none items-center justify-center rounded-md border border-[var(--soromi-border)] bg-transparent text-[var(--soromi-text-dim)] transition-colors hover:border-[#e08585] hover:text-[#e08585]"
+                className="flex size-6 flex-none cursor-pointer appearance-none items-center justify-center rounded-md border border-[var(--soromi-border)] bg-transparent text-[var(--soromi-text-dim)] transition-colors hover:border-[var(--soromi-danger-soft)] hover:text-[var(--soromi-danger-soft)]"
               >
                 <Square className="size-3 fill-current" />
               </button>
@@ -201,7 +217,10 @@ export function Composer({
                 status="ready"
                 onClick={onSendClick}
                 disabled={disabled || !hasContent}
-              />
+                title={queues ? 'Queue it: sent when the agent finishes (Enter)' : undefined}
+              >
+                {queues ? <ListPlus className="size-4" /> : undefined}
+              </PromptInputSubmit>
             )}
           </div>
         </InputGroupAddon>

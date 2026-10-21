@@ -9,7 +9,7 @@ import { StatusDot, Text } from '@/components'
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Helpers
-import { getSessionDetail } from '../helpers'
+import { getSessionLine } from '../helpers'
 
 //Hooks
 import { useSessionItem } from '../hooks/use-session-item'
@@ -27,14 +27,16 @@ export const SessionRow = (props: RowProps) => {
   const session = props.session
   const item = useSessionItem(session, props.peers, props.onMenu)
   const active = props.active
+  const flush = props.flush
 
   const getStyle = useCallback(
     (state: PressableStateCallbackType) => [
       styles.row,
+      flush && styles.flush,
       active && styles.active,
       state.pressed && styles.pressed,
     ],
-    [styles, active],
+    [styles, flush, active],
   )
 
   return (
@@ -50,7 +52,7 @@ export const SessionRow = (props: RowProps) => {
           {item.name}
         </Text>
         <Text variant="bodySm" tone="muted" numberOfLines={1}>
-          {getSessionDetail(session)}
+          {getSessionLine(session, props.now)}
         </Text>
       </View>
     </Pressable>
@@ -67,6 +69,7 @@ const makeStyles = defineStyles((theme) => ({
     paddingRight: theme.spacing.md,
     paddingVertical: theme.spacing.sm2,
   },
+  flush: { paddingLeft: theme.spacing.md },
   pressed: { backgroundColor: theme.surface.raised },
   active: { backgroundColor: theme.surface.raised },
   text: { flex: 1, gap: theme.spacing.xxs },

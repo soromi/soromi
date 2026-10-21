@@ -2,13 +2,20 @@ import { useEffect, useState } from 'react'
 
 //Packages
 import { useTransport } from '@soromi/client'
-import { Button, Input, Label, Switch } from '@soromi/ui'
+import { Switch } from '@soromi/ui'
 
-//Styles
-import { CARD, DESC, H2, SECTION, SECTION_HEAD } from './styles'
+//Components
+import {
+  SETTINGS_FIELD,
+  SETTINGS_PRIMARY,
+  SettingsGroup,
+  SettingsPage,
+  SettingsRow,
+} from './layout'
 
 /**
- * Remote (self-host) settings: the relay paired phones connect through. Local-link only.
+ * Remote settings: the relay paired phones connect through (a Cloudflare Worker of your own, or
+ * the default). Local-link only.
  * Editable at runtime so a bundled app never needs a rebuild to point at a different relay.
  * Reads the current values on mount and applies changes live on the daemon.
  */
@@ -45,6 +52,7 @@ export function RemoteSettings() {
       type: 'set-remote-config',
       config: { relayUrl: relayUrl.trim(), accessKey: accessKey.trim(), direct },
     })
+    setStored({ relayUrl: relayUrl.trim(), accessKey: accessKey.trim() })
     setSaved(true)
   }
   // Applied at once, with the relay settings as the daemon has them: it is a switch, not a field
@@ -58,65 +66,71 @@ export function RemoteSettings() {
     setSaved(false)
   }
 
+  const dirty = relayUrl.trim() !== stored.relayUrl || accessKey.trim() !== stored.accessKey
+
   return (
-    <section className={SECTION}>
-      <div className={SECTION_HEAD}>
-        <div>
-          <h2 className={H2}>Remote</h2>
-          <p className={DESC}>
-            How paired phones reach this computer: directly when they share a network with it, and
-            through the relay otherwise. Fill in the relay fields only to self-host it; left blank,
-            they use the defaults shown.
-          </p>
-        </div>
-      </div>
+    <SettingsPage
+      title="Remote"
+      description="How paired phones reach this computer: straight to it on a network they share, and through the relay from anywhere else. End-to-end encrypted either way."
+    >
+      <SettingsGroup label="Nearby">
+        <SettingsRow
+          title="Connect directly on the same network"
+          description="A phone on this computer's Wi-Fi or VPN skips the relay, and goes back to it when it leaves. Opens a port while a phone is paired."
+          control={
+            <Switch
+              id="direct-access"
+              checked={direct}
+              onCheckedChange={toggleDirect}
+              aria-label="Connect directly on the same network"
+            />
+          }
+        />
+      </SettingsGroup>
 
-      <div className={CARD}>
-        <div className="flex items-center justify-between gap-4 p-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="direct-access">Connect directly on the same network</Label>
-            <p className="text-xs text-muted-foreground">
-              A paired phone on this computer's Wi-Fi or VPN talks to it straight, without the
-              relay, and goes back to the relay when it leaves. The link is end-to-end encrypted
-              either way. Opens a port on this computer while a phone is paired.
-            </p>
-          </div>
-          <Switch id="direct-access" checked={direct} onCheckedChange={toggleDirect} />
+      <SettingsGroup
+        label="Relay"
+        hint="Leave these empty to use the defaults shown. The access key must match your relay Worker's RELAY_ACCESS_KEY secret; only this computer presents it, and phones never see it."
+      >
+        <SettingsRow
+          title="Relay URL"
+          description="Phones that move to it are told when they next connect."
+          control={
+            <input
+              id="relay-url"
+              aria-label="Relay URL"
+              className={SETTINGS_FIELD}
+              placeholder={defaults.relayUrl}
+              value={relayUrl}
+              onChange={(event) => edit(setRelayUrl)(event.target.value)}
+            />
+          }
+        />
+        <SettingsRow
+          title="Access key"
+          description="What lets this computer open rooms on the relay."
+          control={
+            <input
+              id="access-key"
+              type="password"
+              aria-label="Relay access key"
+              autoComplete="off"
+              className={SETTINGS_FIELD}
+              placeholder={defaults.accessKey ? '••••••' : ''}
+              value={accessKey}
+              onChange={(event) => edit(setAccessKey)(event.target.value)}
+            />
+          }
+        />
+        <div className="flex items-center justify-end gap-3 px-4 py-2.5">
+          {saved && !dirty && (
+            <span className="text-[12px] text-[var(--soromi-accent)]">Saved</span>
+          )}
+          <button type="button" className={SETTINGS_PRIMARY} disabled={!dirty} onClick={save}>
+            Save
+          </button>
         </div>
-      </div>
-
-      <div className={CARD}>
-        <div className="p-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="relay-url">Relay URL</Label>
-              <Input
-                id="relay-url"
-                placeholder={defaults.relayUrl}
-                value={relayUrl}
-                onChange={(event) => edit(setRelayUrl)(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="access-key">Relay access key</Label>
-              <Input
-                id="access-key"
-                placeholder={defaults.accessKey}
-                value={accessKey}
-                onChange={(event) => edit(setAccessKey)(event.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Must match the relay's RELAY_ACCESS_KEY. Only your daemon presents it; paired phones
-                never see it.
-              </p>
-            </div>
-            <div className="mt-1 flex items-center gap-3">
-              <Button onClick={save}>Save</Button>
-              {saved && <span className="text-[13px] text-[var(--soromi-accent)]">Saved</span>}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+      </SettingsGroup>
+    </SettingsPage>
   )
 }

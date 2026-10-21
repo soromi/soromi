@@ -2,7 +2,7 @@
 import type { SegmentedOption } from '@/components'
 
 //Type
-import type { Shell } from '@/states/workspace/workspace.state.type'
+import type { ShellSummary } from '@soromi/protocol'
 
 /** How a session that runs in a terminal is shown: what was said in it, or the terminal itself. */
 export type TerminalView = 'conversation' | 'terminal'
@@ -16,18 +16,9 @@ export type TerminalKey = {
   data: string
 }
 
-/** Where a plain shell runs: what the daemon needs to start it. */
-export type ShellSpot = {
-  workspace: string
-  /** Relative to the workspace; `''` is its root. */
-  folder: string
-}
-
 export type PaneProps = {
   /** A session's id, or a shell's. */
   session: string
-  /** For a shell opened from here, which the daemon starts when it does not have it. */
-  shell?: ShellSpot
 }
 
 export type ShellsProps = {
@@ -35,11 +26,19 @@ export type ShellsProps = {
 }
 
 export type ShellTabProps = {
-  shell: Shell
+  shell: ShellSummary
   /** The one on screen: it is marked, and is the one that can be closed. */
   active: boolean
   onSelect: (id: string) => void
   onClose: (id: string) => void
+  /** On a long press: to give it another name. */
+  onRename: (id: string) => void
+}
+
+export type RenameShellProps = {
+  /** The terminal being renamed; `null` while none is. */
+  target: ShellSummary | null
+  onClose: () => void
 }
 
 export type NewShellProps = {
@@ -82,6 +81,13 @@ export type TerminalConfig = {
     /** What the button that opens one does, for a screen reader. */
     add: string
     close: string
+    /** Over the box a terminal's new name is typed in. */
+    rename: string
+    /** What a long press on one does, for a screen reader. */
+    renameHint: string
+    /** In that box, while it is empty. */
+    name: string
+    save: string
     /** Over the folders a new one can start in. */
     pick: string
     /** What the top of the workspace is called among them. */

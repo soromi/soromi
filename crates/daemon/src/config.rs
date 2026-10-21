@@ -28,7 +28,7 @@ pub fn direct_port() -> u16 {
 }
 
 /// The relay to dial when a config value / env var is unset (Soromi's hosted relay).
-const DEFAULT_RELAY_URL: &str = "wss://relay.soromi.dev";
+const DEFAULT_RELAY_URL: &str = "wss://relay-worker.soromi.dev";
 /// The relay access key when unset: the one Soromi's hosted relay is run with. It ships in every
 /// build, so it is not a secret and keeps nobody out of that relay; self-hosters set their own (on
 /// the relay and here) so only their daemons can open rooms.
@@ -71,11 +71,33 @@ fn resolve(stored: &str, env: &str, default: &str) -> String {
 
 /// The relay to dial for devices. Config file (`relayUrl`) > `SOROMI_RELAY_URL` > default.
 pub fn relay_url() -> String {
-    resolve(
+    relay_address(&resolve(
         &load_config().relay_url,
         "SOROMI_RELAY_URL",
         DEFAULT_RELAY_URL,
-    )
+    ))
+}
+
+/// A relay as it is dialed and put in pairing codes, which a phone only takes as a `wss://` (or
+/// `ws://`) address. One typed as a bare host (`relay.example.com`) is taken as `wss://`, and a web
+/// address as the WebSocket one on the same host (`https://` as `wss://`); a trailing slash goes.
+/// Empty stays empty: not set.
+pub fn relay_address(raw: &str) -> String {
+    let value = raw.trim().trim_end_matches('/');
+    if value.is_empty() || value.starts_with("wss://") || value.starts_with("ws://") {
+        return value.to_string();
+    }
+    if let Some(host) = value.strip_prefix("https://") {
+        return format!("wss://{host}");
+    }
+    if let Some(host) = value.strip_prefix("http://") {
+        return format!("ws://{host}");
+    }
+    if value.contains("://") {
+        // Another kind of address altogether: kept as typed, for the settings screen to show.
+        return value.to_string();
+    }
+    format!("wss://{value}")
 }
 
 /// The relay access key the daemon presents to create a room. Config file (`accessKey`) >
@@ -113,7 +135,7 @@ pub fn remote_config() -> RemoteConfig {
 /// environment, or else the built-in values.
 pub fn remote_defaults() -> RemoteDefaults {
     RemoteDefaults {
-        relay_url: resolve("", "SOROMI_RELAY_URL", DEFAULT_RELAY_URL),
+        relay_url: relay_address(&resolve("", "SOROMI_RELAY_URL", DEFAULT_RELAY_URL)),
         access_key: resolve("", "SOROMI_RELAY_ACCESS_KEY", DEFAULT_ACCESS_KEY),
     }
 }
@@ -125,7 +147,7 @@ pub fn remote_overrides() -> RemoteConfig {
     let defaults = remote_defaults();
 
     RemoteConfig {
-        relay_url: override_of(&stored.relay_url, &defaults.relay_url),
+        relay_url: override_of(&relay_address(&stored.relay_url), &defaults.relay_url),
         access_key: override_of(&stored.access_key, &defaults.access_key),
         direct: direct_enabled(),
     }
@@ -147,7 +169,7 @@ fn override_of(value: &str, fallback: &str) -> String {
 pub fn set_remote_config(config: &RemoteConfig) -> std::io::Result<RemoteConfig> {
     let defaults = remote_defaults();
     let stored = StoredConfig {
-        relay_url: override_of(&config.relay_url, &defaults.relay_url),
+        relay_url: override_of(&relay_address(&config.relay_url), &defaults.relay_url),
         access_key: override_of(&config.access_key, &defaults.access_key),
         direct: Some(config.direct),
     };
@@ -166,14 +188,45 @@ mod tests {
     #[test]
     fn a_setting_that_repeats_its_default_is_not_an_override() {
         assert_eq!(
-            override_of("wss://relay.soromi.dev", "wss://relay.soromi.dev"),
+            override_of(
+                "wss://relay-worker.soromi.dev",
+                "wss://relay-worker.soromi.dev"
+            ),
             ""
         );
         assert_eq!(
-            override_of(" wss://mine.example ", "wss://relay.soromi.dev"),
+            override_of(" wss://mine.example ", "wss://relay-worker.soromi.dev"),
             "wss://mine.example"
         );
         assert_eq!(override_of("", "soromi"), "");
+    }
+
+    #[test]
+    fn a_relay_typed_without_its_scheme_is_taken_as_a_secure_websocket() {
+        assert_eq!(
+            relay_address("relay-worker.soromi.dev"),
+            "wss://relay-worker.soromi.dev"
+        );
+        assert_eq!(
+            relay_address(" https://relay.example.com/ "),
+            "wss://relay.example.com"
+        );
+        assert_eq!(relay_address("http://10.0.0.2:8787"), "ws://10.0.0.2:8787");
+        assert_eq!(relay_address("ws://localhost:8787/"), "ws://localhost:8787");
+        assert_eq!(
+            relay_address("wss://relay.example.com"),
+            "wss://relay.example.com"
+        );
+        assert_eq!(
+            relay_address("ftp://relay.example.com"),
+            "ftp://relay.example.com"
+        );
+        assert_eq!(relay_address("  "), "");
+        // Typed as a bare host, the default is no override of it.
+        assert_eq!(
+            override_of(&relay_address("relay-worker.soromi.dev"), DEFAULT_RELAY_URL),
+            ""
+        );
     }
 
     #[test]

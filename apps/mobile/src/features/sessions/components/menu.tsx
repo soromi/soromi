@@ -17,8 +17,9 @@ import { LinkService } from '@/services/link'
 import type { MenuProps } from '../types'
 
 /**
- * What a long press on a session offers: giving it a name, and closing it on the computer.
- * Renaming turns the sheet into a box to type the name in.
+ * What a long press on a session offers: giving it a name, switching it between chat and terminal
+ * (as the desktop's toggle does), and closing it on the computer. Renaming turns the sheet into a
+ * box to type the name in.
  */
 export const SessionMenu = (props: MenuProps) => {
   const styles = useThemedStyles(makeStyles)
@@ -42,6 +43,19 @@ export const SessionMenu = (props: MenuProps) => {
     onClose()
   }, [target, title, onClose])
 
+  const handleSwitch = useCallback(
+    (session: string) => {
+      onClose()
+      if (!target) return
+      LinkService.send({
+        type: 'switch-mode',
+        session,
+        mode: target.mode === 'chat' ? 'terminal' : 'chat',
+      })
+    },
+    [onClose, target],
+  )
+
   const handleCloseSession = useCallback(
     (session: string) => {
       onClose()
@@ -55,6 +69,14 @@ export const SessionMenu = (props: MenuProps) => {
       {title === null ? (
         <>
           <Option value="rename" label={SESSIONS.menu.rename} onSelect={handleRename} />
+          {target && (
+            <Option
+              value={target.id}
+              label={SESSIONS.menu.switchTo[target.mode === 'chat' ? 'terminal' : 'chat']}
+              hint={SESSIONS.menu.switchHint}
+              onSelect={handleSwitch}
+            />
+          )}
           <Option
             value={target?.id ?? ''}
             label={SESSIONS.menu.close}

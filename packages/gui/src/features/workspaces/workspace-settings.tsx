@@ -20,7 +20,7 @@ import {
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
-import { basename, deriveRootAndFolders } from '@/features/welcome/folders'
+import { basename, deriveRootAndFolders } from '@soromi/client'
 import { pickFolder } from '@/lib/host'
 
 //Constants
@@ -245,7 +245,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                   'flex cursor-pointer appearance-none items-center gap-[11px] rounded-[9px] border-none bg-transparent px-3 py-[9px] text-left font-medium text-[13.5px] transition-colors',
                   isActive
                     ? item.danger
-                      ? 'bg-[var(--soromi-bg-hover)] text-[#e08585]'
+                      ? 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-danger-soft)]'
                       : 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-text)]'
                     : 'text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
                 )}
@@ -256,7 +256,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                     'flex h-[18px] w-[18px] flex-none items-center justify-center',
                     isActive
                       ? item.danger
-                        ? 'text-[#e08585]'
+                        ? 'text-[var(--soromi-danger-soft)]'
                         : 'text-[var(--soromi-accent)]'
                       : 'text-[var(--soromi-text-faint)]',
                   )}
@@ -271,7 +271,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
 
         <div
           ref={contentRef}
-          className="mr-2 mb-2 flex-1 overflow-y-auto rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] shadow-[0_1px_2px_rgb(0_0_0/40%),0_10px_30px_rgb(0_0_0/32%)]"
+          className="mr-2 mb-2 flex-1 overflow-y-auto rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] [box-shadow:var(--soromi-shadow-panel)]"
         >
           <div className="mx-auto max-w-[720px] px-7 pt-10 pb-14">
             <header className="flex items-center gap-3.5">
@@ -314,7 +314,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                     </div>
                     <button
                       type="button"
-                      className="flex-none cursor-pointer appearance-none rounded-lg border-none bg-transparent px-2.5 py-[5px] font-medium text-[#e08585] text-[12.5px] transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] disabled:cursor-default disabled:opacity-35"
+                      className="flex-none cursor-pointer appearance-none rounded-lg border-none bg-transparent px-2.5 py-[5px] font-medium text-[var(--soromi-danger-soft)] text-[12.5px] transition-colors enabled:hover:bg-[var(--soromi-bg-hover)] disabled:cursor-default disabled:opacity-35"
                       disabled={folderPaths.length <= 1}
                       onClick={() => dropFolder(path)}
                     >
@@ -357,7 +357,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                             value={account}
                             onValueChange={(value) => value && setAccount(row.agent, index, value)}
                           >
-                            <SelectTrigger className="w-[200px] flex-none rounded-[9px] bg-[var(--soromi-bg-hover)]">
+                            <SelectTrigger className="w-[200px] flex-none rounded-[9px] bg-[var(--soromi-bg-field)]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -460,8 +460,8 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
               <div className={SECTION_HEAD}>
                 <h2 className={H2}>Danger zone</h2>
               </div>
-              <div className="overflow-hidden rounded-[14px] border border-[rgb(224_133_133/0.28)] bg-[rgb(224_133_133/0.05)]">
-                <div className="flex items-center justify-between gap-4 border-[rgb(224_133_133/0.18)] border-b px-[18px] py-4">
+              <div className="overflow-hidden rounded-[14px] border border-[color-mix(in_srgb,var(--soromi-danger-soft)_28%,transparent)] bg-[color-mix(in_srgb,var(--soromi-danger-soft)_5%,transparent)]">
+                <div className="flex items-center justify-between gap-4 border-[color-mix(in_srgb,var(--soromi-danger-soft)_18%,transparent)] border-b px-[18px] py-4">
                   <div className="min-w-0">
                     <div className="text-[13.5px] text-[var(--soromi-text-dim)]">
                       Export workspace
@@ -473,7 +473,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                   <button
                     type="button"
                     onClick={exportSpace}
-                    className="flex-none cursor-pointer appearance-none rounded-[9px] border border-[rgb(224_133_133/0.4)] bg-transparent px-[15px] py-[9px] font-semibold text-[13px] text-[#e08585] transition-colors hover:bg-[rgb(224_133_133/0.12)]"
+                    className="flex-none cursor-pointer appearance-none rounded-[9px] border border-[color-mix(in_srgb,var(--soromi-danger-soft)_40%,transparent)] bg-transparent px-[15px] py-[9px] font-semibold text-[13px] text-[var(--soromi-danger-soft)] transition-colors hover:bg-[color-mix(in_srgb,var(--soromi-danger-soft)_12%,transparent)]"
                   >
                     Export
                   </button>
@@ -490,7 +490,7 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
                   <button
                     type="button"
                     onClick={removeSpace}
-                    className="flex-none cursor-pointer appearance-none rounded-[9px] border-none bg-[#e08585] px-[15px] py-[9px] font-bold text-[13px] text-[#2a0f0f] hover:bg-[#ea9595]"
+                    className="flex-none cursor-pointer appearance-none rounded-[9px] border-none bg-[var(--soromi-danger-soft)] px-[15px] py-[9px] font-bold text-[13px] text-[var(--soromi-danger-on)] hover:bg-[var(--soromi-danger-hover)]"
                   >
                     Delete…
                   </button>
@@ -504,21 +504,21 @@ export function WorkspaceSettings({ workspace }: { workspace: string }) {
       {changed && (
         <div className="flex h-[64px] flex-none items-center justify-between gap-4 border-[var(--soromi-border-subtle)] border-t bg-[var(--soromi-bg-app)] px-[26px]">
           <span className="flex items-center gap-[9px] text-[13px] text-[var(--soromi-text-dim)]">
-            <span className="h-[7px] w-[7px] rounded-full bg-[#e0b341]" />
+            <span className="h-[7px] w-[7px] rounded-full bg-[var(--soromi-amber)]" />
             Unsaved changes
           </span>
           <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={discard}
-              className="cursor-pointer appearance-none rounded-[10px] border border-[#363636] bg-transparent px-[18px] py-[10px] font-semibold text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[#424242]"
+              className="cursor-pointer appearance-none rounded-[10px] border border-[var(--soromi-border-strong)] bg-transparent px-[18px] py-[10px] font-semibold text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[var(--soromi-text-ghost)]"
             >
               Discard
             </button>
             <button
               type="button"
               onClick={save}
-              className="cursor-pointer appearance-none rounded-[10px] border-none bg-[var(--soromi-accent)] px-[22px] py-[10px] font-bold text-[13.5px] text-[var(--soromi-accent-on)] hover:bg-[#4bdb9a]"
+              className="cursor-pointer appearance-none rounded-[10px] border-none bg-[var(--soromi-accent)] px-[22px] py-[10px] font-bold text-[13.5px] text-[var(--soromi-accent-on)] hover:bg-[var(--soromi-accent-hover)]"
             >
               Save changes
             </button>

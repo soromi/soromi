@@ -2,6 +2,8 @@
 import { assertNever } from '@/lib/assert-never'
 
 //Components
+import { AgentLogPanel } from '@/features/agents/agent-log-panel'
+import { Conversations } from '@/features/conversations/conversations'
 import { FilePreview } from '@/features/files/file-preview'
 import { DiffPreview } from '@/features/git/diff-preview'
 import { Settings } from '@/features/settings/settings'
@@ -21,12 +23,16 @@ export function OverlayScreen({ overlay }: { overlay: Overlay }) {
       return <FilePreview overlay={overlay} />
     case 'diff':
       return <DiffPreview overlay={overlay} />
+    case 'agent':
+      return <AgentLogPanel overlay={overlay} />
     case 'create-space':
       return <CreateSpaceOverlay />
     case 'settings':
       return <Settings />
     case 'workspace-settings':
       return <WorkspaceSettings workspace={overlay.workspace} />
+    case 'conversations':
+      return <Conversations workspace={overlay.workspace} />
     default:
       return assertNever(overlay)
   }

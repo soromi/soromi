@@ -185,9 +185,35 @@ pub struct AgentAccount {
     ts(export, export_to = "../../../packages/protocol/src/generated/")
 )]
 pub struct SubAgent {
+    /// What a viewport asks for its log by (`WatchAgent`): the tool call that started it, or the
+    /// id its provider gave it. Absent when neither is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub id: Option<String>,
     pub name: String,
     pub status: Status,
     pub started_at: Option<u32>,
+}
+
+/// A message waiting in a chat session's queue: typed while the agent was at work, it is sent as the
+/// next turn once the running one ends, rather than steering it. `text` is its start, for showing
+/// (the daemon keeps all of it); `files` how many attachments go with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct QueuedTurn {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u32>", optional))]
+    pub files: u32,
+}
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 /// A slash command ("action") the provider exposes for a session — Claude's `slash_commands` from
@@ -320,6 +346,80 @@ pub struct SessionSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub context_tokens: Option<u32>,
+    /// A chat session's queued messages, oldest first: each is sent as a turn of its own when the
+    /// one before it ends (`ChatQueue`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<QueuedTurn>>", optional))]
+    pub queued: Vec<QueuedTurn>,
+    /// The queue is held: the turn was stopped, so what is queued waits for the next turn to end,
+    /// or to be sent by hand, instead of going out now.
+    #[serde(
+        default,
+        rename = "queuePaused",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[cfg_attr(
+        feature = "ts",
+        ts(as = "Option<bool>", optional, rename = "queuePaused")
+    )]
+    pub queue_paused: bool,
+    /// When its status last changed (a turn started or ended, a request came up), in Unix
+    /// seconds: how long ago it was last at work. Absent until it first changes after the daemon
+    /// starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub updated: Option<u32>,
+}
+
+/// A plain shell open in a workspace (its Terminal tab), as every viewport shows it. The daemon
+/// keeps the list, so a terminal opened on one device is there on the others; it ends when it is
+/// closed, when its shell exits, or when the daemon stops.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ShellSummary {
+    /// The PTY id (`shell:<uuid>`), attached to like any session.
+    pub id: String,
+    /// Workspace-relative folder it started in ("" = the root).
+    pub folder: String,
+    pub title: String,
+    /// The paired device that opened it; absent for the app on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub opened_by: Option<String>,
+}
+
+/// A conversation an agent of a workspace kept on disk, as the list of earlier ones shows it
+/// (`ListConversations`): what can be picked up again where it stopped (`ResumeConversation`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct PastConversation {
+    /// The agent's own id for it.
+    pub id: String,
+    /// The agent and the account of the workspace's it was had under.
+    pub agent: String,
+    pub account: String,
+    /// The name it was given, or else the start of its first prompt.
+    pub title: String,
+    /// The start of the last thing asked in it, when that is not its first prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub last_prompt: Option<String>,
+    /// When it was last added to, in Unix seconds.
+    pub updated: u32,
+    /// The tab of the workspace's that already shows it, when one does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub session: Option<String>,
 }
 
 /// Rail-facing summary of a workspace. `status` is the aggregate of its sessions.
@@ -337,6 +437,15 @@ pub struct WorkspaceSummary {
     pub folders: Vec<String>,
     pub accounts: Vec<AgentAccount>,
     pub sessions: Vec<SessionSummary>,
+    /// The workspace's open shells, oldest first. Absent when there are none, and from a daemon
+    /// older than the list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<ShellSummary>>", optional))]
+    pub shells: Vec<ShellSummary>,
+    /// Its banners are silenced (`MuteWorkspace`). Absent when they are not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub muted: bool,
     /// Extra instructions appended to the agent's system prompt for this workspace's sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
@@ -381,6 +490,39 @@ pub enum DeviceRoute {
     Direct,
     /// Through the relay, from anywhere.
     Relay,
+}
+
+/// What started the daemon, which says what kind of computer a client is connected to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum Launcher {
+    /// The Soromi desktop app, which starts its own daemon and stops it when it quits.
+    Desktop,
+    /// `soromi` (or `soromi serve`) run by hand in a terminal.
+    Cli,
+    /// A system service (systemd): the daemon of a server, running with nobody at it.
+    Service,
+}
+
+/// The computer the daemon runs on, as a client names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct HostInfo {
+    /// The computer's name: the one set in the system on a Mac ("Juan's MacBook Pro"), its
+    /// host name elsewhere.
+    pub name: String,
+    /// `macos`, `linux` or `windows`.
+    pub os: String,
+    pub launcher: Launcher,
 }
 
 /// One usage window for an agent (e.g. the 5-hour session or the weekly cap). `percent` is 0-100;
@@ -496,6 +638,11 @@ pub enum ClientMessage {
     Hello {
         protocol: u32,
         client_id: String,
+        /// What a paired device is called, as its own system names it ("Pixel 9 Pro"): the
+        /// computer lists it under that name. Absent from the desktop, and from older devices.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        device_name: Option<String>,
     },
     /// Round-trip probe: echoed back as `Pong` with the same nonce. Used to measure latency and to
     /// check that a connection is still alive.
@@ -550,7 +697,25 @@ pub enum ClientMessage {
         #[serde(default)]
         files: Vec<ChatFile>,
     },
+    /// Queue a chat turn: sent as the next turn once the running one ends, instead of steering it
+    /// (as a `ChatTurn` sent mid-turn does). Sent while the agent is idle and nothing is queued,
+    /// it goes out at once. Gated by control, like a turn.
+    ChatQueue {
+        session: String,
+        text: String,
+        #[serde(default)]
+        files: Vec<ChatFile>,
+    },
+    /// Take a message out of a chat's queue by its `QueuedTurn` id: `send` sends it now (steering a
+    /// turn that is running), otherwise it is dropped. Gated by control.
+    ChatUnqueue {
+        session: String,
+        id: String,
+        #[serde(default)]
+        send: bool,
+    },
     /// Interrupt the headless agent's current turn (the composer's stop button). Gated by control.
+    /// The session's queue is held (see `SessionSummary::queue_paused`), not sent.
     ChatInterrupt {
         session: String,
     },
@@ -579,6 +744,15 @@ pub enum ClientMessage {
     ChatCommand {
         session: String,
         command: String,
+    },
+    /// Follow one background agent's own conversation (its prompt, tool calls and replies), by the
+    /// `id` its `SubAgent` carries: replied with `AgentLog`s, the latest of it first and then what
+    /// it adds, until another agent is watched or `agent` is absent (stop). One at a time.
+    WatchAgent {
+        session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        agent: Option<String>,
     },
     /// Request the page of messages just before the `loaded` most recent the viewport already holds
     /// (the "Load earlier" button). The daemon replies with a `ChatHistory` to prepend.
@@ -616,6 +790,27 @@ pub enum ClientMessage {
     RenameSession {
         session: String,
         title: String,
+    },
+    /// The conversations a workspace's agents kept on disk for it, newest first, to pick one up
+    /// again. With `query`, only those that mention it (in their name, or in what was said).
+    /// Replied with `ConversationList`.
+    ListConversations {
+        workspace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        query: Option<String>,
+    },
+    /// Opens a tab that carries on one of those conversations where it stopped, its history
+    /// shown. `mode` is how the tab runs (absent: a chat). Replied with `SessionOpened`; for a
+    /// conversation a tab already shows, that tab.
+    ResumeConversation {
+        workspace: String,
+        conversation: String,
+        agent: String,
+        account: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        mode: Option<SessionMode>,
     },
     ListWorkspaces,
     OpenWorkspace {
@@ -657,6 +852,14 @@ pub enum ClientMessage {
         path: String,
         content: String,
     },
+    /// Lists one of the computer's folders, outside any workspace, for picking a new workspace's
+    /// folders where there is no file dialog of the computer's own (the phone): `path` absolute, or
+    /// `~/…`; absent, the home folder. Replied with `FolderListing`, or an `Error`.
+    BrowseFolders {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        path: Option<String>,
+    },
     /// Moves a file or folder of a workspace to the computer's Trash, where it can be restored from.
     /// The workspace's root and the folders it is made of are refused. Replied with `PathTrashed`,
     /// or an `Error`.
@@ -665,12 +868,18 @@ pub enum ClientMessage {
         path: String,
     },
     /// Open an ad-hoc shell PTY for a workspace, rooted at `folder` (workspace-relative; "" = root).
-    /// The client mints `shell` as `shell:<uuid>`, then `Attach`es to it like any session. These
-    /// shells are not persisted and are not workspace tabs.
+    /// The client mints `shell` as `shell:<uuid>`, then `Attach`es to it like any session. The
+    /// daemon names it and adds it to the workspace's `shells`, which every viewport shows; asked
+    /// again for a shell it already has, it does nothing. `CloseSession` closes it everywhere.
     OpenShell {
         workspace: String,
         shell: String,
         folder: String,
+    },
+    /// Renames a shell, for every viewport. An empty `title` is ignored.
+    RenameShell {
+        shell: String,
+        title: String,
     },
     /// The git working-tree status of one of a workspace's folders (read-only source-control
     /// view). `folder` is workspace-relative ("" = the root): a workspace made of several
@@ -804,10 +1013,14 @@ pub enum ClientMessage {
     ts(export, export_to = "../../../packages/protocol/src/generated/")
 )]
 pub enum ServerMessage {
-    /// Reply to `Hello`: the daemon's protocol version and its release version.
+    /// Reply to `Hello`: the daemon's protocol version, its release version, and the computer it
+    /// runs on with what started it. `host` is absent from a daemon older than it.
     Welcome {
         protocol: u32,
         version: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        host: Option<HostInfo>,
     },
     /// Reply to a `Hello` the daemon cannot serve, or to a client that skipped it. `action` says
     /// which side must update.
@@ -848,6 +1061,11 @@ pub enum ServerMessage {
         workspace: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         session: Option<String>,
+        /// The tool request it is about, when there is one to answer from the banner (allow or
+        /// deny, with `ChatApprovalResponse`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        approval: Option<String>,
     },
     SessionOpened {
         workspace: String,
@@ -873,6 +1091,15 @@ pub enum ServerMessage {
     SessionCommands {
         session: String,
         commands: Vec<SlashCommand>,
+    },
+    /// The answer to `ListConversations`: `query` as asked, so a reply to an older search is
+    /// told apart from the latest.
+    ConversationList {
+        workspace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        query: Option<String>,
+        conversations: Vec<PastConversation>,
     },
     WorkspaceOpened {
         workspace: String,
@@ -900,6 +1127,18 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         image: Option<String>,
+    },
+    /// One of the computer's folders (`BrowseFolders`): where it is (absolute), the folder it is in
+    /// (absent at the top), the home folder, the folders in it by name (no hidden ones), and
+    /// whether it holds a `soromi.space.json` to import.
+    FolderListing {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        parent: Option<String>,
+        home: String,
+        dirs: Vec<String>,
+        space_file: bool,
     },
     /// A `TrashPath` succeeded: the file or folder at `path` is in the Trash, and whatever showed it
     /// (an open file, its rows in the tree) can let it go. Its folder's listing follows as usual.
@@ -996,6 +1235,13 @@ pub enum ServerMessage {
     Routes {
         routes: Vec<String>,
     },
+    /// The relay a paired device reaches this computer through when it is not on the same network
+    /// (`wss://relay.example.com`). Sent to a device after its `Hello` and again whenever it changes
+    /// (Settings → Remote): the device keeps it in its pairing, in place of the one its pairing code
+    /// carried, so a computer that moves to another relay is still reached through it.
+    Relay {
+        url: String,
+    },
     /// Who controls the terminals right now, from this viewport's perspective. `holder` is `None`
     /// when this viewport is the controller; otherwise it names the device in control, and this
     /// viewport watches read-only (its input and resizes are ignored) until it sends
@@ -1065,6 +1311,16 @@ pub enum ServerMessage {
         session: String,
         events: Vec<ChatEvent>,
         has_more: bool,
+    },
+    /// What a watched background agent did (`WatchAgent`). With `reset`, `events` replaces what
+    /// the viewport holds (the latest of the log, `earlier` saying whether there is more before
+    /// it); otherwise they follow on. Pictures in its tool results are left out.
+    AgentLog {
+        session: String,
+        agent: String,
+        events: Vec<ChatEvent>,
+        reset: bool,
+        earlier: bool,
     },
 }
 

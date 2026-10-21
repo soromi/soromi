@@ -26,7 +26,8 @@ export const useSessionItem = (
 
   const handleOpen = useCallback(() => open(id), [open, id])
 
-  const handleLongPress = useCallback(() => onMenu({ id, name }), [onMenu, id, name])
+  const mode = session.mode
+  const handleLongPress = useCallback(() => onMenu({ id, name, mode }), [onMenu, id, name, mode])
 
   return { name, handleOpen, handleLongPress }
 }

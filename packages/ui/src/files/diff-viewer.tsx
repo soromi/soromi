@@ -55,8 +55,8 @@ function DiffRow({ row }: { row: Row }) {
     <div
       className={cn(
         'whitespace-pre px-3 leading-[1.5]',
-        row.kind === 'add' && 'bg-[#12321f] text-[var(--soromi-ok)]',
-        row.kind === 'del' && 'bg-[#3a1717] text-[#f47070]',
+        row.kind === 'add' && 'bg-[var(--soromi-diff-add-bg)] text-[var(--soromi-diff-add-text)]',
+        row.kind === 'del' && 'bg-[var(--soromi-diff-del-bg)] text-[var(--soromi-diff-del-text)]',
         row.kind === 'ctx' && 'text-[var(--soromi-text-dim)]',
       )}
     >

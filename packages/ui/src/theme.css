@@ -1,5 +1,7 @@
 /*
- * The single source of truth for the Soromi color palette. App-specific tokens (z-index ladder,
+ * The single source of truth for the Soromi color palette, in both appearances. Components never
+ * write a color of their own: every surface, text, state, shadow and syntax color is a token here,
+ * so the light appearance is one block of overrides below. App-specific tokens (z-index ladder,
  * safe-area insets) live in the app's own theme.css.
  */
 :root {
@@ -8,25 +10,93 @@
      panels), then hover, then active/borders. */
   --soromi-bg-shell: #09090a;
   --soromi-bg-app: #121213;
+  /* Floating popovers (usage, devices). */
   --soromi-bg-rail: #121213;
+  /* Cards and menus. */
   --soromi-bg-sidebar: #121213;
+  /* Fields and tiles inside a panel. */
   --soromi-bg-tab: #121213;
+  /* The floating content panel, and the terminal. */
   --soromi-bg-terminal: #121213;
   --soromi-bg-hover: #1f1f1f;
   --soromi-bg-active: #2a2a2a;
+  /* The row that is open (the sidebar's current session). */
+  --soromi-bg-selected: #1f1f1f;
+  /* Set into the panel: code blocks, a tool's output, a request waiting for an answer. */
+  --soromi-bg-inset: #2a2a2a;
+  /* The person's own messages, and inline code. */
+  --soromi-bg-bubble: #2a2a2a;
+  /* A dropdown or field that stands on its own. */
+  --soromi-bg-field: #1f1f1f;
+  --soromi-focus-ring: #3ecf8e;
   --soromi-border: #2a2a2a;
   --soromi-border-subtle: #1f1f1f;
+  --soromi-border-strong: #363636;
   --soromi-text: #f0f0f0;
   --soromi-text-dim: #cccccc;
+  --soromi-text-muted: #8a8a8a;
   --soromi-text-faint: #6e6e6e;
+  /* Glyphs and hints that should recede: chevrons, shortcuts, placeholders. */
+  --soromi-text-ghost: #565656;
 
   /* Emerald accent. */
   --soromi-accent: #3ecf8e;
+  --soromi-accent-hover: #4bdb9a;
   --soromi-accent-dim: #11251b;
   --soromi-accent-border: #24523c;
   --soromi-accent-on: #08321f;
   --soromi-warn: #d9a53f;
   --soromi-ok: #3ecf8e;
+
+  /* States. Amber: working, waiting, another device in control. Red: failed, removing. Blue:
+     waiting on the person. */
+  --soromi-amber: #e0b341;
+  --soromi-amber-hover: #ecc456;
+  --soromi-amber-text: #c99a2e;
+  --soromi-amber-on: #2a2205;
+  --soromi-danger: #f47070;
+  --soromi-danger-soft: #e08585;
+  --soromi-danger-hover: #ea9595;
+  --soromi-danger-on: #2a0f0f;
+  --soromi-info: #6b93d6;
+  --soromi-notice-bg: #3a3016;
+  --soromi-notice-text: #f0d9a8;
+
+  /* Diffs. */
+  --soromi-diff-add-bg: #12321f;
+  --soromi-diff-add-text: #3ecf8e;
+  --soromi-diff-del-bg: #3a1717;
+  --soromi-diff-del-text: #f47070;
+
+  /* Depth. The panel floating on the shell, menus and popovers over it, the docked file panel. */
+  --soromi-shadow-panel: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px rgb(0 0 0 / 32%);
+  --soromi-shadow-popover: 0 12px 40px rgb(0 0 0 / 45%);
+  --soromi-shadow-float: 0 20px 60px rgb(0 0 0 / 50%);
+  --soromi-shadow-dock: -10px 0 30px rgb(0 0 0 / 28%);
+  --soromi-shadow-selected: none;
+  --soromi-scrim: rgb(0 0 0 / 60%);
+  --soromi-scrollbar: rgb(255 255 255 / 13%);
+  --soromi-scrollbar-hover: rgb(255 255 255 / 24%);
+
+  /* The file editor (CodeMirror) and its syntax colors, after VS Code's Dark+. */
+  --soromi-code-bg: #1f1f1f;
+  --soromi-code-text: #cccccc;
+  --soromi-code-gutter: #6e7681;
+  --soromi-code-cursor: #aeafad;
+  --soromi-code-selection: #264f78;
+  --soromi-code-active-line: rgb(255 255 255 / 4%);
+  --soromi-syntax-comment: #6a9955;
+  --soromi-syntax-string: #ce9178;
+  --soromi-syntax-number: #b5cea8;
+  --soromi-syntax-keyword: #569cd6;
+  --soromi-syntax-control: #c586c0;
+  --soromi-syntax-function: #dcdcaa;
+  --soromi-syntax-type: #4ec9b0;
+  --soromi-syntax-variable: #9cdcfe;
+  --soromi-syntax-tag: #569cd6;
+  --soromi-syntax-constant: #4fc1ff;
+  --soromi-syntax-regexp: #d16969;
+  --soromi-syntax-invalid: #f44747;
 
   /* Account badges. */
   --soromi-badge-personal-fg: #5b9bd1;
@@ -40,30 +110,105 @@
 
 /*
  * Light appearance. Applied as a `so-light` class on the root element (see the app store's `theme`);
- * it overrides the palette tokens so every surface flips, while the emerald accent, amber warn, and
- * red destructive colors stay literal in both themes. Higher specificity than `:root`, so it wins.
+ * it overrides the palette so every surface flips. Paper white panels float on a warm, quiet grey
+ * shell; depth comes from soft, low shadows and hairline borders rather than from contrast; text is
+ * a warm near-black; the emerald deepens so it reads as text and carries white on a button. Higher
+ * specificity than `:root`, so it wins.
  */
 .so-light {
-  --soromi-bg-shell: #eeeeec;
-  --soromi-bg-app: #eeeeec;
-  --soromi-bg-rail: #eeeeec;
+  --soromi-bg-shell: #f3f3f1;
+  --soromi-bg-app: #f3f3f1;
+  --soromi-bg-rail: #ffffff;
   --soromi-bg-sidebar: #ffffff;
-  --soromi-bg-tab: #e9e9e5;
+  --soromi-bg-tab: #fafaf9;
   --soromi-bg-terminal: #ffffff;
-  --soromi-bg-hover: #e9e9e5;
-  --soromi-bg-active: #d8d8d2;
-  --soromi-border: #d8d8d2;
-  --soromi-border-subtle: #e0e0da;
-  --soromi-text: #0f0f0e;
-  --soromi-text-dim: #3a3a36;
-  --soromi-text-faint: #75756e;
+  --soromi-bg-hover: #ebebe8;
+  --soromi-bg-active: #e3e3df;
+  --soromi-bg-selected: #ffffff;
+  --soromi-bg-inset: #f7f7f5;
+  --soromi-bg-bubble: #efefeb;
+  --soromi-bg-field: #ffffff;
+  --soromi-focus-ring: rgb(18 160 102 / 35%);
+  --soromi-border: #e2e2de;
+  --soromi-border-subtle: #ebebe8;
+  --soromi-border-strong: #d2d2cc;
+  --soromi-text: #1c1c1a;
+  --soromi-text-dim: #43433f;
+  --soromi-text-muted: #6b6b65;
+  --soromi-text-faint: #8a8a83;
+  --soromi-text-ghost: #a9a9a2;
 
-  --soromi-accent: #3ecf8e;
-  --soromi-accent-dim: #dcf1e5;
-  --soromi-accent-border: #a7dcc2;
-  --soromi-accent-on: #08321f;
-  --soromi-warn: #d9a53f;
-  --soromi-ok: #3ecf8e;
+  --soromi-accent: #12a066;
+  --soromi-accent-hover: #0e8d59;
+  --soromi-accent-dim: #e5f4ec;
+  --soromi-accent-border: #b4dfc8;
+  --soromi-accent-on: #ffffff;
+  --soromi-warn: #b8841d;
+  --soromi-ok: #12a066;
+
+  --soromi-amber: #d9a21b;
+  --soromi-amber-hover: #c99414;
+  --soromi-amber-text: #9a6a06;
+  --soromi-amber-on: #2a2205;
+  --soromi-danger: #d84a4a;
+  --soromi-danger-soft: #c94a43;
+  --soromi-danger-hover: #b53d37;
+  --soromi-danger-on: #ffffff;
+  --soromi-info: #3d6fcc;
+  --soromi-notice-bg: #fbf3df;
+  --soromi-notice-text: #6f520f;
+
+  --soromi-diff-add-bg: #e8f6ee;
+  --soromi-diff-add-text: #14804f;
+  --soromi-diff-del-bg: #fcecec;
+  --soromi-diff-del-text: #c23b3b;
+
+  --soromi-shadow-panel:
+    0 0 0 1px rgb(28 28 26 / 3%), 0 1px 2px rgb(28 28 26 / 5%), 0 8px 28px rgb(28 28 26 / 6%);
+  --soromi-shadow-popover:
+    0 0 0 1px rgb(28 28 26 / 3%), 0 4px 12px rgb(28 28 26 / 6%), 0 16px 40px rgb(28 28 26 / 10%);
+  --soromi-shadow-float:
+    0 0 0 1px rgb(28 28 26 / 3%), 0 6px 16px rgb(28 28 26 / 7%), 0 24px 56px rgb(28 28 26 / 12%);
+  --soromi-shadow-dock: -8px 0 28px rgb(28 28 26 / 7%);
+  --soromi-shadow-selected: 0 0 0 1px rgb(28 28 26 / 5%), 0 1px 3px rgb(28 28 26 / 7%);
+  --soromi-scrim: rgb(28 28 26 / 28%);
+  --soromi-scrollbar: rgb(28 28 26 / 16%);
+  --soromi-scrollbar-hover: rgb(28 28 26 / 30%);
+
+  /* After GitHub's light theme, the one the chat's code blocks use in this appearance. */
+  --soromi-code-bg: #ffffff;
+  --soromi-code-text: #24292f;
+  --soromi-code-gutter: #a0a4a9;
+  --soromi-code-cursor: #24292f;
+  --soromi-code-selection: #d6e6fb;
+  --soromi-code-active-line: rgb(28 28 26 / 3%);
+  --soromi-syntax-comment: #6e7781;
+  --soromi-syntax-string: #0a3069;
+  --soromi-syntax-number: #0550ae;
+  --soromi-syntax-keyword: #cf222e;
+  --soromi-syntax-control: #cf222e;
+  --soromi-syntax-function: #8250df;
+  --soromi-syntax-type: #953800;
+  --soromi-syntax-variable: #24292f;
+  --soromi-syntax-tag: #116329;
+  --soromi-syntax-constant: #0550ae;
+  --soromi-syntax-regexp: #0a3069;
+  --soromi-syntax-invalid: #82071e;
+
+  --soromi-badge-personal-fg: #2f6fae;
+  --soromi-badge-personal-bg: #e6eff8;
+  --soromi-badge-work-fg: #6b5bb5;
+  --soromi-badge-work-bg: #eeebf8;
+}
+
+/*
+ * Code blocks in the chat are highlighted for both appearances at once (Shiki's dual themes): each
+ * token carries its dark color inline and its light one as `--shiki-light`, which wins here.
+ */
+.so-light .shiki,
+.so-light .shiki span {
+  /* biome-ignore lint/complexity/noImportantStyles: Shiki writes the dark colors inline. */
+  color: var(--shiki-light) !important;
 }
 
 /*

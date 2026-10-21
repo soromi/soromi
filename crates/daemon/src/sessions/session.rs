@@ -88,6 +88,8 @@ pub struct Session {
     /// hook can't leave it stuck on "running".
     last_activity: Arc<Mutex<Instant>>,
     reader_handle: Option<JoinHandle<()>>,
+    /// Turns `true` once the program has ended and its output with it (it exited, or was stopped).
+    ended_rx: watch::Receiver<bool>,
     /// The idle-decay task, aborted on Drop.
     decay_handle: Option<AbortHandle>,
     /// Structured chat events parsed from the agent's transcript, for viewers to follow. Empty
@@ -135,7 +137,7 @@ impl Session {
                 }
             }
             None => {
-                for (key, value) in std::env::vars() {
+                for (key, value) in crate::system::child_env() {
                     cmd.env(key, value);
                 }
             }
@@ -159,6 +161,7 @@ impl Session {
         let settled = Arc::new(AtomicBool::new(false));
         let activated = Arc::new(AtomicBool::new(false));
         let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let (ended_tx, ended_rx) = watch::channel(false);
 
         let reader_handle = spawn_reader(
             reader,
@@ -169,6 +172,7 @@ impl Session {
             settled.clone(),
             activated.clone(),
             last_activity.clone(),
+            ended_tx,
         );
         let decay_handle = spawn_idle_decay(
             status_tx.clone(),
@@ -193,6 +197,7 @@ impl Session {
             activated,
             last_activity,
             reader_handle: Some(reader_handle),
+            ended_rx,
             decay_handle,
             chat_log: Arc::new(ChatLog::new(Vec::new())),
             active_subagents: Arc::new(Mutex::new(Subagents::default())),
@@ -290,6 +295,16 @@ impl Session {
                 (snapshot, self.output_tx.subscribe())
             }
         }
+    }
+
+    /// The agent transcript this session's chat follows, once it is known.
+    pub fn transcript(&self) -> Option<PathBuf> {
+        self.transcript_path.lock().ok()?.clone()
+    }
+
+    /// A watch that turns `true` once the program has ended (a shell that was `exit`ed, say).
+    pub fn subscribe_ended(&self) -> watch::Receiver<bool> {
+        self.ended_rx.clone()
     }
 
     /// A watch on the agent status; the current value is available immediately.
@@ -489,6 +504,7 @@ fn spawn_reader(
     settled: Arc<AtomicBool>,
     activated: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
+    ended_tx: watch::Sender<bool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut decoder = Utf8Decoder::default();
@@ -526,6 +542,8 @@ fn spawn_reader(
                 }
             }
         }
+        // The program is gone: nothing more will be read.
+        let _ = ended_tx.send(true);
     })
 }
 

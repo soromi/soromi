@@ -35,6 +35,16 @@ export type HeaderItem = {
 }
 
 /** The part of a screen's options that puts something at the right of its header. */
+export type HeaderTitleProps = {
+  title: string
+}
+
+/** A screen's title, in the options its navigator takes. */
+export type HeaderTitleOptions = {
+  title: string
+  headerTitle?: () => ReactElement
+}
+
 export type HeaderActions = {
   headerRight: () => ReactElement | null
   /** iOS only, where it takes the place of `headerRight`. */
@@ -54,6 +64,16 @@ export type ScreenOptions = {
   title: string
 }
 
+export type ComputersConfig = {
+  unnamed: string
+  title: string
+  inUse: string
+  pair: string
+  pairHint: string
+  open: string
+  pairValue: string
+}
+
 export type NavigationConfig = {
   /** How a screen arrives: sliding in on a phone, in place beside the sessions column. */
   animation: {
@@ -68,6 +88,15 @@ export type NavigationConfig = {
     session: ScreenOptions
     /** Titled by the screen itself: the workspace the session belongs to. */
     panel: ScreenOptions
+    /** Titled by the screen itself: the background agent it follows. */
+    agent: ScreenOptions
+    /** Each titled by the screen itself. */
+    newWorkspace: ScreenOptions
+    workspace: ScreenOptions
+    workspaceSettings: ScreenOptions
+    /** Both titled by the screen itself. */
+    conversations: ScreenOptions
+    usage: ScreenOptions
     file: ScreenOptions
     diff: ScreenOptions
   }

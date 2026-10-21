@@ -1,32 +1,53 @@
 //Packages
 import { useTransport } from '@soromi/client'
 
+//Components
+import { AboutHero } from '@/shared/about-hero'
+import { SETTINGS_BUTTON, SettingsGroup, SettingsPage, SettingsRow } from '../layout'
+
+//Utils
+import { openExternal } from '@/lib/host'
+
 //Constants
-import { APP_VERSION } from '@/config'
+import { REPO_URL } from '@/config'
 
-//Styles
-import { DESC, H2, SECTION, SECTION_HEAD } from '../styles'
-
-/** App version + a manual update check. */
+/** Which Soromi this is, a way to look for a newer one, and where to read about it. */
 export function AboutSection() {
   const transport = useTransport()
-  const checkUpdate = () => transport.send({ type: 'check-update' })
 
   return (
-    <section className={SECTION}>
-      <div className={SECTION_HEAD}>
-        <div>
-          <h2 className={H2}>About</h2>
-          <p className={DESC}>Soromi Desktop {APP_VERSION}</p>
-        </div>
+    <SettingsPage title="About">
+      <div className="overflow-hidden rounded-[12px] border border-[var(--soromi-border)]">
+        <AboutHero fade="var(--soromi-bg-terminal)" />
       </div>
-      <button
-        type="button"
-        onClick={checkUpdate}
-        className="inline-flex cursor-pointer appearance-none items-center gap-2.5 self-start rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] px-4 py-2.5 font-semibold text-[13.5px] text-[var(--soromi-text-dim)] transition-colors hover:border-[var(--soromi-accent)] hover:text-[var(--soromi-accent)]"
-      >
-        Check for updates
-      </button>
-    </section>
+      <SettingsGroup>
+        <SettingsRow
+          title="Updates"
+          description="Soromi checks for a newer release by itself, and says so here and in the window."
+          control={
+            <button
+              type="button"
+              className={SETTINGS_BUTTON}
+              onClick={() => transport.send({ type: 'check-update' })}
+            >
+              Check now
+            </button>
+          }
+        />
+        <SettingsRow
+          title="Help & docs"
+          description="How Soromi works, and what is new."
+          control={
+            <button
+              type="button"
+              className={SETTINGS_BUTTON}
+              onClick={() => openExternal(REPO_URL)}
+            >
+              Open
+            </button>
+          }
+        />
+      </SettingsGroup>
+    </SettingsPage>
   )
 }

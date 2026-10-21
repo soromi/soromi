@@ -8,13 +8,15 @@ export const makeStyles = defineStyles((theme) => ({
     borderRadius: theme.borderRadius.md,
   },
   sm: {
+    minHeight: theme.control.sm,
     paddingHorizontal: theme.spacing.sm2,
-    paddingVertical: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
     borderRadius: theme.borderRadius.sm,
   },
   md: {
+    minHeight: theme.control.md,
     paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm2,
+    paddingVertical: theme.spacing.sm,
   },
   primary: { backgroundColor: theme.surface.action },
   secondary: { backgroundColor: theme.surface.active },

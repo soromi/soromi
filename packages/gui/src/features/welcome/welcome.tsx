@@ -10,24 +10,29 @@ import { useAppStore } from '@/stores/app-store'
 
 //Utils
 import { pickFolder } from '@/lib/host'
-import { basename, deriveRootAndFolders } from './folders'
+import { basename, deriveRootAndFolders } from '@soromi/client'
 
 //Constants
 import { isDesktop } from '@/config'
 import { PROVIDERS } from '@/config/providers'
 
 //Components
+import { Ambient } from '@/shared/ambient'
 import { OverlayShell } from '@/shared/overlay-shell'
 import { ProviderIcon } from '@/shared/provider-icon'
+import { SoromiMark } from '@/shared/soromi-mark'
 
-/** Bold field label. */
-const LABEL = 'font-semibold text-[13.5px] text-[var(--soromi-text)]'
+//Types
+import type { ReactNode } from 'react'
+
+/** A field's label. */
+const LABEL = 'font-medium text-[12.5px] text-[var(--soromi-text-dim)]'
 /** A text input field. */
 const FIELD =
-  'w-full rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] px-[14px] py-[11px] text-[14px] text-[var(--soromi-text)] outline-none transition-colors placeholder:text-[var(--soromi-text-faint)] focus:border-[var(--soromi-accent)]'
+  'h-9 w-full rounded-[8px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-field)] px-3 text-[13px] text-[var(--soromi-text)] outline-none transition-colors placeholder:text-[var(--soromi-text-ghost)] focus:border-[var(--soromi-accent)]'
 /** A dropdown trigger, matched to the fields. */
 const TRIGGER =
-  'h-auto rounded-[10px] border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] px-[13px] py-[11px] text-[14px]'
+  'h-9 rounded-[8px] border-[var(--soromi-border)] bg-[var(--soromi-bg-field)] px-3 text-[13px]'
 
 const FolderIcon = ({ size = 16 }: { size?: number }) => (
   <svg
@@ -105,13 +110,8 @@ function CreateSpaceForm() {
   const agentLabel = PROVIDERS.find((p) => p.value === agent)?.label ?? agent
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      <p className="m-0 text-[14px] text-[var(--soromi-text-dim)] leading-[1.5]">
-        Pick one or more work folders and choose an agent and account. Nothing is written to the
-        folder.
-      </p>
-
-      <div className="flex flex-col gap-2">
+    <div className="flex w-full flex-col gap-5">
+      <div className="flex flex-col gap-1.5">
         <label className={LABEL} htmlFor="ws-name">
           Name
         </label>
@@ -124,17 +124,20 @@ function CreateSpaceForm() {
         />
       </div>
 
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-1.5">
         <span className={LABEL}>Folders</span>
         {folderInputs.map((folder, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and stable.
-          <div key={index} className="flex items-center gap-2.5">
+          <div key={index} className="flex items-center gap-2">
             <div className="relative flex-1">
-              <span className="-translate-y-1/2 absolute top-1/2 left-[13px] text-[var(--soromi-text-faint)]">
-                <FolderIcon />
+              <span className="-translate-y-1/2 absolute top-1/2 left-[11px] text-[var(--soromi-text-faint)]">
+                <FolderIcon size={14} />
               </span>
               <input
-                className={cn(FIELD, 'pl-[38px] text-[13px] [font-family:var(--soromi-font-mono)]')}
+                className={cn(
+                  FIELD,
+                  'pl-[32px] text-[12.5px] [font-family:var(--soromi-font-mono)]',
+                )}
                 placeholder="/path/to/folder"
                 value={folder}
                 onChange={(event) => updateFolder(index, event.target.value)}
@@ -147,7 +150,7 @@ function CreateSpaceForm() {
               <button
                 type="button"
                 onClick={() => pickFolderAt(index)}
-                className="flex-none cursor-pointer appearance-none rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-hover)] px-5 py-[11px] font-semibold text-[14px] text-[var(--soromi-text-dim)] transition-colors hover:bg-[var(--soromi-bg-active)]"
+                className="h-9 flex-none cursor-pointer appearance-none rounded-[8px] border border-[var(--soromi-border)] bg-transparent px-3.5 font-medium text-[12.5px] text-[var(--soromi-text-dim)] transition-colors hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
               >
                 Pick
               </button>
@@ -157,7 +160,7 @@ function CreateSpaceForm() {
                 type="button"
                 aria-label="Remove folder"
                 onClick={() => removeFolder(index)}
-                className="flex h-[38px] w-[30px] flex-none cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors hover:text-[var(--soromi-text-dim)]"
+                className="flex h-9 w-[28px] flex-none cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] transition-colors hover:text-[var(--soromi-text-dim)]"
               >
                 <svg
                   width="15"
@@ -178,11 +181,11 @@ function CreateSpaceForm() {
         <button
           type="button"
           onClick={addFolder}
-          className="inline-flex cursor-pointer appearance-none items-center gap-[7px] self-start border-none bg-transparent font-semibold text-[14px] text-[var(--soromi-accent)] hover:underline"
+          className="mt-0.5 inline-flex cursor-pointer appearance-none items-center gap-1.5 self-start border-none bg-transparent font-medium text-[12.5px] text-[var(--soromi-accent)] hover:underline"
         >
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -196,10 +199,10 @@ function CreateSpaceForm() {
         </button>
       </div>
 
-      <div className="h-px bg-[var(--soromi-border)]" />
+      <div className="h-px bg-[var(--soromi-border-subtle)]" />
 
-      <div className="grid grid-cols-2 gap-5">
-        <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
           <span className={LABEL}>Agent</span>
           <Select value={agent} onValueChange={(value) => value && setAgent(value)}>
             <SelectTrigger className={TRIGGER}>
@@ -218,12 +221,12 @@ function CreateSpaceForm() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-3">
             <span className={LABEL}>Account</span>
             <button
               type="button"
-              className="cursor-pointer appearance-none border-none bg-transparent font-semibold text-[13px] text-[var(--soromi-accent)] hover:underline"
+              className="cursor-pointer appearance-none border-none bg-transparent font-medium text-[12px] text-[var(--soromi-accent)] hover:underline"
               onClick={openSettings}
             >
               New account
@@ -245,7 +248,7 @@ function CreateSpaceForm() {
       </div>
 
       {error && (
-        <div className="rounded-[10px] border border-[rgb(224_133_133/0.4)] bg-[rgb(224_133_133/0.08)] px-3.5 py-2.5 text-[13px] text-[#e08585]">
+        <div className="rounded-[8px] border border-[color-mix(in_srgb,var(--soromi-danger-soft)_40%,transparent)] bg-[color-mix(in_srgb,var(--soromi-danger-soft)_8%,transparent)] px-3 py-2 text-[12.5px] text-[var(--soromi-danger-soft)]">
           {error}
         </div>
       )}
@@ -254,7 +257,7 @@ function CreateSpaceForm() {
         type="button"
         onClick={create}
         disabled={!root}
-        className="w-full cursor-pointer appearance-none rounded-[12px] border-none bg-[var(--soromi-accent)] py-[15px] font-bold text-[15px] text-[var(--soromi-accent-on)] transition-colors hover:bg-[#4bdb9a] disabled:cursor-not-allowed disabled:opacity-[0.45]"
+        className="h-10 w-full cursor-pointer appearance-none rounded-[9px] border-none bg-[var(--soromi-accent)] font-semibold text-[13.5px] text-[var(--soromi-accent-on)] transition-colors hover:bg-[var(--soromi-accent-hover)] disabled:cursor-not-allowed disabled:opacity-[0.45]"
       >
         Create workspace
       </button>
@@ -262,7 +265,7 @@ function CreateSpaceForm() {
         type="button"
         onClick={importFile}
         disabled={!root}
-        className="cursor-pointer appearance-none border-none bg-transparent text-center font-semibold text-[14px] text-[var(--soromi-accent)] hover:underline disabled:cursor-not-allowed disabled:text-[var(--soromi-text-faint)] disabled:no-underline"
+        className="-mt-1 cursor-pointer appearance-none border-none bg-transparent text-center font-medium text-[12.5px] text-[var(--soromi-accent)] hover:underline disabled:cursor-not-allowed disabled:text-[var(--soromi-text-faint)] disabled:no-underline"
       >
         Import a <span className="[font-family:var(--soromi-font-mono)]">soromi.space.json</span>{' '}
         from this folder
@@ -271,12 +274,38 @@ function CreateSpaceForm() {
   )
 }
 
-/** Base view shown when there is no active workspace (first run). */
+/**
+ * The create-space form on a card of its own, raised over the page's dotted ground: its title (with
+ * a mark when there is one), what creating a workspace does, and the form.
+ */
+function CreateSpaceCard({ title, mark }: { title: string; mark?: ReactNode }) {
+  return (
+    <div className="relative w-full max-w-[500px] rounded-[16px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] px-7 pt-7 pb-6 [box-shadow:var(--soromi-shadow-float)]">
+      <div className="mb-6 flex items-start gap-3">
+        {mark && <span className="mt-[3px] flex flex-none">{mark}</span>}
+        <div className="min-w-0">
+          <h1 className="m-0 font-semibold text-[18px] text-[var(--soromi-text)] tracking-[-0.01em]">
+            {title}
+          </h1>
+          <p className="m-0 mt-1 text-[12.5px] text-[var(--soromi-text-faint)] leading-[1.5]">
+            Pick the folders an agent works in, the agent, and the account it runs under. Nothing is
+            written to the folders.
+          </p>
+        </div>
+      </div>
+      <CreateSpaceForm />
+    </div>
+  )
+}
+
+/** Base view shown when there is no workspace yet (first run): a welcome, and the way to start. */
 export function Welcome() {
   return (
-    <div className="flex flex-1 items-center justify-center overflow-auto px-8 py-10">
-      <div className="w-full max-w-[900px]">
-        <CreateSpaceForm />
+    <div className="relative flex flex-1 flex-col overflow-auto">
+      <Ambient focus="center" />
+      {/* In the middle of the panel when it has the room, from the top when it does not. */}
+      <div className="relative my-auto flex justify-center px-6 py-12">
+        <CreateSpaceCard title="Welcome to Soromi" mark={<SoromiMark width={20} height={18} />} />
       </div>
     </div>
   )
@@ -286,9 +315,10 @@ export function Welcome() {
 export function CreateSpaceOverlay() {
   return (
     <OverlayShell icon={<FolderIcon size={18} />} title="New workspace">
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-[900px] px-8 pt-12 pb-20">
-          <CreateSpaceForm />
+      <div className="relative min-h-0 flex-1 overflow-auto">
+        <Ambient focus="top" />
+        <div className="relative flex justify-center px-6 pt-14 pb-16">
+          <CreateSpaceCard title="New workspace" />
         </div>
       </div>
     </OverlayShell>

@@ -27,7 +27,7 @@ export function Approval({
 }) {
   if (approval.kind === 'plan') {
     return (
-      <div className="rounded-[10px] border border-[var(--soromi-accent)]/45 bg-[var(--soromi-bg-active)] p-2.5">
+      <div className="rounded-[10px] border border-[var(--soromi-accent)]/45 bg-[var(--soromi-bg-inset)] p-2.5">
         <div className="mb-2 flex items-center gap-1.5 text-[12.5px] text-[var(--soromi-accent)]">
           <ClipboardList className="h-3.5 w-3.5" />
           <span className="font-medium">Approve this plan and start coding?</span>
@@ -58,7 +58,7 @@ export function Approval({
   }
 
   return (
-    <div className="rounded-[10px] border border-[var(--soromi-warn)]/45 bg-[var(--soromi-bg-active)] p-2.5">
+    <div className="rounded-[10px] border border-[var(--soromi-warn)]/45 bg-[var(--soromi-bg-inset)] p-2.5">
       <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] text-[var(--soromi-warn)]">
         <ShieldQuestion className="h-3.5 w-3.5" />
         <span className="font-medium">Allow this action?</span>

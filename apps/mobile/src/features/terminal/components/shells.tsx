@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { ScrollView, View } from 'react-native'
 
 //Components
@@ -10,6 +9,7 @@ import { defineStyles, useThemedStyles } from '@/config/theme'
 //Components
 import { NewShell } from './new-shell'
 import { TerminalPane } from './pane'
+import { RenameShell } from './rename-shell'
 import { ShellTab } from './shell-tab'
 
 //Constants
@@ -22,19 +22,15 @@ import { useShells } from '../hooks/use-shells'
 import type { ShellsProps } from '../types'
 
 /**
- * A workspace's terminals, as in the desktop's Terminal tab: plain shells on the computer, one on
- * screen at a time, with a strip above to move between them, open another, or close the one shown.
+ * A workspace's terminals, as in the desktop's Terminal tab and the same ones: plain shells on the
+ * computer, one on screen at a time, with a strip above to move between them, open another, or
+ * close the one shown. A long press on one renames it.
  */
 export const Shells = (props: ShellsProps) => {
   const styles = useThemedStyles(makeStyles)
   const workspace = props.workspace
   const shells = useShells(workspace)
   const active = shells.active
-
-  const spot = useMemo(
-    () => (active ? { workspace, folder: active.folder } : undefined),
-    [workspace, active],
-  )
 
   return (
     <View style={styles.root}>
@@ -53,6 +49,7 @@ export const Shells = (props: ShellsProps) => {
               active={shell.id === active?.id}
               onSelect={shells.handleSelect}
               onClose={shells.handleClose}
+              onRename={shells.handleRename}
             />
           ))}
         </ScrollView>
@@ -61,7 +58,7 @@ export const Shells = (props: ShellsProps) => {
       {active ? (
         // One terminal at a time, started over for each: going back to one has the daemon draw
         // its screen again as it stands.
-        <TerminalPane key={active.id} session={active.id} shell={spot} />
+        <TerminalPane key={active.id} session={active.id} />
       ) : (
         <View style={styles.empty}>
           <Text variant="bodySm" tone="muted" style={styles.message}>
@@ -69,6 +66,7 @@ export const Shells = (props: ShellsProps) => {
           </Text>
         </View>
       )}
+      <RenameShell target={shells.renamed} onClose={shells.handleRenamed} />
     </View>
   )
 }

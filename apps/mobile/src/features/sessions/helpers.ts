@@ -1,4 +1,4 @@
-import { runningAgents, sessionStatus } from '@soromi/core'
+import { conversationAge, runningAgents, sessionStatus, usageSummary } from '@soromi/core'
 
 //Config
 import { routes } from '@/config/router'
@@ -7,10 +7,10 @@ import { routes } from '@/config/router'
 import { SESSIONS } from './constants/sessions'
 
 //Type
-import type { SessionSummary, WorkspaceSummary } from '@soromi/protocol'
+import type { AgentUsage, SessionSummary, WorkspaceSummary } from '@soromi/protocol'
 import type { Href } from 'expo-router'
 import type { SessionsView } from '@/states/preferences/preferences.state.type'
-import type { BannerView, GridSection, PendingSession, SessionSection, Tally } from './types'
+import type { Attention, BannerView, PendingSession, SessionSection, Tally } from './types'
 
 /** A session's name as the desktop shows it: its own title, or the account it runs under. */
 export const getSessionName = (session: SessionSummary, peers: SessionSummary[]): string => {
@@ -36,7 +36,76 @@ export const getSessionDetail = (session: SessionSummary): string => {
   return SESSIONS.detail[session.status]
 }
 
+/**
+ * A session's line under its name: what it is up to, and how long ago it last changed ("Finished
+ * · 2h ago"). One at work says only what it is doing, which is now. `now` is Unix seconds.
+ */
+export const getSessionLine = (session: SessionSummary, now: number): string => {
+  const detail = getSessionDetail(session)
+  if (session.updated === undefined || sessionStatus(session) === 'thinking') return detail
+
+  return `${detail}${SESSIONS.separator}${conversationAge(session.updated, now)}`
+}
+
 export const getSessionKey = (session: SessionSummary): string => session.id
+
+/** Where a workspace's sessions are, with what can be done there. */
+export const getWorkspaceHref = (workspace: string): Href => ({
+  pathname: routes.app.workspace,
+  params: { name: workspace },
+})
+
+export const getWorkspaceKey = (workspace: WorkspaceSummary): string => workspace.name
+
+/** How many sessions a workspace has, in words: "No sessions", "1 session", "10 sessions". */
+export const getSessionCount = (count: number): string =>
+  count === 0
+    ? SESSIONS.count.none
+    : `${count} ${count === 1 ? SESSIONS.count.one : SESSIONS.count.many}`
+
+/**
+ * The sessions that need the person, across every workspace: stuck first, then waiting for an
+ * answer, then finished and not looked at since. Each keeps its workspace's order within that.
+ */
+export const getAttention = (workspaces: WorkspaceSummary[]): Attention[] => {
+  const order = SESSIONS.attention.statuses
+  const found = workspaces.flatMap((workspace) =>
+    workspace.sessions
+      .filter((session) => order.includes(sessionStatus(session)))
+      .map((session) => ({ session, workspace: workspace.name, peers: workspace.sessions })),
+  )
+
+  return found.sort(
+    (a, b) => order.indexOf(sessionStatus(a.session)) - order.indexOf(sessionStatus(b.session)),
+  )
+}
+
+export const getAttentionKey = (item: Attention): string => item.session.id
+
+/** Where a workspace's own settings are. */
+export const getWorkspaceSettingsHref = (workspace: string): Href => ({
+  pathname: routes.app.workspaceSettings,
+  params: { name: workspace },
+})
+
+/** Where a workspace's earlier conversations are, to carry one on. */
+export const getConversationsHref = (workspace: string): Href => ({
+  pathname: routes.app.conversations,
+  params: { name: workspace },
+})
+
+/** Where a workspace's plan usage is shown in full. */
+export const getUsageHref = (workspace: string): Href => ({
+  pathname: routes.app.usage,
+  params: { name: workspace },
+})
+
+/** The usage row as a screen reader says it: "Usage: Claude 9%, Codex 62%". */
+export const getUsageLabel = (agents: AgentUsage[]): string => {
+  const summary = usageSummary(agents)
+
+  return summary ? `${SESSIONS.usage.label}: ${summary}` : SESSIONS.usage.label
+}
 
 /** Where a session's conversation lives. */
 export const getSessionHref = (id: string): Href => ({
@@ -46,35 +115,28 @@ export const getSessionHref = (id: string): Href => ({
 
 /**
  * Every workspace as a list section. One that is folded away keeps its heading and lists no
- * sessions.
+ * sessions. Until one is opened or folded by hand, only the first is open, so a long list starts
+ * short.
  */
 export const toSections = (
   workspaces: WorkspaceSummary[],
   collapsed: Record<string, boolean>,
 ): SessionSection[] =>
-  workspaces.map((workspace) => {
-    const open = !collapsed[workspace.name]
+  workspaces.map((workspace, index) => {
+    const open = !(collapsed[workspace.name] ?? index > 0)
 
     return { title: workspace.name, workspace, open, data: open ? workspace.sessions : [] }
   })
 
-/**
- * Every workspace as a section of the grid: its sessions in rows of `columns` cards. One that is
- * folded away keeps its heading and has no rows.
- */
-export const toGridSections = (
-  workspaces: WorkspaceSummary[],
-  collapsed: Record<string, boolean>,
-  columns: number,
-): GridSection[] =>
-  toSections(workspaces, collapsed).map((section) => {
-    const rows: SessionSummary[][] = []
-    for (let start = 0; start < section.data.length; start += columns) {
-      rows.push(section.data.slice(start, start + columns))
-    }
+/** A workspace's sessions in rows of `columns` cards, for the grid; the last as short as it comes. */
+export const toCardRows = (sessions: SessionSummary[], columns: number): SessionSummary[][] => {
+  const rows: SessionSummary[][] = []
+  for (let start = 0; start < sessions.length; start += columns) {
+    rows.push(sessions.slice(start, start + columns))
+  }
 
-    return { ...section, data: rows }
-  })
+  return rows
+}
 
 /** A row of cards is known by the first session in it. */
 export const getRowKey = (row: SessionSummary[]): string => row[0]?.id ?? ''

@@ -6,7 +6,7 @@
     "scheme": "soromi",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#121213",
     "ios": {
       "supportsTablet": true,

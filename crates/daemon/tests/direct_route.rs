@@ -28,6 +28,9 @@ use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 use soromi_protocol::{DeviceRoute, KeepAwakeMode, PROTOCOL_VERSION};
 
+/// What the local link takes from a client here (`transport::local`).
+const TOKEN: &str = "test-local-token";
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// A key no device was paired with.
@@ -50,7 +53,7 @@ impl Pushed {
 }
 
 impl PushGateway for Pushed {
-    fn send(&self, token: &str, banner: &WireNotification) -> Sending {
+    fn send(&self, token: &str, _device: &str, banner: &WireNotification) -> Sending {
         self.banners
             .lock()
             .unwrap()
@@ -104,7 +107,13 @@ impl Daemon {
                 port: 0,
             },
         );
-        tokio::spawn(serve(listener, hub.clone(), accounts, pairing.clone()));
+        tokio::spawn(serve(
+            listener,
+            hub.clone(),
+            accounts,
+            pairing.clone(),
+            TOKEN.into(),
+        ));
 
         let paired = pairing.create_device("Phone".to_string());
         let code = paired.pairing_code.strip_prefix("soromi://pair#").unwrap();
@@ -133,9 +142,10 @@ impl Daemon {
 
     /// The desktop app's connection, past its handshake.
     async fn desktop(&self) -> Socket {
-        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", self.local))
-            .await
-            .unwrap();
+        let (mut ws, _) =
+            tokio_tungstenite::connect_async(format!("ws://{}/?token={TOKEN}", self.local))
+                .await
+                .unwrap();
         let hello = json!({ "type": "hello", "protocol": PROTOCOL_VERSION, "clientId": "desk" });
         ws.send(Message::Text(hello.to_string())).await.unwrap();
         loop {

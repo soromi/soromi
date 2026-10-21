@@ -106,6 +106,9 @@ impl StreamJsonSession {
             // Keep the agent's own diagnostics on our stderr; only stdout is the protocol.
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
+        for key in crate::system::DAEMON_ONLY {
+            cmd.env_remove(key);
+        }
         if let Some(env) = env {
             cmd.env_clear();
             for (key, value) in env {

@@ -1,7 +1,9 @@
 import type { ChatRow, ToolDiffLine, ToolItem, ToolState } from '@soromi/core'
+import type { ReactNode } from 'react'
 import type {
   ChatFile,
   PermissionMode,
+  QueuedTurn,
   Status,
   SubAgent,
   ToolApproval,
@@ -45,10 +47,33 @@ export type AgentsProps = {
   enabled: boolean
 }
 
+export type QueueProps = {
+  session: string
+  /** The messages queued, oldest first; none while there are none. */
+  queued: QueuedTurn[] | undefined
+  /** A stop holds them back. */
+  paused: boolean
+  /** Only the device in control, while the link is up, can send or remove one. */
+  enabled: boolean
+}
+
+export type QueuedLineProps = {
+  session: string
+  turn: QueuedTurn
+  enabled: boolean
+}
+
 export type AgentLineProps = {
+  /** The session it works for, whose log screen a tap opens. */
+  session: string
   agent: SubAgent
   /** Now, in whole seconds, so every line counts from the same tick. */
   now: number
+}
+
+export type AgentLogNoteProps = {
+  loaded: boolean
+  running: boolean
 }
 
 export type ContextProps = {
@@ -76,6 +101,13 @@ export type MessageImageProps = {
   file: ChatFile
 }
 
+export type OpenPictureProps = {
+  file: ChatFile
+  /** How it is drawn in the conversation: a tile beside a message's others, or a panel as wide as
+   * the row (what a tool returned). */
+  size: 'tile' | 'panel'
+}
+
 /** Lines of a tool's body or output, cut to what is worth drawing, with how many were left out. */
 export type Clipped<T> = {
   shown: T[]
@@ -97,6 +129,8 @@ export type ComposerProps = {
   working: boolean
   inControl: boolean
   online: boolean
+  /** Under the box, above the home indicator: the workspace's usage. */
+  footer?: ReactNode
 }
 
 export type EarlierProps = {
@@ -161,8 +195,17 @@ export type AttachmentProps = {
 }
 
 /** How much can go with one message. */
+/** Where an attachment comes from: the photo library, the camera, or the phone's files. */
+export type AttachSource = 'library' | 'camera' | 'files'
+
+export type AttachSheetProps = {
+  visible: boolean
+  onSelect: (source: AttachSource) => void
+  onClose: () => void
+}
+
 export type AttachLimit = {
-  /** How many pictures. */
+  /** How many attachments: pictures and files together. */
   limit: number
   /** How large they can be together, as sent (base64 characters). */
   maxEncoded: number
@@ -193,9 +236,13 @@ export type ChatConfig = {
   }
   composer: {
     placeholder: string
+    /** In place of the placeholder while the agent works, when a message waits for its turn. */
+    queue: string
     /** In place of the placeholder while another device is in control. */
     watching: string
     send: string
+    /** What the send button does while the agent works, for a screen reader. */
+    queued: string
     stop: string
     attach: string
     /** In place of the box, for a session that runs in a terminal. */
@@ -207,10 +254,22 @@ export type ChatConfig = {
     /** The side of a picture's preview, in points. */
     thumb: number
     remove: string
-    /** Said when no more pictures fit in the message. */
+    /** Above where an attachment comes from. */
+    title: string
+    /**
+     * How long the sheet takes to go: the system's picker or camera does not come up on iOS while
+     * something else is still leaving the screen.
+     */
+    pickDelayMs: number
+    sources: Record<AttachSource, { label: string; hint?: string }>
+    /** Said when no more fit in the message. */
     full: Notice
-    /** Said when some of the pictures picked were too large to go together. */
+    /** Said when some of those picked were too large to go together. */
     dropped: Notice
+    /** Said when some files picked are not something the agent can read. */
+    unsupported: Notice
+    /** Said when the camera is not allowed. */
+    camera: Notice
     ok: string
   }
   model: {
@@ -271,6 +330,18 @@ export type ChatConfig = {
     /** The heading of the agent's reasoning, which opens to show it. */
     label: string
   }
+  /** The messages queued over the box. */
+  queue: {
+    /** Over one queued message, and after the count over more. */
+    one: string
+    many: string
+    /** Over them while a stop holds them back. */
+    paused: string
+    /** In place of the text of one sent with pictures alone. */
+    attachments: string
+    send: string
+    remove: string
+  }
   agents: {
     /** After the count, for one agent and for more. */
     one: string
@@ -281,6 +352,21 @@ export type ChatConfig = {
     /** After the minutes and the seconds an agent has run for. */
     minutes: string
     seconds: string
+    /** What a tap on an agent does, for a screen reader. */
+    open: string
+    /** Its own log, on a screen of its own. */
+    log: {
+      loading: string
+      /** It has written nothing yet. */
+      starting: string
+      /** It is over and wrote nothing. */
+      none: string
+      /** Above a log that goes back further than what was sent. */
+      earlier: string
+      /** Under its name: still at work, or done. */
+      running: string
+      finished: string
+    }
   }
   context: {
     /** Before and after how full the window is. */
@@ -301,6 +387,9 @@ export type ChatConfig = {
     maxHeight: number
   }
   files: {
+    /** For a screen reader: what a tap on a picture does, and what one with no name is. */
+    open: string
+    picture: string
     /** The side of a picture in a message, in points. */
     thumb: number
     /** The height of a picture a tool returned: large enough to look at. */

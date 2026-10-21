@@ -12,21 +12,16 @@ import { routes } from '@/config/router'
 import { PAIRING } from '../constants/pairing'
 
 //Services
-import { KeychainService } from '@/services/keychain'
-import { LinkService } from '@/services/link'
-
-//State
-import { useLinkActions } from '@/states/link/link.state.hook'
-import { WorkspaceStore } from '@/states/workspace/workspace.state'
+import { ComputersService } from '@/services/computers'
 
 /**
  * Pairs the phone with a computer from the code its Soromi shows, however the code arrives:
  * scanned, pasted, or opened as a link (the code is an address this app opens). A code that works
- * is kept in the keychain, connected with, and the app moves on to the sessions.
+ * adds that computer to the ones the phone is paired with (a code scanned again brings its entry
+ * up to date), switches to it, and the app moves on to its sessions.
  */
 export const usePair = () => {
   const router = useRouter()
-  const link = useLinkActions()
   const [error, setError] = useState<string | null>(null)
   // One code at a time: the camera reports the same code many times a second.
   const busy = useRef(false)
@@ -41,18 +36,15 @@ export const usePair = () => {
       }
       busy.current = true
       try {
-        await KeychainService.savePairing(parsed.pairing)
-        // The terminals listed were the last computer's.
-        WorkspaceStore.getState().actions.setShells({})
-        link.setPairing(parsed.pairing)
-        LinkService.connect(parsed.pairing, await KeychainService.getClientId())
+        // Added to the computers the phone is paired with, and the one used from now on.
+        await ComputersService.add(parsed.pairing)
         router.replace(routes.app.sessions)
       } catch {
         setError(PAIRING.errors.save)
         busy.current = false
       }
     },
-    [link, router],
+    [router],
   )
 
   const clearError = useCallback(() => setError(null), [])

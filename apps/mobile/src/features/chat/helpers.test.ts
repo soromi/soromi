@@ -15,6 +15,7 @@ import {
   getEncodedSize,
   getMoreLabel,
   getNoticeText,
+  getQueueLabel,
   getRowKey,
   getSwitchMessage,
   getWorkingMeta,
@@ -89,6 +90,12 @@ test('elapsed time is whole seconds and never negative', () => {
 test('notices lose their brackets, and an empty one reads as an interruption', () => {
   expect(getNoticeText('[Request interrupted by user]')).toBe('Request interrupted by user')
   expect(getNoticeText('')).toBe('Interrupted')
+})
+
+test('queued messages say when they go, or that a stop holds them', () => {
+  expect(getQueueLabel(1, false)).toBe('Queued: sent when the agent finishes.')
+  expect(getQueueLabel(3, false)).toBe('3 queued: sent one at a time as the agent finishes.')
+  expect(getQueueLabel(3, true)).toMatch(/held after Stop/)
 })
 
 test('agents in the background are counted, and timed like a stopwatch', () => {

@@ -77,12 +77,13 @@ export const Toolbar = (props: ToolbarProps) => {
           onPress={props.onStop}
         />
       )}
-      {/* While the agent works, a message sent steers the turn; with nothing written, only stop. */}
+      {/* While the agent works, a message is queued for its turn's end; with nothing written,
+          only stop. */}
       {(!props.working || props.filled) && (
         <IconButton
-          icon="arrow-up"
+          icon={props.working ? 'list-plus' : 'arrow-up'}
           variant="primary"
-          label={CHAT.composer.send}
+          label={props.working ? CHAT.composer.queued : CHAT.composer.send}
           disabled={!props.enabled || !props.filled}
           onPress={props.onSend}
         />

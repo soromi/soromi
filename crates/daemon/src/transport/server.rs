@@ -7,7 +7,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, watch};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{WebSocketStream, accept_async};
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::{WebSocketStream, accept_hdr_async};
 
 use soromi_protocol::{ClientMessage, KeepAwakeMode, ServerMessage};
 
@@ -119,9 +121,11 @@ pub async fn serve(
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
     pairing: Arc<PairingService>,
+    token: String,
 ) {
     // Resolved once: the machine's name, shown to remote devices when this computer is in control.
     let device_name = local_device_name();
+    let token: Arc<str> = token.into();
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             continue;
@@ -130,10 +134,25 @@ pub async fn serve(
         let accounts = accounts.clone();
         let pairing = pairing.clone();
         let name = device_name.clone();
+        let token = token.clone();
         tokio::spawn(async move {
             // A keystroke and its echo are tiny packets; never hold one back to batch it.
             let _ = stream.set_nodelay(true);
-            if let Ok(ws) = accept_async(stream).await {
+            // Only a client holding the token gets in: another account on this machine, or a web
+            // page in a browser on it, can reach the port but cannot read `daemon.json`. The
+            // error type is the handshake's own; it is built once per refused socket.
+            #[allow(clippy::result_large_err)]
+            let check =
+                |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+                    if super::local::presents(request.uri().query(), &token) {
+                        return Ok(response);
+                    }
+                    let mut refusal =
+                        ErrorResponse::new(Some("this daemon needs its local token".into()));
+                    *refusal.status_mut() = StatusCode::UNAUTHORIZED;
+                    Err(refusal)
+                };
+            if let Ok(ws) = accept_hdr_async(stream, check).await {
                 // Local links are trusted, so they run plaintext and can manage devices.
                 handle_connection(
                     ws,
@@ -348,6 +367,21 @@ where
     let mut tasks = vec![writer, change_task, dir_task, control_task];
     tasks.extend(devices_task);
     tasks.extend(routes_task);
+    // A device is told again when the relay it reaches this computer through changes.
+    let relay_task = link_kind.device().map(|_| {
+        let relay_out = out.clone();
+        let relay_link = link.clone();
+        let mut relay = hub.subscribe_relay();
+        tokio::spawn(async move {
+            while relay.changed().await.is_ok() {
+                let url = relay.borrow_and_update().clone();
+                if relay_link.is_ready() && !url.is_empty() {
+                    let _ = relay_out.send(ServerMessage::Relay { url });
+                }
+            }
+        })
+    });
+    tasks.extend(relay_task);
     let _guard = ConnectionGuard {
         hub: hub.clone(),
         viewer_id,
@@ -723,7 +757,7 @@ mod tests {
         let handler_hub = hub.clone();
         let codec = Codec::from_key_base64(key).unwrap();
         tokio::spawn(async move {
-            let ws = accept_async(near).await.unwrap();
+            let ws = tokio_tungstenite::accept_async(near).await.unwrap();
             let device = DeviceLink {
                 id: "d1".to_string(),
                 on_presence: Arc::new(|_| {}),
@@ -871,8 +905,18 @@ mod tests {
             r#"{{"type":"hello","protocol":{},"clientId":"phone"}}"#,
             soromi_protocol::PROTOCOL_VERSION
         );
-        far.send(say(hello)).await.unwrap();
+        far.send(say(hello.clone())).await.unwrap();
         assert_eq!(received(&mut far, &codec).await, vec!["welcome", "routes"]);
+
+        // The relay it reaches the computer through changes: it is told at once, and with every
+        // hello from then on, next to the routes.
+        hub.set_relay("wss://relay.example.com".into());
+        assert_eq!(received(&mut far, &codec).await, vec!["relay"]);
+        far.send(say(hello)).await.unwrap();
+        assert_eq!(
+            received(&mut far, &codec).await,
+            vec!["welcome", "routes", "relay"]
+        );
 
         crate::home::set_soromi_home(None);
     }

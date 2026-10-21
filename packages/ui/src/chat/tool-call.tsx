@@ -96,14 +96,14 @@ export function ToolCall(tool: ToolCallProps) {
         {stat && (
           <span className="flex-none [font-family:var(--soromi-font-mono)] text-[11.5px]">
             <span className="text-[var(--soromi-ok)]">+{stat.add}</span>{' '}
-            <span className="text-[#f47070]">-{stat.del}</span>
+            <span className="text-[var(--soromi-danger)]">-{stat.del}</span>
           </span>
         )}
         <StatusDot state={state} />
       </button>
 
       {open && hasBody && (
-        <div className="mt-1 mb-1.5 ml-5 overflow-hidden rounded-[8px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-active)]">
+        <div className="mt-1 mb-1.5 ml-5 overflow-hidden rounded-[8px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-inset)]">
           {diff ? (
             <pre className={PANEL}>
               {diff.map((line, index) => (
@@ -112,8 +112,10 @@ export function ToolCall(tool: ToolCallProps) {
                   key={index}
                   className={cn(
                     'px-1',
-                    line.sign === '+' && 'bg-[#12321f] text-[var(--soromi-ok)]',
-                    line.sign === '-' && 'bg-[#3a1717] text-[#f47070]',
+                    line.sign === '+' &&
+                      'bg-[var(--soromi-diff-add-bg)] text-[var(--soromi-diff-add-text)]',
+                    line.sign === '-' &&
+                      'bg-[var(--soromi-diff-del-bg)] text-[var(--soromi-diff-del-text)]',
                     line.sign === ' ' && 'text-[var(--soromi-text-dim)]',
                   )}
                 >
@@ -139,7 +141,7 @@ export function ToolCall(tool: ToolCallProps) {
               <pre
                 className={cn(
                   PANEL,
-                  !result.ok ? 'text-[#f47070]' : 'text-[var(--soromi-text-faint)]',
+                  !result.ok ? 'text-[var(--soromi-danger)]' : 'text-[var(--soromi-text-faint)]',
                 )}
               >
                 {result.text}
@@ -158,7 +160,7 @@ function StatusDot({ state }: { state: ToolState }) {
     state === 'done'
       ? 'bg-[var(--soromi-ok)]'
       : state === 'error'
-        ? 'bg-[#f47070]'
+        ? 'bg-[var(--soromi-danger)]'
         : 'bg-[var(--soromi-warn)] motion-safe:animate-status-pulse'
   return <span className={cn('h-[6px] w-[6px] flex-none rounded-full', color)} />
 }

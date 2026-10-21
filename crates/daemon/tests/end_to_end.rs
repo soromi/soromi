@@ -21,6 +21,9 @@ use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 use soromi_protocol::{KeepAwakeMode, PROTOCOL_VERSION, TERMINAL_OUTPUT};
 
+/// What the local link takes from a client here (`transport::local`).
+const TOKEN: &str = "test-local-token";
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// A daemon serving on a free port, with its own temporary home and workspace root.
@@ -59,7 +62,7 @@ impl Daemon {
                 port: 0,
             },
         );
-        tokio::spawn(serve(listener, hub, accounts, pairing));
+        tokio::spawn(serve(listener, hub, accounts, pairing, TOKEN.into()));
 
         Self {
             addr,
@@ -71,9 +74,10 @@ impl Daemon {
 
     /// Opens a socket and says nothing yet.
     async fn open(&self) -> Socket {
-        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", self.addr))
-            .await
-            .unwrap();
+        let (ws, _) =
+            tokio_tungstenite::connect_async(format!("ws://{}/?token={TOKEN}", self.addr))
+                .await
+                .unwrap();
         ws
     }
 
@@ -207,6 +211,23 @@ async fn a_client_on_another_version_is_told_which_side_to_update() {
         read_until(&mut newer, "incompatible").await["action"],
         "update-daemon"
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_local_link_turns_away_a_client_without_its_token() {
+    let daemon = Daemon::start().await;
+
+    for url in [
+        format!("ws://{}", daemon.addr),
+        format!("ws://{}/?token=guess", daemon.addr),
+    ] {
+        let refused = tokio_tungstenite::connect_async(url).await.unwrap_err();
+        let tokio_tungstenite::tungstenite::Error::Http(response) = refused else {
+            panic!("expected an HTTP refusal, got {refused:?}");
+        };
+        assert_eq!(response.status(), 401);
+    }
 }
 
 #[tokio::test]

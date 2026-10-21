@@ -14,10 +14,13 @@ import { setModelCatalog } from '@soromi/ui/chat'
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
-import { focusWindow, onNotificationClick, showNotification } from '@/lib/host'
+import { focusWindow, onNotificationClick, setAppearance, showNotification } from '@/lib/host'
 
 //Constants
 import { DAEMON_URL, isElectron } from '@/config'
+
+//App
+import { watchAttention } from './attention'
 
 //Components
 import { AppLayout } from './app-layout'
@@ -31,8 +34,10 @@ export function App() {
   const theme = useAppStore((s) => s.theme)
 
   // Apply the appearance as a root class; `theme.css`'s `.so-light` overrides flip every surface.
+  // The shell is told too: its window opens in it next time, and its menus and dialogs follow.
   useEffect(() => {
     document.documentElement.classList.toggle('so-light', theme === 'light')
+    setAppearance(theme)
   }, [theme])
 
   // Clicking an OS notification opens the tab it was about (the shell also surfaces the window).
@@ -48,16 +53,19 @@ export function App() {
     [],
   )
 
-  // Report window focus to the daemon so it suppresses sounds/banners while the app is in front, and
-  // fires them when it's away (the Electron shell relays focus over the wire; see host `showNotification`).
+  // Tell the daemon whether someone is at the app, so it holds sounds and banners while they are
+  // and pushes them to their phone while they are not: the window behind another, or in front but
+  // left untouched for a few minutes (see `attention`). A reconnect starts the daemon over, so it is
+  // told again.
   useEffect(() => {
     if (!isElectron) return
-    const report = () => transport.send({ type: 'set-focused', focused: document.hasFocus() })
-    window.addEventListener('focus', report)
-    window.addEventListener('blur', report)
+    const attention = watchAttention((attended) =>
+      transport.send({ type: 'set-focused', focused: attended }),
+    )
+    const offOpen = transport.onOpen(attention.resend)
     return () => {
-      window.removeEventListener('focus', report)
-      window.removeEventListener('blur', report)
+      attention.stop()
+      offOpen()
     }
   }, [transport])
 
@@ -151,12 +159,9 @@ export function App() {
       transport.send({ type: 'list-models' })
       // The Electron shell (ad-hoc signed, like Tauri) renders banners natively with the Soromi
       // icon and click-to-open, so opt into wire notifications and let the daemon route them here
-      // instead of firing its own osascript banner. We also report window focus so banners and
-      // sounds fire only while you're away from the app.
-      if (isElectron) {
-        transport.send({ type: 'notifications-native', enabled: true })
-        transport.send({ type: 'set-focused', focused: document.hasFocus() })
-      }
+      // instead of firing its own osascript banner. Whether someone is at the app is reported by
+      // its own watcher (above).
+      if (isElectron) transport.send({ type: 'notifications-native', enabled: true })
     })
     const offClose = transport.onClose(() => client.setConnected(false))
     transport.connect()

@@ -14,6 +14,8 @@ export type PasteProps = {
 
 export type PairingConfig = {
   steps: string
+  /** The picture at the top of the screen: how tall it is. */
+  hero: { height: number }
   errors: Record<PairingError, string> & {
     /** The code was fine, but the phone could not keep it. */
     save: string

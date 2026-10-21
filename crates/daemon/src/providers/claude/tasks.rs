@@ -8,7 +8,9 @@
 //!   `task_progress`, `task_updated` and `task_notification`.
 //! - **In the transcript** (a terminal session, which is followed by reading the file), as text:
 //!   the tool result that acknowledges a background launch, a `SendMessage` to an agent, and the
-//!   `<task-notification>` Claude hands the main agent as a user-role message when one stops.
+//!   `<task-notification>` Claude hands the main agent when one stops: as a user-role message, or,
+//!   when it stops while the main agent is busy, as a queued command (`attachment` of type
+//!   `queued_command`) that is never written as a message at all.
 //!
 //! A stream carries the transcript's shapes too, so a chat session may hear the same thing twice.
 //! Every signal says what is true rather than what changed, so twice is harmless.
@@ -76,8 +78,25 @@ pub fn task_signals(line: &str) -> Vec<TaskSignal> {
         Some("system") => from_task_frame(&value).into_iter().collect(),
         Some("user") => from_user(&value),
         Some("assistant") => from_assistant(&value),
+        Some("attachment") => queued_notification(&value)
+            .and_then(ended)
+            .into_iter()
+            .collect(),
         _ => Vec::new(),
     }
+}
+
+/// The `<task-notification>` text Claude queued for the main agent while it was busy, if the
+/// entry is one: an `attachment` of type `queued_command` whose prompt is the notification.
+pub(super) fn queued_notification(value: &Value) -> Option<&str> {
+    let attachment = value.get("attachment")?;
+    if attachment.get("type").and_then(Value::as_str) != Some("queued_command") {
+        return None;
+    }
+    attachment
+        .get("prompt")
+        .and_then(Value::as_str)
+        .filter(|prompt| prompt.contains(NOTIFICATION))
 }
 
 /// A structured task frame from the live stream.
@@ -231,9 +250,11 @@ fn ended(text: &str) -> Option<TaskSignal> {
     })
 }
 
-/// The id of the agent a tool result says was launched in the background, if it says so.
+/// The id of the agent a tool result says was launched in the background, if it says so. The
+/// acknowledgement is the whole of the result, from its start: another tool's output that only
+/// quotes one (a search through a transcript, say) launched nothing.
 fn launched(text: &str) -> Option<&str> {
-    if !text.contains(LAUNCH_ACK) {
+    if !text.trim_start().starts_with(LAUNCH_ACK) {
         return None;
     }
     let rest = &text[text.find(LAUNCH_ID)? + LAUNCH_ID.len()..];
@@ -305,6 +326,34 @@ mod tests {
             tool: tool.map(str::to_string),
             name: name.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn an_agent_that_stops_while_the_main_agent_is_busy_is_heard_of_from_the_queue() {
+        let queued = r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>a664cc8815e672f9e</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Research usage\" finished</summary>\n</task-notification>"}}"#;
+        assert_eq!(
+            task_signals(queued),
+            vec![ended_signal(
+                "a664cc8815e672f9e",
+                Some("toolu_1"),
+                Some("Research usage")
+            )]
+        );
+        // A queued prompt the person typed is no notification.
+        let typed = r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"and the tests too"}}"#;
+        assert_eq!(task_signals(typed), vec![]);
+    }
+
+    #[test]
+    fn only_the_launch_itself_says_an_agent_was_launched() {
+        let launch = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"Async agent launched successfully.\nagentId: a1b2c3d4e5f6a7b8c (internal ID)"}]}]}}"#;
+        assert_eq!(
+            task_signals(launch),
+            vec![running("a1b2c3d4e5f6a7b8c", Some("t1"), None, Some(true))]
+        );
+        // A command's output that quotes one (a search through a transcript) launched nothing.
+        let quoted = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"match: Async agent launched successfully.\nagentId: a1b2c3d4e5f6a7b8c"}]}]}}"#;
+        assert_eq!(task_signals(quoted), vec![]);
     }
 
     #[test]

@@ -9,12 +9,20 @@ import { useAppStore } from '@/stores/app-store'
 
 //Components
 import { DevicesWidget } from './devices-widget'
+import { KeepAwakeWidget } from './keep-awake-widget'
+import { SettingsButton } from './settings-button'
 import { UsageWidget } from './usage-widget'
 
-/** The bottom status bar: usage + devices on the left, and the Terminal/Chat view toggle on the right. */
+/**
+ * The bottom status bar: settings, keep-awake, usage and devices on the left, and the
+ * Terminal/Chat view toggle on the right.
+ */
 export function StatusBar() {
   return (
     <div className="z-[var(--z-status-bar)] flex h-[28px] flex-none items-center gap-1 bg-[var(--soromi-bg-shell)] px-6">
+      <SettingsButton />
+      <KeepAwakeWidget />
+      <div className="mx-1 h-3.5 w-px bg-[var(--soromi-border)]" />
       <UsageWidget />
       <DevicesWidget />
       <div className="flex-1" />

@@ -11,7 +11,7 @@ import type { ButtonHTMLAttributes } from 'react'
 const buttonVariants = cva(
   // `appearance-none border-0` clears WebKit's native button chrome (preflight is off during the
   // Mantine -> Tailwind migration); variants set their own background/border.
-  'inline-flex appearance-none items-center justify-center gap-2 whitespace-nowrap rounded-md border-0 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex appearance-none items-center justify-center gap-2 whitespace-nowrap rounded-md border-0 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--soromi-focus-ring)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {

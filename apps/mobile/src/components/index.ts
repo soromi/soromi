@@ -1,5 +1,16 @@
+export { ActionRow } from './action-row'
+export { Backdrop } from './backdrop'
 export { Button } from './button'
+export { Card } from './card'
 export { Chip } from './chip'
+export { Highlight } from './highlight'
+export {
+  getLanguage,
+  getPathLanguage,
+  highlightLines,
+  joinLines,
+} from './highlight/helpers'
+export type { HighlightLine, HighlightToken } from './highlight/types'
 export { Icon } from './icon'
 export type { IconName } from './icon/types'
 export { IconButton } from './icon-button'
@@ -10,11 +21,15 @@ export { Logo } from './logo'
 export { Markdown } from './markdown'
 export { Option } from './option'
 export { Picture } from './picture'
+export { PictureViewer } from './picture-viewer'
 export { ProviderMark } from './provider-mark'
+export { ResizeHandle } from './resize-handle'
 export { Segmented } from './segmented'
 export type { Option as SegmentedOption } from './segmented/types'
 export { Sheet } from './sheet'
 export { StatusDot } from './status-dot'
+export { Switch } from './switch'
+export { SystemBars } from './system-bars'
 export { Terminal } from './terminal'
 export type { TerminalHandle } from './terminal/types'
 export { Text } from './text'

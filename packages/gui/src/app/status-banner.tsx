@@ -19,14 +19,14 @@ export function StatusBanner() {
 
   if (!connected) {
     return (
-      <div className={`${BANNER} bg-[var(--soromi-accent-dim)] text-[var(--soromi-accent-on)]`}>
+      <div className={`${BANNER} bg-[var(--soromi-accent-dim)] text-[var(--soromi-accent)]`}>
         Connecting to the daemon…
       </div>
     )
   }
   if (notice) {
     return (
-      <div className={`${BANNER} bg-[#3a3016] text-[#f0d9a8]`}>
+      <div className={`${BANNER} bg-[var(--soromi-notice-bg)] text-[var(--soromi-notice-text)]`}>
         <span className="min-w-0 flex-1">{notice}</span>
         <button
           type="button"

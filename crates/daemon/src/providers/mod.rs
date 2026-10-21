@@ -1,5 +1,6 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde_json::Value;
 use soromi_protocol::{
@@ -58,6 +59,21 @@ pub enum TaskSignal {
         /// What it was doing, when the line says: kept in case it is set going again.
         name: Option<String>,
     },
+}
+
+/// A conversation a provider keeps on disk, as a list of earlier ones shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conversation {
+    /// The provider's own id for it, which resumes it.
+    pub id: String,
+    /// The name it was given, or else the start of its first prompt.
+    pub title: String,
+    /// The start of the last thing asked in it, when that is not its first prompt.
+    pub last_prompt: Option<String>,
+    /// When it was last added to.
+    pub updated: SystemTime,
+    /// The file it is kept in.
+    pub path: PathBuf,
 }
 
 /// What a provider needs to fetch its plan usage: the endpoint, the bearer token, and any extra
@@ -181,6 +197,23 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// The conversations this provider kept for a working folder, in no particular order: what a
+    /// workspace can pick up again. None by default, for a provider that keeps none it can list.
+    fn conversations(&self, _config_dir: &Path, _cwd: &str) -> Vec<Conversation> {
+        Vec::new()
+    }
+
+    /// One of them, by its id.
+    fn conversation(&self, _config_dir: &Path, _cwd: &str, _id: &str) -> Option<Conversation> {
+        None
+    }
+
+    /// Whether what was said in a kept conversation (the prompts and the replies, not what tools
+    /// returned) matches `query`.
+    fn conversation_mentions(&self, _path: &Path, _query: &regex::bytes::Regex) -> bool {
+        false
+    }
+
     /// Where this provider keeps skills/slash-commands: the per-project config folder (e.g.
     /// `.claude`) and the slash-command subfolder (e.g. `commands`). `None` means no skills.
     fn skill_dirs(&self) -> Option<(&'static str, &'static str)> {
@@ -218,6 +251,19 @@ pub trait Provider: Send + Sync {
     /// list. Each provider writes a different format (Claude's JSONL, Codex's rollout, ...). Default:
     /// the provider has no transcript format Soromi reads, so nothing is surfaced.
     fn parse_transcript_line(&self, _line: &str) -> Vec<ChatEvent> {
+        Vec::new()
+    }
+
+    /// Where a background agent of the conversation at `transcript` writes its own conversation,
+    /// by the id its `SubAgent` carries (see [`soromi_protocol::SubAgent::id`]). `None` while it has
+    /// written nothing, or for a provider that keeps no such logs (the default).
+    fn agent_log_path(&self, _transcript: &Path, _agent: &str) -> Option<PathBuf> {
+        None
+    }
+
+    /// One line of a background agent's own log as chat events: its prompt, tool calls and
+    /// replies, which the main conversation's parser leaves out as the agent's business.
+    fn parse_agent_log_line(&self, _line: &str) -> Vec<ChatEvent> {
         Vec::new()
     }
 

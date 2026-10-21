@@ -1,25 +1,35 @@
 import { useCallback } from 'react'
 
 //Services
-import { KeychainService } from '@/services/keychain'
+import { ComputersService } from '@/services/computers'
 import { LinkService } from '@/services/link'
 
 //State
-import { resetAllStores } from '@/states/create'
-import { WorkspaceStore } from '@/states/workspace/workspace.state'
+import { DaemonStore } from '@/states/daemon/daemon.state'
+import { LinkStore } from '@/states/link/link.state'
 
 /**
- * Forgets the computer: the terminals opened on it from here are closed, the pairing leaves the
- * keychain, the link closes, and everything mirrored from it is cleared. The computer keeps its side until the device is revoked there.
+ * Forgets the computer in use: its pairing leaves the keychain, and the phone goes on with
+ * another computer it is paired with, or with none. The computer keeps its side until the device
+ * is revoked there.
+ *
+ * On a computer with nobody at it (Soromi started from a terminal, or as a service on a server)
+ * the terminals this phone opened are closed first: nothing would be left to close them. On the
+ * desktop app's computer they are left running, since its terminals are the desktop's to manage.
  */
 export const useUnpair = () =>
   useCallback(async () => {
-    // Nothing would be left to close the terminals opened from here, so they go first.
-    const shells = Object.values(WorkspaceStore.getState().shells.lists).flat()
-    for (const shell of shells) LinkService.send({ type: 'close-session', session: shell.id })
-    // And nothing more is to be pushed to this phone from that computer.
-    LinkService.setPushToken(null)
-    await KeychainService.forgetPairing()
-    LinkService.disconnect()
-    resetAllStores()
+    const device = LinkStore.getState().pairing.current?.device
+    const daemon = DaemonStore.getState()
+    const unattended = daemon.host !== null && daemon.host.launcher !== 'desktop'
+    if (unattended && device) {
+      for (const workspace of daemon.workspaces) {
+        for (const shell of workspace.shells ?? []) {
+          if (shell.openedBy === device) {
+            LinkService.send({ type: 'close-session', session: shell.id })
+          }
+        }
+      }
+    }
+    await ComputersService.forgetCurrent()
   }, [])

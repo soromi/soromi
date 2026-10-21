@@ -1,60 +1,57 @@
-import { useShallow } from 'zustand/react/shallow'
-
 //Packages
 import { useClientStore, useTransport } from '@soromi/client'
-import { Button } from '@soromi/ui'
+import { Switch } from '@soromi/ui'
 
-//Icons
-import BellOffSvg from '@/assets/icons/bell-off.svg?react'
+//Components
+import { SettingsGroup, SettingsPage, SettingsRow } from '../layout'
 
-//Styles
-import { CARD_NAME, DESC, H2, SECTION, SECTION_HEAD } from '../styles'
-
-/** Muted workspaces: the ones whose notifications are silenced, with an unmute action. */
+/**
+ * Which workspaces notify: one switch each. What is said is the computer's (each workspace's
+ * `muted`), so this, the sidebar's menu and the phone always agree.
+ */
 export function NotificationsSection() {
   const transport = useTransport()
-  const { workspaces, muted, setMuted } = useClientStore(
-    useShallow((s) => ({ workspaces: s.workspaces, muted: s.muted, setMuted: s.setMuted })),
-  )
-  const mutedNames = workspaces.filter((w) => muted[w.name]).map((w) => w.name)
+  const workspaces = useClientStore((s) => s.workspaces)
+  const setMuted = useClientStore((s) => s.setMuted)
 
-  const unmute = (workspace: string) => {
-    setMuted(workspace, false)
-    transport.send({ type: 'mute-workspace', workspace, muted: false })
+  const toggle = (workspace: string, notify: boolean) => {
+    setMuted(workspace, !notify)
+    transport.send({ type: 'mute-workspace', workspace, muted: !notify })
   }
 
   return (
-    <section className={SECTION}>
-      <div className={SECTION_HEAD}>
-        <div>
-          <h2 className={H2}>Muted workspaces</h2>
-          <p className={DESC}>Workspaces with notifications silenced.</p>
-        </div>
-      </div>
-
-      {mutedNames.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-[var(--soromi-border)] border-dashed px-6 py-12 text-center">
-          <span className="mb-1.5 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--soromi-bg-hover)] text-[var(--soromi-text-faint)]">
-            <BellOffSvg width={22} height={22} />
-          </span>
-          <div className="text-[15px] text-[var(--soromi-text-dim)]">No muted workspaces</div>
-          <div className="text-[13px] text-[var(--soromi-text-faint)]">
-            Silenced workspaces show up here.
+    <SettingsPage
+      title="Notifications"
+      description="A banner and a sound when a session finishes, or needs you to answer it."
+    >
+      <SettingsGroup
+        label="Workspaces"
+        hint="A muted workspace is silent here and on your paired phones. They come back on with it."
+      >
+        {workspaces.length === 0 && (
+          <div className="px-4 py-6 text-center text-[12.5px] text-[var(--soromi-text-faint)]">
+            No workspaces yet.
           </div>
-        </div>
-      ) : (
-        mutedNames.map((workspace) => (
-          <div
-            key={workspace}
-            className="flex items-center justify-between rounded-[10px] border border-[var(--soromi-border)] px-3.5 py-2.5"
-          >
-            <span className={CARD_NAME}>{workspace}</span>
-            <Button variant="ghost" size="sm" onClick={() => unmute(workspace)}>
-              Unmute
-            </Button>
-          </div>
-        ))
-      )}
-    </section>
+        )}
+        {workspaces.map((workspace) => (
+          <SettingsRow
+            key={workspace.name}
+            title={workspace.name}
+            description={
+              workspace.muted
+                ? 'Muted'
+                : `${workspace.sessions.length} ${workspace.sessions.length === 1 ? 'session' : 'sessions'}`
+            }
+            control={
+              <Switch
+                checked={!workspace.muted}
+                onCheckedChange={(notify) => toggle(workspace.name, notify)}
+                aria-label={`Notifications for ${workspace.name}`}
+              />
+            }
+          />
+        ))}
+      </SettingsGroup>
+    </SettingsPage>
   )
 }

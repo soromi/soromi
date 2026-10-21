@@ -10,9 +10,14 @@ on:
 permissions:
   contents: write
 
-# Builds the Electron desktop app (apps/desktop) and attaches it to the tag's release.
-# macOS only for now: the Electron shell bundles a natively-compiled `soromi-daemon`, so Windows /
-# Linux builds would each need their own runner + daemon compile — add matrix entries when needed.
+# Builds everything a release ships and attaches it to the tag's draft release, through the same
+# `scripts/build.mjs` / `scripts/linux/build.sh` used locally (`pnpm build:desktop:mac` and co.):
+#   - macOS (Apple Silicon): the desktop app (.zip) and the `soromi` binary (.tar.gz), both signed
+#     and notarized when the secrets below are set.
+#   - Linux x64 and arm64: the desktop app (.deb, .rpm) and the `soromi` binary (.tar.gz), built in
+#     a Debian 11 container so they run on Ubuntu 20.04 / Debian 11 / RHEL 9 and newer.
+# Each build job uploads its files; one last job puts them all on the release, so parallel jobs
+# never race to create it.
 #
 # Signing + notarization use Electron Forge's built-in osxSign/osxNotarize. They activate when the
 # Developer ID cert is in the keychain; forge.config auto-detects it and otherwise builds unsigned.
@@ -24,7 +29,7 @@ permissions:
 #   APPLE_PASSWORD                an app-specific password (appleid.apple.com) for notarization
 #   APPLE_TEAM_ID                 the Team ID (Y4VQSWR73G)
 jobs:
-  build:
+  mac:
     runs-on: macos-latest
     env:
       # Surfaced so the import step can gate on presence (secrets aren't allowed in `if:`).
@@ -73,15 +78,64 @@ jobs:
       - name: Build protocol
         run: pnpm --filter @soromi/protocol build
 
-      # `make` chains: build the release daemon (cargo) + the gui, then run the Electron Forge makers,
-      # which sign (osxSign) and notarize (osxNotarize, app-specific password) via the env below.
-      - name: Build the desktop app
+      # Builds, signs and notarizes the app with Electron Forge (osxSign / osxNotarize), checks it
+      # with Gatekeeper and its stapled ticket, and zips it; then the same for the bare binary.
+      - name: Build the desktop app and the CLI
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           DEBUG: 'electron-forge:*,@electron/notarize*,@electron/osx-sign*,@electron/packager*'
-        run: pnpm --filter @soromi/desktop make
+        run: |
+          node scripts/build.mjs desktop mac
+          node scripts/build.mjs cli mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac
+          path: out/release/*
+          if-no-files-found: error
+
+  linux:
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # The oldest glibc we support (2.31): built on the runner itself (Ubuntu 24.04), the binaries
+    # would not start on Ubuntu 22.04.
+    container: rust:1-bullseye
+    env:
+      SRC: ${{ github.workspace }}
+      OUT: ${{ github.workspace }}/out/release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the CLI
+        run: bash scripts/linux/build.sh cli
+
+      # Reuses the daemon the CLI step compiled.
+      - name: Build the desktop app
+        run: bash scripts/linux/build.sh desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: out/release/*
+          if-no-files-found: error
+
+  release:
+    needs: [mac, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: out/release
+          merge-multiple: true
 
       - name: Attach artifacts to the release
         uses: softprops/action-gh-release@v2
@@ -95,7 +149,10 @@ jobs:
           body: |
             Download the build for your platform from the assets below.
 
-            macOS builds are Developer ID signed and notarized when the release secrets are configured.
-          files: |
-            apps/desktop/out/make/**/*.zip
-            apps/desktop/out/make/**/*.dmg
+            - **Desktop:** `Soromi-*-macos-arm64.zip` (Apple Silicon), `.deb` / `.rpm` for Linux.
+            - **Server / command line:** `soromi-*-<os>-<arch>.tar.gz`, the daemon and the `soromi`
+              command on their own. See `docs/server.md`.
+
+            Every file has a `.sha256` beside it. macOS builds are Developer ID signed and notarized
+            when the release secrets are configured.
+          files: out/release/*

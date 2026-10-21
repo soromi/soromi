@@ -11,7 +11,7 @@ import type { ReactNode } from 'react'
 const STATUS_CLASS: Record<Status, string | null> = {
   thinking: 'bg-[var(--soromi-accent)]',
   'waiting-input': 'bg-[var(--soromi-warn)]',
-  blocked: 'bg-[#f87171]',
+  blocked: 'bg-[var(--soromi-danger)]',
   done: 'bg-[var(--soromi-ok)]',
   idle: null,
 }

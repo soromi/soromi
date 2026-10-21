@@ -64,16 +64,22 @@ export const useWorkspaceDiff = (
 export const useWorkspaceCollapsed = () => WorkspaceStore((state) => state.groups.collapsed)
 
 /**
- * @description The terminals opened from here in a workspace, or `undefined` if none ever was
+ * @description The computer's folder last listed for picking a workspace's folders
  */
-export const useWorkspaceShells = (workspace: string) =>
-  WorkspaceStore((state) => state.shells.lists[workspace])
+export const useWorkspaceFolderListing = () => WorkspaceStore((state) => state.browse.listing)
 
 /**
  * @description The id of the terminal on screen in a workspace, if one is
  */
 export const useWorkspaceActiveShell = (workspace: string) =>
   WorkspaceStore((state) => state.shells.active[workspace])
+
+/**
+ * @description What a workspace renamed from this phone is called now; `undefined` for one that
+ * was not
+ */
+export const useWorkspaceRenamedTo = (workspace: string) =>
+  WorkspaceStore((state) => state.renames.to[workspace])
 
 /**
  * @description Workspace actions: a stable reference, so no shallow compare needed

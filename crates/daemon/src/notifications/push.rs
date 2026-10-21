@@ -25,6 +25,8 @@ const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 const TOKENS_FILE: &str = "push.json";
 /// The Android channel the phone app posts its banners on, so a pushed one looks the same.
 const CHANNEL: &str = "sessions";
+/// The kind of banner the app shows Allow and Deny buttons under (registered by the app).
+const APPROVAL_CATEGORY: &str = "approval";
 const SEND_LIMIT: Duration = Duration::from_secs(15);
 /// Longer than any token the push service hands out; anything past it is not one.
 const MAX_TOKEN: usize = 256;
@@ -42,25 +44,35 @@ pub enum Delivery {
 
 pub type Sending = Pin<Box<dyn Future<Output = Delivery> + Send>>;
 
-/// Hands a banner to a push service for one phone.
+/// Hands a banner to a push service for one phone. `device` is that phone's id here, which goes
+/// along so a phone paired with several computers can tell which one a banner came from.
 pub trait PushGateway: Send + Sync {
-    fn send(&self, token: &str, banner: &WireNotification) -> Sending;
+    fn send(&self, token: &str, device: &str, banner: &WireNotification) -> Sending;
 }
 
 /// Expo's push service, which takes one kind of token for both Apple's and Google's.
 pub struct ExpoGateway;
 
 impl PushGateway for ExpoGateway {
-    fn send(&self, token: &str, banner: &WireNotification) -> Sending {
-        let message = json!({
+    fn send(&self, token: &str, device: &str, banner: &WireNotification) -> Sending {
+        let mut message = json!({
             "to": token,
             "title": banner.title,
             "body": banner.body,
-            "data": { "workspace": banner.workspace, "session": banner.session },
+            "data": {
+                "workspace": banner.workspace,
+                "session": banner.session,
+                "device": device,
+                "approval": banner.approval,
+            },
             "sound": "default",
             "channelId": CHANNEL,
             "priority": "high",
         });
+        // A tool request is answered from the banner: the app shows Allow and Deny under it.
+        if banner.approval.is_some() {
+            message["categoryId"] = json!(APPROVAL_CATEGORY);
+        }
         Box::pin(async move {
             let Ok(client) = reqwest::Client::builder().timeout(SEND_LIMIT).build() else {
                 return Delivery::Failed;
@@ -76,7 +88,9 @@ impl PushGateway for ExpoGateway {
     }
 }
 
-/// Reads the service's answer to one message: a ticket, alone or in a list of one.
+/// Reads the service's answer to one message: a ticket, alone or in a list of one. A refusal is
+/// said on stderr: one that is the app's (no push credentials for it) fails every banner, and
+/// would otherwise go unseen.
 fn delivery_from(answer: &Value) -> Delivery {
     let ticket = match &answer["data"] {
         Value::Array(tickets) => tickets.first().unwrap_or(&Value::Null),
@@ -85,7 +99,14 @@ fn delivery_from(answer: &Value) -> Delivery {
     match ticket["status"].as_str() {
         Some("ok") => Delivery::Sent,
         Some("error") if ticket["details"]["error"] == "DeviceNotRegistered" => Delivery::Gone,
-        _ => Delivery::Failed,
+        _ => {
+            let reason = ticket["message"]
+                .as_str()
+                .or(answer["errors"][0]["message"].as_str())
+                .unwrap_or("no answer the daemon understood");
+            eprintln!("soromi: a banner could not be pushed to a phone: {reason}");
+            Delivery::Failed
+        }
     }
 }
 
@@ -189,7 +210,7 @@ impl PushService {
                 .collect()
         };
         for (device, token) in targets {
-            let sending = self.gateway.send(&token, banner);
+            let sending = self.gateway.send(&token, &device, banner);
             let inner = self.inner.clone();
             let store = self.store.clone();
             tokio::spawn(async move {
@@ -248,7 +269,7 @@ mod tests {
     }
 
     impl PushGateway for Recording {
-        fn send(&self, token: &str, banner: &WireNotification) -> Sending {
+        fn send(&self, token: &str, _device: &str, banner: &WireNotification) -> Sending {
             self.sent
                 .lock()
                 .unwrap()
@@ -264,6 +285,7 @@ mod tests {
             body: "\"kazomi\" finished".into(),
             workspace: "kazomi".into(),
             session: Some("s1".into()),
+            approval: None,
             audience: Audience::Everyone,
         }
     }

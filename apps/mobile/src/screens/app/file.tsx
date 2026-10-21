@@ -14,6 +14,7 @@ import { LinkBanner } from '@/features/layout/components/link-banner'
 
 //Helpers
 import { getFileName } from '@/features/files/helpers'
+import { getHeaderTitle } from '@/features/layout/helpers'
 
 //Hooks
 import { useFile } from '@/features/files/hooks/use-file'
@@ -24,7 +25,7 @@ export const FileScreen = () => {
   const { name, path } = useLocalSearchParams<{ name: string; path: string }>()
   const file = useFile(name, path)
 
-  const options = useMemo(() => ({ title: getFileName(path) }), [path])
+  const options = useMemo(() => getHeaderTitle(getFileName(path)), [path])
 
   return (
     <KeyboardView style={styles.root}>

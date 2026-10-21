@@ -10,12 +10,16 @@ declare global {
 }
 
 /**
- * The daemon's local WebSocket endpoint the viewport connects to. The desktop shell injects
- * the real URL (its daemon binds an ephemeral port); the fallback is the fixed dev port used
- * when running the GUI standalone against `pnpm daemon`.
+ * The daemon's local WebSocket endpoint the viewport connects to, with the token its local link
+ * takes. The desktop shell injects the real URL (its daemon binds an ephemeral port, with a token
+ * of the shell's choosing); the fallback is the fixed dev port, for the GUI run standalone against
+ * `pnpm dev:daemon`, started with the same `SOROMI_LOCAL_TOKEN` as `VITE_SOROMI_LOCAL_TOKEN` here.
  */
 export const DAEMON_URL =
-  (typeof window !== 'undefined' && window.__SOROMI_DAEMON_URL__) || 'ws://localhost:8317'
+  (typeof window !== 'undefined' && window.__SOROMI_DAEMON_URL__) ||
+  (import.meta.env.VITE_SOROMI_LOCAL_TOKEN
+    ? `ws://localhost:8317/?token=${encodeURIComponent(import.meta.env.VITE_SOROMI_LOCAL_TOKEN)}`
+    : 'ws://localhost:8317')
 
 /** True when running inside the Electron desktop shell (native dialogs, notifications, etc.). */
 export const isElectron = typeof window !== 'undefined' && '__SOROMI_ELECTRON__' in window

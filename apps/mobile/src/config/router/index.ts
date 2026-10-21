@@ -10,6 +10,12 @@ export const routes = {
     /** Patterns: each is filled by a helper in the feature that links to it. */
     session: '/session/[id]',
     panel: '/session/[id]/panel',
+    agent: '/session/[id]/agent',
+    newWorkspace: '/workspace/new',
+    workspace: '/workspace/[name]/sessions',
+    workspaceSettings: '/workspace/[name]/settings',
+    conversations: '/workspace/[name]/conversations',
+    usage: '/workspace/[name]/usage',
     file: '/workspace/[name]/file',
     diff: '/workspace/[name]/diff',
   },

@@ -8,8 +8,10 @@ use soromi_protocol::{
 
 use super::{Provider, UsageAuthState};
 
+mod agents;
 mod chat;
 mod commands;
+mod conversations;
 mod hooks;
 mod status;
 mod tasks;
@@ -103,18 +105,19 @@ impl Provider for Claude {
     }
 
     fn transcript_path(&self, config_dir: &Path, cwd: &str, id: &str) -> Option<PathBuf> {
-        // Claude saves each conversation to `<config>/projects/<cwd>/<id>.jsonl`, encoding the cwd by
-        // replacing every non-alphanumeric char with `-`.
-        let encoded: String = cwd
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        Some(
-            config_dir
-                .join("projects")
-                .join(encoded)
-                .join(format!("{id}.jsonl")),
-        )
+        Some(project_dir(config_dir, cwd).join(format!("{id}.jsonl")))
+    }
+
+    fn conversations(&self, config_dir: &Path, cwd: &str) -> Vec<super::Conversation> {
+        conversations::list(&project_dir(config_dir, cwd))
+    }
+
+    fn conversation(&self, config_dir: &Path, cwd: &str, id: &str) -> Option<super::Conversation> {
+        conversations::read(&project_dir(config_dir, cwd).join(format!("{id}.jsonl")))
+    }
+
+    fn conversation_mentions(&self, path: &Path, query: &regex::bytes::Regex) -> bool {
+        conversations::mentions(path, query)
     }
 
     fn skill_dirs(&self) -> Option<(&'static str, &'static str)> {
@@ -143,6 +146,14 @@ impl Provider for Claude {
 
     fn transcript_entry_id<'a>(&self, line: &'a str) -> Option<&'a str> {
         transcript::entry_id(line)
+    }
+
+    fn agent_log_path(&self, transcript: &Path, agent: &str) -> Option<PathBuf> {
+        agents::log_path(transcript, agent)
+    }
+
+    fn parse_agent_log_line(&self, line: &str) -> Vec<ChatEvent> {
+        transcript::parse_agent_line(line)
     }
 
     fn task_signals(&self, line: &str) -> Vec<super::TaskSignal> {
@@ -270,6 +281,16 @@ impl Provider for Claude {
             })
             .collect()
     }
+}
+
+/// Where Claude keeps the conversations had in `cwd`: `<config>/projects/<cwd>/`, the folder's path
+/// with every character that is not a letter or a digit made a `-`.
+fn project_dir(config_dir: &Path, cwd: &str) -> PathBuf {
+    let encoded: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    config_dir.join("projects").join(encoded)
 }
 
 #[cfg(test)]

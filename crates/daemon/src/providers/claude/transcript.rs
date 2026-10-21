@@ -27,37 +27,73 @@ pub fn entry_id(line: &str) -> Option<&str> {
 pub fn parse_line(line: &str) -> Vec<ChatEvent> {
     serde_json::from_str::<Value>(line)
         .ok()
-        .map(|value| parse_value(&value))
+        .map(|value| parse_value(&value, false))
         .unwrap_or_default()
 }
 
-fn parse_value(value: &Value) -> Vec<ChatEvent> {
+/// One line of a background agent's own log (`subagents/agent-<id>.jsonl`), all of which is the
+/// agent's: what it was asked, the tools it used, what it said.
+pub fn parse_agent_line(line: &str) -> Vec<ChatEvent> {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .map(|value| parse_value(&value, true))
+        .unwrap_or_default()
+}
+
+fn parse_value(value: &Value, agent_log: bool) -> Vec<ChatEvent> {
     // A sub-agent's (Task/Agent) own conversation is interleaved into the stream/transcript, tagged
     // `isSidechain: true` (transcript) or with a non-null `parent_tool_use_id` (stream). Those belong
     // to the sub-agent, not the main thread — skip them so they don't render as chat bubbles. The
-    // sub-agent still surfaces via the main thread's `Agent` tool call (and the agents-working panel).
-    if value.get("isSidechain").and_then(Value::as_bool) == Some(true)
-        || value
-            .get("parent_tool_use_id")
-            .is_some_and(|id| !id.is_null())
+    // sub-agent still surfaces via the main thread's `Agent` tool call (and the agents-working panel),
+    // and its own log is read on its own (`parse_agent_line`), where every line is its.
+    if !agent_log
+        && (value.get("isSidechain").and_then(Value::as_bool) == Some(true)
+            || value
+                .get("parent_tool_use_id")
+                .is_some_and(|id| !id.is_null()))
     {
         return Vec::new();
     }
-    // Internal bookkeeping messages, not conversation: the `<local-command-caveat>` (`isMeta`) and the
-    // post-compaction continuation summary (`isVisibleInTranscriptOnly` / `isCompactSummary`). They'd
-    // otherwise render as giant/odd bubbles, so drop them.
-    if value.get("isMeta").and_then(Value::as_bool) == Some(true)
-        || value
-            .get("isVisibleInTranscriptOnly")
-            .and_then(Value::as_bool)
-            == Some(true)
+    // The post-compaction continuation summary (`isVisibleInTranscriptOnly` / `isCompactSummary`) is
+    // the agent's own memory, not conversation: it would render as a giant bubble, so drop it.
+    if value
+        .get("isVisibleInTranscriptOnly")
+        .and_then(Value::as_bool)
+        == Some(true)
         || value.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
     {
         return Vec::new();
     }
     match value.get("type").and_then(Value::as_str) {
+        // What Claude adds to the conversation itself, in the user's name: flagged `isMeta` in the
+        // transcript and `isSynthetic` on the live stream. Nobody typed it, so it is never a user
+        // bubble. A short note that tells the user something (asking the agent to resume a reply
+        // that was cut off, or to continue) is a system notice; internal notes (the local-command
+        // caveat, a picture's path or sizes, a skill's instructions, injected context) are dropped.
+        Some("user") if is_synthetic(value) => parse_user(value)
+            .into_iter()
+            .filter_map(|event| match event {
+                ChatEvent::User { text, files } if files.is_empty() && is_short_note(&text) => {
+                    Some(ChatEvent::Notice { text })
+                }
+                ChatEvent::User { .. } => None,
+                other => Some(other),
+            })
+            .collect(),
         Some("user") => parse_user(value),
         Some("assistant") => parse_assistant(value),
+        // A background task stopped while the main agent was busy: Claude queued the note for it
+        // instead of writing it as a message. Shown as the one line a person needs of it, as the
+        // same note is when it arrives as a message.
+        Some("attachment") => super::tasks::queued_notification(value)
+            .and_then(super::tasks::notification)
+            .filter(|notice| !notice.summary.is_empty())
+            .map(|notice| {
+                vec![ChatEvent::Notice {
+                    text: notice.summary.to_string(),
+                }]
+            })
+            .unwrap_or_default(),
         // The conversation was compacted here: mark the spot.
         Some("system")
             if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
@@ -85,6 +121,25 @@ pub(super) fn compaction_notice(auto: bool) -> ChatEvent {
     ChatEvent::Notice {
         text: text.to_string(),
     }
+}
+
+/// A user-role message Claude wrote itself rather than the person: `isMeta` in the transcript,
+/// `isSynthetic` on the live stream.
+fn is_synthetic(value: &Value) -> bool {
+    ["isMeta", "isSynthetic"]
+        .iter()
+        .any(|flag| value.get(*flag).and_then(Value::as_bool) == Some(true))
+}
+
+/// The longest note Claude adds itself that is shown, as a notice; anything longer is context for
+/// the agent, not a note for the user.
+const SHORT_NOTE: usize = 300;
+
+/// Whether a message Claude added itself reads as a note to show: short, and not the path of a
+/// picture that came with the user's message (`[Image: source: …]`, shown as the picture itself).
+fn is_short_note(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty() && text.chars().count() <= SHORT_NOTE && !text.starts_with("[Image: source:")
 }
 
 fn parse_user(value: &Value) -> Vec<ChatEvent> {
@@ -693,13 +748,44 @@ mod tests {
     }
 
     #[test]
+    fn what_claude_adds_in_the_users_name_is_a_notice_on_the_stream_and_in_the_transcript() {
+        let nudge =
+            "Your response above was cut off mid-stream. Resume directly from where it stops.";
+        let notice = vec![ChatEvent::Notice {
+            text: nudge.to_string(),
+        }];
+        // Live, as the stream sends it.
+        let stream = format!(
+            r#"{{"type":"user","isReplay":true,"isSynthetic":true,"message":{{"role":"user","content":"{nudge}"}}}}"#
+        );
+        assert_eq!(parse_line(&stream), notice);
+        // From the transcript, on reload.
+        let transcript = format!(
+            r#"{{"type":"user","isMeta":true,"turnCompanion":true,"message":{{"role":"user","content":"{nudge}"}}}}"#
+        );
+        assert_eq!(parse_line(&transcript), notice);
+        // The same words typed by the person are theirs.
+        let typed = format!(r#"{{"type":"user","message":{{"role":"user","content":"{nudge}"}}}}"#);
+        assert!(matches!(parse_line(&typed)[..], [ChatEvent::User { .. }]));
+        // Internal notes stay out, flagged or not: a picture's sizes or path, and long context.
+        let sizes = r#"{"type":"user","isSynthetic":true,"message":{"role":"user","content":"[Image: original 10x10, displayed at 5x5.]"}}"#;
+        assert_eq!(parse_line(sizes), vec![]);
+        let path = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"[Image: source: /tmp/a.png]"}}"#;
+        assert_eq!(parse_line(path), vec![]);
+        let context = format!(
+            r#"{{"type":"user","isMeta":true,"message":{{"role":"user","content":"{}"}}}}"#,
+            "context ".repeat(60)
+        );
+        assert_eq!(parse_line(&context), vec![]);
+    }
+
+    #[test]
     fn the_local_command_caveat_is_dropped_tagged_or_meta() {
         // Tagged (live stream, no `isMeta`).
         let tagged = r#"{"type":"user","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands.</local-command-caveat>"}}"#;
         assert_eq!(parse_line(tagged), vec![]);
         // Flagged `isMeta` (from the transcript / seed).
-        let meta =
-            r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"anything"}}"#;
+        let meta = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat: The messages below were generated by the user while running local commands."}}"#;
         assert_eq!(parse_line(meta), vec![]);
     }
 

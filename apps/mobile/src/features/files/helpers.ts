@@ -9,7 +9,7 @@ import { FILES } from './constants/files'
 //Type
 import type { FileNode } from '@soromi/core'
 import type { Href } from 'expo-router'
-import type { IconName } from '@/components'
+import type { HighlightLine, IconName } from '@/components'
 import type { FileContent, FileSave } from '@/states/workspace/workspace.state.type'
 import type { CodeLine, FileIconLook, FileStatus } from './types'
 
@@ -79,5 +79,10 @@ export const getFileStatus = (arg: {
 }
 
 /** A file's text as numbered lines. */
-export const toLines = (content: string): CodeLine[] =>
-  content.split('\n').map((text, index) => ({ key: `l${index}`, number: index + 1, text }))
+export const toLines = (content: string, colored: HighlightLine[] | null = null): CodeLine[] =>
+  content.split('\n').map((text, index) => ({
+    key: `l${index}`,
+    number: index + 1,
+    text,
+    tokens: colored?.[index] ?? null,
+  }))

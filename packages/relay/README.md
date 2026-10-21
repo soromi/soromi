@@ -1,76 +1,99 @@
 # @soromi/relay
 
-A stateless, content-blind relay that lets the phone reach the desktop daemon when they are not on
-the same network.
+The relay that lets a phone reach its computer when the two are not on the same network, as a
+Cloudflare Worker.
 
-Both peers dial **out** to the relay (so there is no port-forwarding or NAT to configure) and are
-matched by a secret **room id**. The relay cross-forwards their frames **verbatim**, it never parses
-or stores them. The frames are end-to-end encrypted between the daemon and the phone, so the relay
-only ever sees ciphertext; it holds no end-to-end keys and no data.
+Both ends dial **out** to it (nothing to forward on a router, no port open on the computer) and
+meet in a **room**, by a random secret id the pairing QR carries. The relay forwards their frames
+to each other **verbatim**: they are end-to-end encrypted between the daemon and the phone, so it
+only ever sees ciphertext. It holds no keys and stores nothing.
+
+Each room is a Durable Object. Cloudflare creates it near the first peer to reach it, which is the
+daemon (it waits in its rooms), and each peer connects through its own nearest Cloudflare
+location. So the relay runs close to whoever uses it, wherever that is, from one deployment. A
+room's sockets use the hibernation API: while the phone is away and the daemon only waits, the
+room is asleep and costs nothing.
 
 ## Protocol
 
-- Connect: `wss://<relay>/?room=<id>&role=<host|device>`. The room id is random and secret,
-  delivered by the pairing QR. The daemon is the room's `host`; the paired phone is its `device`.
-- A room holds one host and one device. A socket joining in a role that is taken **replaces** the
-  one holding it (which is closed with `4002`), so a peer that reconnects never waits for its own
-  dead socket to time out.
-- A host must present the access key (`4003` otherwise). A device needs no key, but the room must
-  have its host (`4004` otherwise). A missing room id is refused (`4000`).
-- Any frame from one peer is forwarded to the other. A peer that stops draining its socket is
-  dropped rather than buffered for; dead sockets are dropped by a heartbeat.
+- `wss://<relay>/?room=<id>&role=<host|device>`. The daemon is a room's `host`, the paired phone
+  its `device`. A room holds one of each; their frames are forwarded to each other as they came,
+  text as text and binary as binary.
+- A socket joining in a role that is taken **replaces** the one there, which is closed with `4002`,
+  so a peer that reconnects never waits for its own dead socket.
+- A host must present the access key in the `x-soromi-access` header (`4003` otherwise). A device
+  needs none, but the room must have its host (`4004`). A missing or overlong room id is refused
+  (`4000`). A peer that names no role (an older build) is a host if it holds the key.
 - Each peer is told the room's occupancy as a text frame, `{"__relay":"presence","peers":n}`.
-- `GET /health` returns `ok` for uptime checks.
+- `GET /health` answers `ok`, or `503` while no access key is set. Anything else is `404`.
 
-## Run
+A Worker cannot send WebSocket pings. A dead socket is dropped when its connection times out, or
+replaced when its peer comes back; the daemon and the phone notice a silent link on their own.
 
-```bash
-pnpm --filter @soromi/relay dev      # watch mode (tsx); uses the daemon's default key if none is set
-pnpm --filter @soromi/relay build && RELAY_ACCESS_KEY=your-secret pnpm --filter @soromi/relay start
+## Code
+
+```
+src/
+├─ index.ts              the Worker: routes a request to its controller, exports the Room class
+├─ types.ts              Role, Seat, Env (the bindings and the access-key secret)
+├─ config/app.ts         the header names, limits and close codes
+├─ controllers/
+│  ├─ health-controller.ts   GET /health
+│  └─ relay-controller.ts    the WebSocket route: decides room and role, hands the socket over
+├─ rooms/
+│  ├─ room.ts            the Durable Object: seats, forwarding, presence (hibernation API)
+│  └─ seats.ts           what a room says and where a frame goes: pure, unit-tested
+├─ helpers/
+│  ├─ peer.ts            who a peer is: its room, its role, whether it may open a room (pure)
+│  └─ refuse.ts          turning a peer away with a close code
+└─ test/
+   ├─ harness.ts         starts the Worker with `wrangler dev`; sockets as the daemon and phone
+   └─ relay.test.ts      the protocol above, end to end
 ```
 
-Environment:
+What can be tested without the Workers runtime (`helpers/peer`, `rooms/seats`) is kept in modules
+of its own, with its tests beside it; those run in the repository's `pnpm test`. `test/` runs the
+Worker itself, which takes a few seconds to start, so it runs on its own (below).
 
-- `PORT` sets the listen port (default `8787`).
-- `RELAY_ACCESS_KEY` (**required**) is the shared secret a daemon must present (in the
-  `x-soromi-access` header) to open a room. There is no built-in value: the relay refuses to start
-  without it, so it is never gated by a secret you did not choose. Only the daemon holds it; a
-  paired phone joins an existing room by id without it, so the key never rides in a pairing code.
-  Set it empty (`RELAY_ACCESS_KEY=`) to run an open relay that anyone may open rooms on.
-
-## Self-host (Docker)
-
-The relay is a single stateless process, so any container host works. Every frame between the
-daemon and the phone passes through it, so run it in a region close to where you use them: its
-distance from the two is added to every keystroke.
-
-Every release publishes a pre-built image to GitHub Container Registry:
+## Develop
 
 ```bash
-docker run -d --restart unless-stopped -p 8787:8787 \
-  -e RELAY_ACCESS_KEY=your-secret \
-  ghcr.io/soromi/soromi-relay:latest
+pnpm dev:relay                          # wrangler dev, on ws://localhost:8787
+pnpm --filter @soromi/relay test        # unit tests, then the Worker end to end
+pnpm --filter @soromi/relay typecheck
 ```
 
-Or build it yourself from the repo root (the image is standalone, no monorepo tooling at runtime):
+`dev` needs an access key: put `RELAY_ACCESS_KEY=<anything>` in a `.dev.vars` file in this folder
+(it is not committed). Point a daemon at it with `SOROMI_RELAY_URL=ws://localhost:8787` and
+`SOROMI_RELAY_ACCESS_KEY=<the same>`.
+
+## Deploy
+
+With a Cloudflare account, from this folder:
 
 ```bash
-docker build -f packages/relay/Dockerfile -t soromi-relay .
-docker run -d --restart unless-stopped -p 8787:8787 -e RELAY_ACCESS_KEY=your-secret soromi-relay
-# PORT overrides the listen port:
-docker run -d -e PORT=9000 -p 9000:9000 -e RELAY_ACCESS_KEY=your-secret soromi-relay
+npx wrangler login                        # opens the browser once
+npx wrangler secret put RELAY_ACCESS_KEY  # the secret your daemons present; see below
+pnpm deploy:relay                         # from the repository root (wrangler deploy)
 ```
 
-`GET /health` returns `ok` (used by the image's `HEALTHCHECK`).
+The deploy prints the Worker's address, `https://soromi-relay.<your-subdomain>.workers.dev`; the
+relay URL is the same with `wss://`.
 
-**TLS.** The image itself serves plain `ws://`. In production put it behind a TLS-terminating
-reverse proxy (Caddy, nginx, a cloud load balancer) that upgrades to `wss://` and forwards
-WebSocket traffic, so both peers can dial `wss://relay.example.com`. The relay is stateless and
-holds no data, so it scales horizontally as long as **both peers of a room land on the same
-instance** (pin by the `room` query param, or run a single instance).
+**The access key.** Only a daemon that presents it can open a room, which keeps others from
+running their traffic through your account. A daemon with nothing set presents `soromi`, which
+anyone can read in this repository, so choose your own and give the same value to the Worker
+(`wrangler secret put`) and to each daemon (Settings → Remote → "Relay access key"). An empty
+secret leaves the relay open to anyone; with none set, it turns every daemon away.
 
-**Wiring it up.** Point the daemon at your relay: set its `SOROMI_RELAY_URL` (or Settings ->
-Remote) to `wss://relay.example.com`. If you set a private `RELAY_ACCESS_KEY`, give the daemon the
-same value in Settings -> Remote -> "Relay access key" (or `SOROMI_RELAY_ACCESS_KEY`). Paired
-devices' QR codes then carry your relay URL (never the access key). See the
-[daemon README](../../crates/daemon/README.md#pairing-endpoints-self-host-no-rebuild).
+**Pointing Soromi at it.** Set the relay URL in Settings → Remote. A pairing code carries the
+relay it was made with, so a phone paired before the change still dials the old one: pair it again
+(Devices → Pair a phone).
+
+**On your own hostname** (`wss://relay.example.com`), in place of the `workers.dev` one: the
+hostname's zone has to be on Cloudflare (its nameservers). Uncomment `routes` in `wrangler.jsonc`
+with the hostname and deploy again; Cloudflare makes the DNS record and the certificate. Moving the
+hostname phones were paired with to the Worker this way keeps them working without pairing again.
+
+**Cost.** Durable Objects with hibernating WebSockets are on Cloudflare's free Workers plan, with
+daily limits; one person's use is expected to fit. The usage is in the Cloudflare dashboard.

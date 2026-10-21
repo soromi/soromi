@@ -1,8 +1,26 @@
+import { createElement } from 'react'
 import { Platform } from 'react-native'
+
+//Components
+import { HeaderTitle } from './components/header-title'
 
 //Type
 import type { ReactElement } from 'react'
-import type { HeaderActions } from './types'
+import type { HeaderActions, HeaderTitleOptions } from './types'
+
+/**
+ * A screen's options for its title.
+ *
+ * Android's toolbar sets a title well to the right of the back arrow (Material's 72 dp keyline),
+ * in a large type of its own. It only lets go of that space when its own title is empty, so there
+ * the title is drawn by the app instead, in the app's type, next to the arrow. iOS sets its title
+ * as the system does everywhere else, and keeps it.
+ */
+export const getHeaderTitle = (title: string): HeaderTitleOptions => {
+  if (Platform.OS !== 'android') return { title }
+
+  return { title: '', headerTitle: () => createElement(HeaderTitle, { title }) }
+}
 
 /**
  * A screen's options for what sits at the right of its header.

@@ -16,6 +16,7 @@ import { Composer } from '@/features/chat/components/composer'
 import { ContextBanner } from '@/features/chat/components/context'
 import { LoadEarlier } from '@/features/chat/components/earlier'
 import { ChatEmpty } from '@/features/chat/components/empty'
+import { Queue } from '@/features/chat/components/queue'
 import { ChatRow } from '@/features/chat/components/row'
 import { WorkingIndicator } from '@/features/chat/components/working'
 import { ControlBar } from '@/features/layout/components/control-bar'
@@ -23,17 +24,19 @@ import { LinkBanner } from '@/features/layout/components/link-banner'
 import { ScreenHeader } from '@/features/layout/components/screen-header'
 import { PanelTabs } from '@/features/panel/components/tabs'
 import { TerminalPane } from '@/features/terminal/components/pane'
+import { UsageLine } from '@/features/usage/components/line'
 
 //Constants
 import { TERMINAL } from '@/features/terminal/constants/terminal'
 
 //Helpers
 import { getPanelHref, getRowKey, toRows } from '@/features/chat/helpers'
-import { getHeaderActions } from '@/features/layout/helpers'
+import { getHeaderActions, getHeaderTitle } from '@/features/layout/helpers'
 
 //Hooks
 import { useAttach } from '@/features/chat/hooks/use-attach'
 import { useChatFiles } from '@/features/chat/hooks/use-chat-files'
+import { useScreenOn } from '@/features/chat/hooks/use-screen-on'
 import { useTurnClock } from '@/features/chat/hooks/use-turn-clock'
 import { useLayout } from '@/hooks/use-layout'
 
@@ -48,6 +51,7 @@ import {
   useDaemonInControl,
   useDaemonSession,
   useDaemonStreaming,
+  useDaemonWorkspaceName,
 } from '@/states/daemon/daemon.state.hook'
 import { useLinkOnline } from '@/states/link/link.state.hook'
 
@@ -72,6 +76,7 @@ export const SessionScreen = () => {
   const streaming = useDaemonStreaming(id)
   const approvals = useDaemonApprovals(id)
   const hasEarlier = useDaemonHasEarlier(id)
+  const workspace = useDaemonWorkspaceName(id)
   const inControl = useDaemonInControl()
   const online = useLinkOnline()
   const router = useRouter()
@@ -89,6 +94,7 @@ export const SessionScreen = () => {
   const chat = session?.mode === 'chat'
   const working = session?.status === 'thinking'
   const since = useTurnClock(id, working)
+  useScreenOn(id, working)
   const tokens = session?.context_tokens ?? null
   // A tool call waiting for an answer says more than "working" does.
   const waiting = (approvals?.length ?? 0) > 0
@@ -116,7 +122,7 @@ export const SessionScreen = () => {
   // panel can open beside it on the same line.
   const options = useMemo(
     () => ({
-      title,
+      ...getHeaderTitle(title),
       headerShown: !wide,
       ...getHeaderActions(() => <PanelTabs active={null} onSelect={handlePanel} />),
     }),
@@ -143,6 +149,9 @@ export const SessionScreen = () => {
     () => (hasEarlier ? <LoadEarlier session={id} loaded={loaded} /> : null),
     [hasEarlier, id, loaded],
   )
+
+  // Under the box, as the desktop's status bar: how much of their plans the agents have used.
+  const usage = useMemo(() => (workspace ? <UsageLine workspace={workspace} /> : null), [workspace])
 
   // The near end of an inverted list is the bottom of the conversation.
   const status = useMemo(
@@ -196,12 +205,19 @@ export const SessionScreen = () => {
             {approvals?.map((approval) => (
               <Approval key={approval.id} session={id} approval={approval} enabled={inControl} />
             ))}
+            <Queue
+              session={id}
+              queued={session?.queued}
+              paused={session?.queuePaused ?? false}
+              enabled={inControl && online}
+            />
             <Composer
               session={id}
               chat={chat}
               working={working}
               inControl={inControl}
               online={online}
+              footer={usage}
             />
           </View>
         </KeyboardView>

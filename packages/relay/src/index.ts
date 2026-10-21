@@ -1,20 +1,24 @@
-import { config } from './config/app.js'
-import { createRelay } from './server.js'
+//Controllers
+import { healthController } from './controllers/health-controller'
+import { relayController } from './controllers/relay-controller'
+
+//Types
+import type { Env } from './types'
+
+export { Room } from './rooms/room'
 
 /**
- * Entry point: start the relay on the configured port, bound to all interfaces. The access key has
- * no built-in value, so a relay is never gated by a secret its operator did not choose.
+ * The Soromi relay, as a Cloudflare Worker: a stateless, content-blind pipe between a daemon and
+ * its paired phone. Both dial out to it and meet in a room (a Durable Object, near them) by its
+ * secret id; it forwards their frames, which are end-to-end encrypted between the two, verbatim.
+ * No storage and no keys.
  */
-const accessKey = process.env.RELAY_ACCESS_KEY
-if (accessKey === undefined) {
-  console.error(
-    'soromi-relay: RELAY_ACCESS_KEY is not set. Set it to the secret your daemon presents ' +
-      '(Settings -> Remote -> "Relay access key"), or to an empty value to run an open relay.',
-  )
-  process.exit(1)
-}
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const { pathname } = new URL(request.url)
+    if (pathname === '/health') return healthController(env)
+    if (pathname === '/') return relayController(request, env)
 
-createRelay({ port: config.port, accessKey }).then((relay) => {
-  const gate = accessKey === '' ? 'open (no access key)' : 'access key required'
-  console.log(`soromi-relay: listening on :${relay.port}, ${gate}`)
-})
+    return new Response('not found', { status: 404 })
+  },
+} satisfies ExportedHandler<Env>

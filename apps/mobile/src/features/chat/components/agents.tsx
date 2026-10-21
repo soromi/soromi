@@ -71,8 +71,7 @@ export const Agents = (props: AgentsProps) => {
       {open && (
         <View style={styles.list}>
           {agents.map((agent, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: agents have no id of their own; their order holds.
-            <AgentLine key={index} agent={agent} now={now} />
+            <AgentLine key={agent.id ?? `at-${index}`} session={session} agent={agent} now={now} />
           ))}
         </View>
       )}

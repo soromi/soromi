@@ -29,6 +29,8 @@ const VERIFY_TIMEOUT_MS = 3000
 const RECHECK_TIMEOUT_MS: Record<DeviceRoute, number> = { direct: 800, relay: 1500 }
 /** How long no route may answer before the app is told the computer cannot be reached. */
 const STALL_MS = 8000
+/** How many checks are timed at once; an older one that is still unanswered is forgotten. */
+const MAX_TIMED = 8
 
 export interface RoutedConfig {
   /** The way through the relay, which works from anywhere. */
@@ -81,6 +83,7 @@ export class RoutedTransport implements Transport {
   private readonly presenceListeners = new Set<(present: boolean) => void>()
   private readonly routeListeners = new Set<(route: DeviceRoute | null) => void>()
   private readonly routesListeners = new Set<(routes: string[]) => void>()
+  private readonly latencyListeners = new Set<(ms: number, route: DeviceRoute) => void>()
   private readonly links: LinkFactory
   private routes: string[]
   private active: Active | null = null
@@ -103,6 +106,8 @@ export class RoutedTransport implements Transport {
   /** When the link in use last said anything at all. */
   private lastHeard = 0
   private nonce = 0
+  /** When each check still waiting for its answer was sent, by nonce, to time the round trip. */
+  private readonly sentAt = new Map<number, number>()
 
   constructor(config: RoutedConfig, options: TransportOptions, links?: LinkFactory) {
     this.routes = config.routes ?? []
@@ -197,6 +202,22 @@ export class RoutedTransport implements Transport {
     return () => {
       this.closeListeners.delete(listener)
     }
+  }
+
+  /**
+   * Calls `listener` with each round trip timed on the link in use, in milliseconds, and the
+   * route it went by. The checks the transport makes on its own are timed, and so is `measure`.
+   */
+  onLatency(listener: (ms: number, route: DeviceRoute) => void): () => void {
+    this.latencyListeners.add(listener)
+    return () => {
+      this.latencyListeners.delete(listener)
+    }
+  }
+
+  /** Times one round trip to the daemon now, for whoever is showing how good the link is. */
+  measure(): void {
+    if (this.active) this.ping(this.active.link)
   }
 
   onPresence(listener: (present: boolean) => void): () => void {
@@ -347,7 +368,10 @@ export class RoutedTransport implements Transport {
     }
     this.alive()
     // The answer to a check is for this transport alone.
-    if (message.type === 'pong') return
+    if (message.type === 'pong') {
+      this.timed(message.nonce)
+      return
+    }
     if (message.type === 'routes') this.learn(message.routes)
     this.emitMessage(message)
   }
@@ -417,6 +441,7 @@ export class RoutedTransport implements Transport {
   /** The link in use is no longer one: forget it, and say there is no route for now. */
   private unseat(): void {
     this.cancelVerify()
+    this.sentAt.clear()
     this.active = null
     for (const listener of this.routeListeners) listener(null)
     this.armStall()
@@ -480,8 +505,28 @@ export class RoutedTransport implements Transport {
       }
     }, within)
     this.verifying = { deadline, timeout }
+    this.ping(active.link)
+  }
+
+  private ping(link: Transport): void {
     this.nonce += 1
-    active.link.send({ type: 'ping', nonce: this.nonce })
+    this.sentAt.set(this.nonce, Date.now())
+    // A check whose answer never came is not waited for forever.
+    for (const nonce of this.sentAt.keys()) {
+      if (this.sentAt.size <= MAX_TIMED) break
+      this.sentAt.delete(nonce)
+    }
+    link.send({ type: 'ping', nonce: this.nonce })
+  }
+
+  /** A check was answered: how long it took is how good the link is. */
+  private timed(nonce: number): void {
+    const at = this.sentAt.get(nonce)
+    const route = this.active?.route
+    if (at === undefined || !route) return
+    this.sentAt.delete(nonce)
+    const ms = Date.now() - at
+    for (const listener of this.latencyListeners) listener(ms, route)
   }
 
   private cancelVerify(): void {

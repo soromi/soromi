@@ -29,6 +29,11 @@ export interface TransportOptions {
    */
   clientId: string
   /**
+   * What the device is called, as its own system names it, also announced in `hello`: the computer
+   * lists a paired device under it. The desktop has none.
+   */
+  deviceName?: string
+  /**
    * Whether to dial again, with a growing delay, each time the socket drops. On unless set to
    * `false`, for a link that is one attempt among several and is replaced rather than retried.
    */
@@ -56,6 +61,7 @@ export abstract class WebSocketTransport implements Transport {
   /** Which session each binary terminal slot belongs to, from the daemon's `attached` replies. */
   private readonly slots = new Map<number, string>()
   private readonly clientId: string
+  private readonly deviceName: string | undefined
   private readonly reconnects: boolean
   private queued: ClientMessage[] = []
   private closedByUser = false
@@ -76,6 +82,7 @@ export abstract class WebSocketTransport implements Transport {
     options: TransportOptions,
   ) {
     this.clientId = options.clientId
+    this.deviceName = options.deviceName
     this.reconnects = options.reconnect ?? true
   }
 
@@ -268,7 +275,12 @@ export abstract class WebSocketTransport implements Transport {
     this.ready = true
     this.welcomed = false
     this.slots.clear()
-    this.transmit(socket, { type: 'hello', protocol: PROTOCOL_VERSION, clientId: this.clientId })
+    this.transmit(socket, {
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      clientId: this.clientId,
+      ...(this.deviceName ? { deviceName: this.deviceName } : {}),
+    })
     for (const message of this.queued) this.transmit(socket, message)
     this.queued = []
     for (const listener of this.openListeners) listener()

@@ -4,9 +4,15 @@ import { RoutedTransport, applyServerMessage } from '@soromi/core'
 import { LINK } from './link.constants'
 
 //Helpers
-import { getStatusAfterClose, getStatusFromIncompatible, isRetryable } from './link.helpers'
+import {
+  confirmSend,
+  getStatusAfterClose,
+  getStatusFromIncompatible,
+  isRetryable,
+} from './link.helpers'
 
 //Services
+import { DeviceService } from './device'
 import { KeychainService } from './keychain'
 
 //State
@@ -24,6 +30,13 @@ let transport: RoutedTransport | null = null
 let bannerListener: BannerListener | null = null
 /** What the daemon pushes banners to this phone with, once the phone has one. */
 let pushToken: string | null = null
+/**
+ * Who waits for a link to be made, to send on it: an answer given from a banner that started the
+ * app, before it had read the keychain. The next link to be made is handed to each.
+ */
+let linkWaiters: Array<(link: RoutedTransport) => void> = []
+/** Who keeps the relay the computer says it is reached through, while someone does. */
+let relayListener: ((url: string) => void) | null = null
 /** Whether the app is on screen, which decides if banners come over the link or are pushed. */
 let attended = true
 
@@ -51,6 +64,11 @@ const routeToWorkspace = (message: ServerMessage): void => {
     case 'git-status':
       workspace.setGitStatus(message.workspace, message.folder, message.status, message.repos)
       break
+    case 'folder-listing': {
+      const { type: _, ...listing } = message
+      workspace.setFolderListing(listing)
+      break
+    }
     case 'git-diff':
       workspace.setDiff(message.workspace, message.folder, message.path, message.staged, {
         patch: message.patch,
@@ -58,6 +76,23 @@ const routeToWorkspace = (message: ServerMessage): void => {
       })
       break
   }
+}
+
+/** The link in use, now or once one is made, within `ms`; `null` if none is made by then. */
+const nextLink = (ms: number): Promise<RoutedTransport | null> => {
+  if (transport) return Promise.resolve(transport)
+
+  return new Promise((resolve) => {
+    const waiter = (link: RoutedTransport) => {
+      clearTimeout(timer)
+      resolve(link)
+    }
+    const timer = setTimeout(() => {
+      linkWaiters = linkWaiters.filter((other) => other !== waiter)
+      resolve(null)
+    }, ms)
+    linkWaiters.push(waiter)
+  })
 }
 
 /**
@@ -80,20 +115,31 @@ export const LinkService = {
         device: pairing.device,
         routes,
       },
-      { clientId },
+      // The computer lists the phone under the name it gives here.
+      { clientId, deviceName: DeviceService.name() },
     )
     transport = next
+    // The link holds what it is given until a route answers, so these go out as soon as one does.
+    for (const waiter of linkWaiters) waiter(next)
+    linkWaiters = []
     link.setStatus('connecting')
     link.setRoute(null)
     link.setError(null)
 
-    next.onRoute(link.setRoute)
-    next.onRoutes((learned) => void KeychainService.saveRoutes(learned))
+    next.onRoute((route) => {
+      link.setRoute(route)
+      if (route) link.linkUp()
+      else link.linkDown()
+    })
+    next.onLatency(link.addSample)
+    next.onRoutes((learned) => void KeychainService.saveRoutes(pairing.device, learned))
     next.onMessage((message) => {
       applyServerMessage(DaemonStore.getState(), message)
       routeToWorkspace(message)
       if (message.type === 'notify') {
         bannerListener?.(message)
+      } else if (message.type === 'relay') {
+        relayListener?.(message.url)
       } else if (message.type === 'incompatible') {
         link.setStatus(getStatusFromIncompatible(message.action))
       } else if (message.type === 'error') {
@@ -145,6 +191,53 @@ export const LinkService = {
     transport.recheck()
   },
 
+  /** Times one round trip to the computer now; the answer lands in the link's quality. */
+  measure: (): void => {
+    transport?.measure()
+  },
+
+  /**
+   * Sends a message that must not be lost, and says whether the computer has it, within `ms`:
+   * over the link, now or once a route answers, or once one is made for an app that is only
+   * starting (an answer given from a banner that started it). For what is sent while the app may
+   * be about to be put away.
+   */
+  sendConfirmed: async (message: ClientMessage, ms: number): Promise<boolean> => {
+    const started = Date.now()
+    const link = await nextLink(ms)
+    if (!link) return false
+
+    return confirmSend(link, message, ms - (Date.now() - started))
+  },
+
+  /**
+   * The same over a link of its own to a computer, made for this one message and closed after:
+   * for one the app is not linked to (a banner from another computer it is paired with), or an
+   * app the system started with no screen, to answer a banner's button. Through the relay it
+   * takes the computer from any other link of this phone's, which is why it is not used while
+   * the app has one to it.
+   */
+  sendOnce: (
+    pairing: Pairing,
+    clientId: string,
+    routes: string[],
+    message: ClientMessage,
+    ms: number,
+  ): Promise<boolean> => {
+    const link = new RoutedTransport(
+      {
+        relay: { relayUrl: pairing.relay, room: pairing.room, key: pairing.key },
+        device: pairing.device,
+        routes,
+      },
+      { clientId, deviceName: DeviceService.name() },
+    )
+    const sent = confirmSend(link, message, ms).finally(() => link.close())
+    link.connect()
+
+    return sent
+  },
+
   /** Sends a message to the daemon, or drops it if there is no link. */
   send: (message: ClientMessage): void => {
     transport?.send(message)
@@ -171,6 +264,18 @@ export const LinkService = {
    * opens, whichever computer that is to, so this is called once and left on. One listener at a
    * time: banners are shown in one place.
    */
+  /**
+   * Hands on the relay the computer says it is reached through, each time it says (after `hello`,
+   * and when it changes there). Returns how to stop.
+   */
+  onRelay: (listener: (url: string) => void): (() => void) => {
+    relayListener = listener
+
+    return () => {
+      if (relayListener === listener) relayListener = null
+    }
+  },
+
   watchBanners: (listener: BannerListener): (() => void) => {
     bannerListener = listener
     if (transport?.isOpen()) transport.send({ type: 'notifications-native', enabled: true })
@@ -191,6 +296,14 @@ export const LinkService = {
     if (token === pushToken) return
     pushToken = token
     if (transport?.isOpen()) transport.send({ type: 'register-push', token })
+  },
+
+  /**
+   * Asks the computer in use to stop pushing banners to this phone, which is about to forget it.
+   * The token stays, for the other computers the phone is paired with.
+   */
+  stopPushHere: (): void => {
+    if (transport?.isOpen()) transport.send({ type: 'register-push', token: null })
   },
 
   /**

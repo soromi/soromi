@@ -1,3 +1,4 @@
+pub mod browse;
 pub mod directory;
 pub mod git;
 pub mod paths;

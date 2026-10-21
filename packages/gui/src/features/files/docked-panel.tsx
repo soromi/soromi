@@ -34,7 +34,7 @@ export function DockedPanel({
     <div className="pointer-events-none absolute inset-0 z-[var(--z-overlay)] flex justify-end">
       <div
         className={cn(
-          'pointer-events-auto flex h-full flex-col border-[var(--soromi-border-subtle)] border-l bg-[var(--soromi-bg-terminal)] shadow-[-10px_0_30px_rgb(0_0_0/28%)] transition-[width] duration-200 ease-out',
+          'pointer-events-auto flex h-full flex-col border-[var(--soromi-border-subtle)] border-l bg-[var(--soromi-bg-terminal)] [box-shadow:var(--soromi-shadow-dock)] transition-[width] duration-200 ease-out',
           wide ? 'w-full' : 'w-[62%] min-w-[440px] max-w-[960px]',
         )}
       >

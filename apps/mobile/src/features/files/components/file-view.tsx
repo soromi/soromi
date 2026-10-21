@@ -96,7 +96,7 @@ export const FileView = (props: FileViewProps) => {
           )}
         </ScrollView>
       ) : (
-        <Code content={file.content} truncated={file.truncated} />
+        <Code path={props.path} content={file.content} truncated={file.truncated} />
       )}
     </>
   )

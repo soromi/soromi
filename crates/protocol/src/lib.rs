@@ -11,17 +11,18 @@ pub mod status;
 pub use account::{AccountProfile, ProviderConfig};
 pub use messages::{
     AgentAccount, AgentUsage, ChatCursor, ChatEvent, ChatFile, ClientMessage, DeviceRoute,
-    DeviceSummary, DirEntry, EntryKind, GitChange, GitStatusInfo, IncompatibleAction, ModelOption,
-    PermissionMode, ProviderModels, RemoteConfig, RemoteDefaults, ServerMessage, SessionMode,
-    SessionSummary, Skill, SkillKind, SkillScope, SlashCommand, SubAgent, ToolApproval, ToolKind,
-    UsageWindow, WorkspaceSummary,
+    DeviceSummary, DirEntry, EntryKind, GitChange, GitStatusInfo, HostInfo, IncompatibleAction,
+    Launcher, ModelOption, PastConversation, PermissionMode, ProviderModels, QueuedTurn,
+    RemoteConfig, RemoteDefaults, ServerMessage, SessionMode, SessionSummary, ShellSummary, Skill,
+    SkillKind, SkillScope, SlashCommand, SubAgent, ToolApproval, ToolKind, UsageWindow,
+    WorkspaceSummary,
 };
 pub use status::{KeepAwakeMode, Status};
 
 /// The wire protocol version a current client announces in `Hello`. Bump it on any change an older
 /// peer would misread. Mirrored as `PROTOCOL_VERSION` in `packages/protocol/src/index.ts`; the
 /// `protocol_version_matches_the_typescript_constant` test keeps the two in step.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Opcode of a binary terminal-output frame: `[TERMINAL_OUTPUT][slot, big-endian u16][utf-8]`.
 /// Never `{` (0x7B), so a frame's first byte tells binary from JSON.

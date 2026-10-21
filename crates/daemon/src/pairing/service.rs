@@ -95,7 +95,8 @@ impl Presence {
 /// Owns the paired devices and their two ways in: one relay connection per device, and the direct
 /// listener they share. Device management happens only over the trusted local link (the desktop
 /// app); the devices' own links are plain viewports that never reach back into this service, so a
-/// phone can neither list devices nor see other keys.
+/// phone can neither list devices nor see other keys. The one thing a device says about itself is
+/// its name, which its link hands on through the hub for its own record only.
 pub struct PairingService {
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
@@ -156,6 +157,22 @@ impl PairingService {
             changed_tx,
         });
 
+        // Devices are told the relay they reach this computer through, which may not be the one
+        // their pairing code carried.
+        service
+            .hub
+            .set_relay(service.relay_url.lock().unwrap().clone());
+
+        // A device says what it is called when it connects; its record takes the name.
+        let pairing = Arc::downgrade(&service);
+        service
+            .hub
+            .set_device_namer(Arc::new(move |id: &str, name: &str| {
+                if let Some(pairing) = pairing.upgrade() {
+                    pairing.name_device(id, name);
+                }
+            }));
+
         for device in service.devices.lock().unwrap().iter() {
             service.dial(device);
         }
@@ -178,6 +195,27 @@ impl PairingService {
         self.refresh_direct();
 
         summary
+    }
+
+    /// A device said what it is called: its record takes the name, so the list says it from now on.
+    pub fn name_device(&self, id: &str, name: &str) {
+        let renamed = {
+            let mut devices = self.devices.lock().unwrap();
+            let renamed = match devices.iter_mut().find(|device| device.id == id) {
+                Some(device) if device.name != name => {
+                    device.name = name.to_string();
+                    true
+                }
+                _ => false,
+            };
+            if renamed {
+                save_devices(&devices);
+            }
+            renamed
+        };
+        if renamed {
+            let _ = self.changed_tx.send(());
+        }
     }
 
     /// Every paired device.
@@ -223,9 +261,11 @@ impl PairingService {
         let relay_changed = {
             let mut current = self.relay_url.lock().unwrap();
             let changed = *current != relay_url;
-            *current = relay_url;
+            *current = relay_url.clone();
             changed
         };
+        // The devices connected another way (directly) are told, and keep it.
+        self.hub.set_relay(relay_url);
         let key_changed = {
             let mut current = self.access_key.lock().unwrap();
             let changed = *current != access_key;

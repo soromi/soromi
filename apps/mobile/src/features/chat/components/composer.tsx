@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -9,6 +9,7 @@ import { Input, Text } from '@/components'
 import { defineStyles, useTheme, useThemedStyles } from '@/config/theme'
 
 //Components
+import { AttachSheet } from './attach-sheet'
 import { Attachments } from './attachments'
 import { SlashMenu } from './slash-menu'
 import { Toolbar } from './toolbar'
@@ -20,7 +21,7 @@ import { CHAT } from '../constants/chat'
 import { hasMessage } from '../helpers'
 
 //Hooks
-import { usePhotos } from '../hooks/use-photos'
+import { useAttachments } from '../hooks/use-attachments'
 
 //Services
 import { LinkService } from '@/services/link'
@@ -29,12 +30,13 @@ import { LinkService } from '@/services/link'
 import { useChatActions, useChatDraft } from '@/states/chat/chat.state.hook'
 
 //Type
-import type { ComposerProps } from '../types'
+import type { AttachSource, ComposerProps } from '../types'
 
 /**
  * Where the next message is written and sent, as one card: the pictures going with it, the box,
  * and under it the model, permissions and account the agent runs with. Only the device in control
- * can change any of it; a session that runs in a terminal gets a note instead.
+ * can change any of it; a session that runs in a terminal gets a note instead. While the agent
+ * works, a message is queued for when its turn ends rather than sent into it.
  */
 export const Composer = (props: ComposerProps) => {
   const theme = useTheme()
@@ -43,11 +45,14 @@ export const Composer = (props: ComposerProps) => {
   const session = props.session
   const draft = useChatDraft(session)
   const actions = useChatActions()
-  const photos = usePhotos(session)
-  const attachments = photos.attachments
-  const pick = photos.pick
+  const attach = useAttachments(session)
+  const attachments = attach.attachments
+  const add = attach.add
+  // Where the next attachment comes from is being chosen.
+  const [choosing, setChoosing] = useState(false)
   const enabled = props.chat && props.inControl && props.online
   const filled = hasMessage(draft, attachments?.length ?? 0)
+  const working = props.working
 
   // Clear of the home indicator, and never flush against the edge.
   const inset = useMemo(
@@ -58,10 +63,11 @@ export const Composer = (props: ComposerProps) => {
   const handleSend = useCallback(() => {
     if (!enabled || !filled) return
     const files = (attachments ?? []).map((one) => one.file)
-    LinkService.send({ type: 'chat-turn', session, text: draft.trim(), files })
+    const type = working ? 'chat-queue' : 'chat-turn'
+    LinkService.send({ type, session, text: draft.trim(), files })
     actions.setDraft(session, '')
     actions.clearAttachments(session)
-  }, [enabled, filled, attachments, draft, session, actions])
+  }, [enabled, filled, attachments, draft, session, actions, working])
 
   const handleChange = useCallback(
     (text: string) => actions.setDraft(session, text),
@@ -73,7 +79,16 @@ export const Composer = (props: ComposerProps) => {
     [session],
   )
 
-  const handleAttach = useCallback(() => void pick(), [pick])
+  const handleAttach = useCallback(() => setChoosing(true), [])
+  const handleChooseClose = useCallback(() => setChoosing(false), [])
+  const handleSource = useCallback(
+    (source: AttachSource) => {
+      setChoosing(false)
+      // The sheet goes first: on iOS the system's picker does not come up over one still leaving.
+      setTimeout(() => void add(source), CHAT.attach.pickDelayMs)
+    },
+    [add],
+  )
 
   if (!props.chat) {
     return (
@@ -81,6 +96,7 @@ export const Composer = (props: ComposerProps) => {
         <Text variant="bodySm" tone="muted">
           {CHAT.composer.terminal}
         </Text>
+        {props.footer}
       </View>
     )
   }
@@ -97,7 +113,13 @@ export const Composer = (props: ComposerProps) => {
           style={styles.input}
           value={draft}
           onChangeText={handleChange}
-          placeholder={props.inControl ? CHAT.composer.placeholder : CHAT.composer.watching}
+          placeholder={
+            !props.inControl
+              ? CHAT.composer.watching
+              : working
+                ? CHAT.composer.queue
+                : CHAT.composer.placeholder
+          }
           editable={enabled}
           multiline
         />
@@ -111,6 +133,8 @@ export const Composer = (props: ComposerProps) => {
           onStop={handleStop}
         />
       </View>
+      {props.footer}
+      <AttachSheet visible={choosing} onSelect={handleSource} onClose={handleChooseClose} />
     </View>
   )
 }

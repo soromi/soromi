@@ -9,7 +9,7 @@ import { ProviderMark, StatusDot, Text } from '@/components'
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Helpers
-import { getSessionDetail } from '../helpers'
+import { getSessionLine } from '../helpers'
 
 //Hooks
 import { useSessionItem } from '../hooks/use-session-item'
@@ -47,7 +47,7 @@ export const SessionCard = (props: CardProps) => {
         {item.name}
       </Text>
       <Text variant="bodySm" tone="muted" numberOfLines={2}>
-        {getSessionDetail(session)}
+        {getSessionLine(session, props.now)}
       </Text>
     </Pressable>
   )

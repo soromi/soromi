@@ -1,5 +1,5 @@
 //Type
-import type { Shell } from './workspace.state.type'
+import type { ShellSummary } from '@soromi/protocol'
 
 /** What a file's content is kept under. A newline cannot be part of either name. */
 export const getFileKey = (workspace: string, path: string): string => `${workspace}\n${path}`
@@ -38,24 +38,10 @@ export const newShellId = (): string => {
 }
 
 /**
- * What a terminal is called: the folder it starts in, numbered when another one open in the
- * workspace already has that name.
- */
-export const getShellTitle = (folder: string, root: string, peers: Shell[]): string => {
-  const base = folder.split('/').filter(Boolean).pop() ?? root
-  const taken = new Set(peers.map((peer) => peer.title))
-  if (!taken.has(base)) return base
-  let index = 2
-  while (taken.has(`${base} ${index}`)) index += 1
-
-  return `${base} ${index}`
-}
-
-/**
  * The terminal that takes a closed one's place on screen: the one after it, or the one before it
  * when it was the last. `undefined` when it was the only one.
  */
-export const getShellAfter = (shells: Shell[], closed: string): string | undefined => {
+export const getShellAfter = (shells: ShellSummary[], closed: string): string | undefined => {
   const index = shells.findIndex((shell) => shell.id === closed)
   const rest = shells.filter((shell) => shell.id !== closed)
 

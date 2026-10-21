@@ -39,7 +39,7 @@ export function AppLayout() {
         <Sidebar />
         {/* One rounded panel floating on the shell (design), inset 8px top/right/bottom. The content
             and the Explorer are columns *inside* it — no gap or divider between them. */}
-        <div className="relative my-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] shadow-[0_1px_2px_rgb(0_0_0/40%),0_10px_30px_rgb(0_0_0/32%)]">
+        <div className="relative my-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] [box-shadow:var(--soromi-shadow-panel)]">
           <main className="relative flex min-w-0 flex-1 flex-col">
             <UpdateBanner />
             <StatusBanner />

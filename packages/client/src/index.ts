@@ -14,13 +14,21 @@ export { TakeoverBar } from './terminal/takeover'
 // Store (daemon-mirrored state)
 export { useClientStore } from './store/client-store'
 export {
+  CONVERSATION_SEARCH_MS,
   agentLabel,
+  agentLogKey,
   agentOptionKey,
   agentOptionsFor,
   isCurrentAgent,
   applyServerMessage,
+  basename,
+  conversationAge,
+  conversationQuery,
   deferredFiles,
+  deriveRootAndFolders,
   groupChanges,
+  isStaleList,
+  openTabOf,
   repoKey,
   repoLabel,
   repoToShow,
@@ -34,3 +42,5 @@ export {
 export { useUsage } from './hooks/use-usage'
 
 export type { AppUpdate, RelayConfig, Transport, WorkspaceInfo } from '@soromi/core'
+/** The colors a terminal is drawn in (`TerminalSurface`'s `theme`). */
+export type { ITheme as TerminalTheme } from '@xterm/xterm'

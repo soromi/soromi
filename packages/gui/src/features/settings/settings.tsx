@@ -63,7 +63,7 @@ export function Settings() {
       }
     >
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-[760px] px-7 pt-11 pb-[180px]">
+        <div className="mx-auto max-w-[680px] px-8 pt-10 pb-24">
           {section === 'accounts' && <AccountsSection />}
           {section === 'appearance' && <AppearanceSection />}
           {section === 'notifications' && <NotificationsSection />}

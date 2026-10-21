@@ -60,6 +60,23 @@ const CHIP_CLASS =
   'soromi-chip mx-0.5 inline-flex translate-y-[3px] cursor-pointer select-none items-center gap-1 rounded-md border border-[var(--soromi-border)] bg-[var(--soromi-bg-hover)] px-1.5 py-0.5 align-baseline font-medium text-[12px] text-[var(--soromi-accent)] [font-family:var(--soromi-font-mono)]'
 const CHIP_THUMB_CLASS = 'h-3.5 w-3.5 rounded-[3px] object-cover'
 
+/**
+ * A paste this large goes in as text nodes in one step rather than through the browser's own
+ * insert, which takes time growing with the square of its lines (2.8 s for 3,600 lines, against
+ * 24 ms). The cost: that paste is not on the editor's undo stack. Below it, ⌘Z undoes a paste.
+ */
+const LARGE_PASTE = { lines: 400, chars: 40_000 }
+
+const isLargePaste = (text: string) => {
+  if (text.length > LARGE_PASTE.chars) return true
+  let lines = 0
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+    lines += 1
+    if (lines > LARGE_PASTE.lines) return true
+  }
+  return false
+}
+
 const dataUrl = (file: ChatFile) => `data:${file.mediaType};base64,${file.data}`
 const chipKind = (mediaType: string): ChipKind =>
   mediaType.startsWith('image/') ? 'image' : 'file'
@@ -192,12 +209,24 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
     onChangeRef.current?.({ text: message.text, empty })
   }, [getMessage])
 
-  // Native input listener — the reliable way to catch every edit of a contentEditable.
+  // Native input listener — the reliable way to catch every edit of a contentEditable. One edit can
+  // fire many `input` events (pasting 360 lines fires 720, one per line and per break), and each
+  // reconcile walks the whole editor, so a long paste froze the window for seconds. The walk runs
+  // once, right after the edit that fired them, however many there were.
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
-    editor.addEventListener('input', reconcile)
-    return () => editor.removeEventListener('input', reconcile)
+    let queued = false
+    const onInput = () => {
+      if (queued) return
+      queued = true
+      queueMicrotask(() => {
+        queued = false
+        reconcile()
+      })
+    }
+    editor.addEventListener('input', onInput)
+    return () => editor.removeEventListener('input', onInput)
   }, [reconcile])
 
   // ---- chip construction + insertion --------------------------------------
@@ -247,6 +276,42 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
     sel?.addRange(range)
     savedRange.current = range.cloneRange()
   }, [])
+
+  /** Puts plain text in at the caret in one step, its lines as line breaks (see `LARGE_PASTE`). */
+  const insertLargeText = useCallback(
+    (text: string) => {
+      const editor = editorRef.current
+      const selection = window.getSelection()
+      if (!editor || !selection || selection.rangeCount === 0) return
+      const range = selection.getRangeAt(0)
+      if (!editor.contains(range.commonAncestorContainer)) return
+      const fragment = document.createDocumentFragment()
+      const parts = text.split('\n')
+      parts.forEach((part, index) => {
+        if (part) fragment.appendChild(document.createTextNode(part))
+        if (index < parts.length - 1) fragment.appendChild(document.createElement('br'))
+      })
+      const last = fragment.lastChild
+      if (!last) return
+      range.deleteContents()
+      range.insertNode(fragment)
+      // The editor scrolls to keep the end of the paste in sight. A caret just after a line break
+      // has no box to measure, so a marker stands there for a moment.
+      const marker = document.createElement('span')
+      last.parentNode?.insertBefore(marker, last.nextSibling)
+      const below = marker.offsetTop + marker.offsetHeight - editor.clientHeight
+      if (below > editor.scrollTop) editor.scrollTop = below
+      marker.remove()
+      // The caret goes after what was pasted.
+      range.setStartAfter(last)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      savedRange.current = range.cloneRange()
+      reconcile()
+    },
+    [reconcile],
+  )
 
   const addFiles = useCallback(
     (files: File[] | FileList) => {
@@ -425,7 +490,8 @@ export const RichTextInput = forwardRef<RichInputHandle, RichInputProps>(functio
     // Plain-text paste only — strip any rich HTML so the editor stays predictable.
     const text = clipboard.getData('text/plain')
     event.preventDefault()
-    document.execCommand('insertText', false, text)
+    if (isLargePaste(text)) insertLargeText(text)
+    else document.execCommand('insertText', false, text)
   }
 
   const onFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -508,7 +574,7 @@ function ChipPreview({ file, rect }: { file: ChatFile; rect: DOMRect }) {
   const bottom = window.innerHeight - rect.top + 8
   return (
     <div
-      className="fixed z-[var(--z-popover)] w-auto max-w-[300px] rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] p-2 shadow-[0_12px_40px_rgb(0_0_0/45%)]"
+      className="fixed z-[var(--z-popover)] w-auto max-w-[300px] rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] p-2 [box-shadow:var(--soromi-shadow-popover)]"
       style={{ left, bottom }}
     >
       {isImage && (

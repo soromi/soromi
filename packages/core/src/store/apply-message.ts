@@ -12,6 +12,9 @@ import type { ClientState } from './client-store'
  */
 export function applyServerMessage(client: ClientState, message: ServerMessage): void {
   switch (message.type) {
+    case 'welcome':
+      client.setWelcome(message.version, message.host ?? null)
+      break
     case 'workspace-list':
       client.setWorkspaces(message.workspaces)
       break
@@ -57,6 +60,21 @@ export function applyServerMessage(client: ClientState, message: ServerMessage):
       break
     case 'chat-approval-resolved':
       client.removeChatApproval(message.session, message.id)
+      break
+    case 'agent-log':
+      client.applyAgentLog(
+        message.session,
+        message.agent,
+        message.events,
+        message.reset,
+        message.earlier,
+      )
+      break
+    case 'conversation-list':
+      client.setConversations(message.workspace, message.query ?? null, message.conversations)
+      break
+    case 'usage':
+      client.setUsage(message.workspace, message.agents)
       break
     case 'chat-history':
       client.prependChatHistory(message.session, message.events, message.hasMore)

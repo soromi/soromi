@@ -1,19 +1,28 @@
 import * as Notifications from 'expo-notifications'
+import * as TaskManager from 'expo-task-manager'
+import { Platform } from 'react-native'
 
 //Constants
 import { NOTIFICATIONS } from './notifications.constants'
 
 //Helpers
-import { getBannerId, toData, toTarget } from './notifications.helpers'
+import {
+  getBannerId,
+  toAnswered,
+  toData,
+  toResponseTarget,
+  toTarget,
+} from './notifications.helpers'
 
 //Type
-import type { Banner, BannerTarget } from './notifications.type'
+import type { Banner, BannerAnswered, BannerTarget } from './notifications.type'
 
 /**
  * The phone's notifications, which come two ways. While the app is on screen, the computer tells
  * it of a banner over the link and the app posts it itself. While it is not, the computer hands
  * the banner to a push service, which reaches the phone through Apple or Google; the system shows
- * that one without the app running. This is the only place that imports the notifications module.
+ * that one without the app running. This is the only place that imports the notifications module
+ * and the task manager it runs Android's answers with.
  */
 export const NotificationService = {
   /**
@@ -38,6 +47,29 @@ export const NotificationService = {
     void Notifications.setNotificationChannelAsync(NOTIFICATIONS.channel.id, {
       name: NOTIFICATIONS.channel.name,
       importance: Notifications.AndroidImportance.HIGH,
+    })
+    // A tool request is answered from its banner, without the app coming up: the system starts it
+    // out of sight to send the answer (see `onBackgroundAnswer`). iOS asks for the phone to be
+    // unlocked first, as it should for letting an agent run something, and which the keychain
+    // the pairing is kept in needs.
+    const { approval } = NOTIFICATIONS
+    void Notifications.setNotificationCategoryAsync(approval.category, [
+      {
+        identifier: approval.allow.id,
+        buttonTitle: approval.allow.title,
+        options: { opensAppToForeground: false, isAuthenticationRequired: true },
+      },
+      {
+        identifier: approval.deny.id,
+        buttonTitle: approval.deny.title,
+        options: {
+          opensAppToForeground: false,
+          isAuthenticationRequired: true,
+          isDestructive: true,
+        },
+      },
+    ]).catch(() => {
+      // Without the category the banner still opens the session, where the request is answered.
     })
   },
 
@@ -71,7 +103,13 @@ export const NotificationService = {
     try {
       await Notifications.scheduleNotificationAsync({
         identifier: getBannerId(banner),
-        content: { title: banner.title, body: banner.body, data: toData(banner), sound: true },
+        content: {
+          title: banner.title,
+          body: banner.body,
+          data: toData(banner),
+          sound: true,
+          ...(banner.approval ? { categoryIdentifier: NOTIFICATIONS.approval.category } : {}),
+        },
         trigger: { channelId: NOTIFICATIONS.channel.id },
       })
     } catch {
@@ -80,13 +118,40 @@ export const NotificationService = {
     }
   },
 
-  /** Takes down the banner about a session: the person is looking at it now. */
-  clear: async (session: string): Promise<void> => {
+  /**
+   * Takes a banner down, by its name: the one about a session (which is named after it) when the
+   * person is looking at that session, or one whose question has been answered.
+   */
+  clear: async (banner: string): Promise<void> => {
     try {
-      await Notifications.dismissNotificationAsync(session)
+      await Notifications.dismissNotificationAsync(banner)
     } catch {
       // There was none, or it was already gone.
     }
+  },
+
+  /**
+   * Calls `answer` when one of a tool request's buttons is pressed with the app behind another or
+   * closed, on Android: the system runs it in a task of the app's, with no screen, so it is set
+   * up as the app's code loads (from its entry), before the system asks for it. iOS starts the
+   * app out of sight instead, and the tap arrives the usual way (`onOpen`).
+   */
+  onBackgroundAnswer: (answer: (answered: BannerAnswered) => Promise<void>): void => {
+    TaskManager.defineTask<Notifications.NotificationTaskPayload>(
+      NOTIFICATIONS.task,
+      async ({ data }) => {
+        const answered = toAnswered(toResponseTarget(data))
+        if (answered) await answer(answered)
+
+        return Notifications.BackgroundNotificationTaskResult.NoData
+      },
+    )
+    // Only Android runs a button's answer in the task; on iOS, which would need the app set up
+    // for pushes that wake it, registering it would be for nothing.
+    if (Platform.OS !== 'android') return
+    void Notifications.registerTaskAsync(NOTIFICATIONS.task).catch(() => {
+      // Without the task, a button pressed with the app closed is answered when it is next opened.
+    })
   },
 
   /**
@@ -95,7 +160,7 @@ export const NotificationService = {
    */
   onOpen: (listener: (target: BannerTarget) => void): (() => void) => {
     const handle = (response: Notifications.NotificationResponse | null) => {
-      const target = toTarget(response?.notification.request.content.data)
+      const target = toResponseTarget(response)
       if (target) listener(target)
     }
     handle(Notifications.getLastNotificationResponse())

@@ -43,7 +43,15 @@ export const Button = ({ size = 'md', variant = 'primary', ...props }: Props) =>
       style={getStyle}
       onPress={props.onPress}
     >
-      <Text variant={getLabelVariant(size)} tone={getLabelTone(variant)}>
+      {/* One line, always. Some Android phones draw a bold label a little wider than it was
+          measured, which would push its last word onto a line the button has no room for: there
+          the text gives up the few percent it needs instead. */}
+      <Text
+        variant={getLabelVariant(size)}
+        tone={getLabelTone(variant)}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
         {props.label}
       </Text>
     </Pressable>

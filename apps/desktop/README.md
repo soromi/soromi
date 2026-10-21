@@ -30,6 +30,7 @@ Notifications and window focus are wired to the daemon over the protocol (`Notif
 pnpm --filter @soromi/desktop dev
 
 # Or with gui hot-reload: run the gui dev server in one terminal…
+# (the shell hands the renderer the daemon's address and local token, so nothing to set)
 pnpm --filter @soromi/gui dev
 # …and the shell pointed at it in another:
 pnpm --filter @soromi/desktop build:daemon

@@ -74,7 +74,7 @@ export function OverlayShell({
       {nav ? (
         <div className="flex min-h-0 flex-1">
           {nav}
-          <div className="mr-2 mb-2 min-w-0 flex-1 overflow-auto rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] shadow-[0_1px_2px_rgb(0_0_0/40%),0_10px_30px_rgb(0_0_0/32%)]">
+          <div className="mr-2 mb-2 min-w-0 flex-1 overflow-auto rounded-[12px] border border-[var(--soromi-border-subtle)] bg-[var(--soromi-bg-terminal)] [box-shadow:var(--soromi-shadow-panel)]">
             {children}
           </div>
         </div>
@@ -119,7 +119,7 @@ export function OverlayNavItem({
         'flex cursor-pointer appearance-none items-center gap-[11px] rounded-[9px] border-none bg-transparent px-3 py-[9px] text-left font-medium text-[13.5px] transition-colors',
         active
           ? danger
-            ? 'bg-[var(--soromi-bg-hover)] text-[#e08585]'
+            ? 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-danger-soft)]'
             : 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-text)]'
           : 'text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]',
       )}
@@ -129,7 +129,7 @@ export function OverlayNavItem({
           'inline-flex',
           active
             ? danger
-              ? 'text-[#e08585]'
+              ? 'text-[var(--soromi-danger-soft)]'
               : 'text-[var(--soromi-accent)]'
             : 'text-[var(--soromi-text-faint)]',
         )}

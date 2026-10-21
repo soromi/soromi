@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { View } from 'react-native'
 
 //Components
-import { Text } from '@/components'
+import { Highlight, Text } from '@/components'
 
 //Config
 import { defineStyles, useThemedStyles } from '@/config/theme'
@@ -10,7 +10,7 @@ import { defineStyles, useThemedStyles } from '@/config/theme'
 //Type
 import type { LineProps } from '../types'
 
-/** One line of a file: its number, then its text, wrapped if it is longer than the screen. */
+/** One line of a file: its number, then its text in colour, wrapped if it is longer than the screen. */
 export const Line = memo((props: LineProps) => {
   const styles = useThemedStyles(makeStyles)
 
@@ -20,7 +20,11 @@ export const Line = memo((props: LineProps) => {
         {props.line.number}
       </Text>
       <Text variant="mono" tone="body" selectable style={styles.text}>
-        {props.line.text}
+        {props.line.tokens ? (
+          <Highlight tokens={props.line.tokens} palette="file" />
+        ) : (
+          props.line.text
+        )}
       </Text>
     </View>
   )

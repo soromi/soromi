@@ -49,8 +49,8 @@ export function ContextBanner({
   if (!isContextFilling(tokens, limit) || dismissed) return null
 
   return (
-    <div className="mb-2 flex items-center gap-3 rounded-[12px] border border-[rgb(224_179_65/0.4)] bg-[rgb(224_179_65/0.1)] px-4 py-2.5">
-      <span className="h-2 w-2 flex-none rounded-full bg-[#e0b341]" />
+    <div className="mb-2 flex items-center gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--soromi-amber)_40%,transparent)] bg-[color-mix(in_srgb,var(--soromi-amber)_10%,transparent)] px-4 py-2.5">
+      <span className="h-2 w-2 flex-none rounded-full bg-[var(--soromi-amber)]" />
       <span className="min-w-0 flex-1 text-[13.5px] text-[var(--soromi-text-dim)]">
         Context is {pct}% full — compact to free up space, or the agent will auto-compact soon.
       </span>
@@ -58,7 +58,7 @@ export function ContextBanner({
         type="button"
         disabled={busy}
         onClick={onCompact}
-        className="flex-none inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-[#e0b341] px-3 py-1.5 font-semibold text-[13px] text-[#2a2205] transition-colors hover:bg-[#eac25a] disabled:cursor-default disabled:opacity-70"
+        className="flex-none inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-[var(--soromi-amber)] px-3 py-1.5 font-semibold text-[13px] text-[var(--soromi-amber-on)] transition-colors hover:bg-[var(--soromi-amber-hover)] disabled:cursor-default disabled:opacity-70"
       >
         {pending === '/compact' && <Spinner />}
         Compact
@@ -67,7 +67,7 @@ export function ContextBanner({
         type="button"
         disabled={busy}
         onClick={() => setConfirmClear(true)}
-        className="flex-none inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border border-[var(--soromi-border)] bg-transparent px-3 py-1.5 font-medium text-[13px] text-[var(--soromi-text-dim)] transition-colors hover:border-[#e08585] hover:text-[#e08585] disabled:cursor-default disabled:opacity-50"
+        className="flex-none inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border border-[var(--soromi-border)] bg-transparent px-3 py-1.5 font-medium text-[13px] text-[var(--soromi-text-dim)] transition-colors hover:border-[var(--soromi-danger-soft)] hover:text-[var(--soromi-danger-soft)] disabled:cursor-default disabled:opacity-50"
       >
         {pending === '/clear' && <Spinner />}
         Clear

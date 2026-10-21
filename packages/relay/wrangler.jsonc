@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "soromi-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // One Durable Object per room. Each is created near the first peer to reach it (the daemon,
+  // which waits in its rooms), and both peers reach it through their nearest Cloudflare location.
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "observability": { "enabled": true },
+  // Where daemons and phones reach it: the hostname pairing codes carry (Cloudflare makes its DNS
+  // record and certificate; the zone has to be in this account), and the workers.dev address, for
+  // trying a deploy before the hostname follows. Previews are not needed: a version is the relay.
+  "routes": [{ "pattern": "relay-worker.soromi.dev", "custom_domain": true }],
+  "workers_dev": true,
+  "preview_urls": false
+  // The secret a daemon presents to open a room is not here: `wrangler secret put RELAY_ACCESS_KEY`.
+}

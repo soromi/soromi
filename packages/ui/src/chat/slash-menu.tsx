@@ -20,7 +20,7 @@ export function SlashMenu({
   onHover: (index: number) => void
 }) {
   return (
-    <div className="absolute right-0 bottom-full left-0 z-[var(--z-popover)] mb-2 max-h-[280px] overflow-y-auto rounded-[12px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] py-1.5 shadow-[0_12px_40px_rgb(0_0_0/45%)]">
+    <div className="absolute right-0 bottom-full left-0 z-[var(--z-popover)] mb-2 max-h-[280px] overflow-y-auto rounded-[12px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-terminal)] py-1.5 [box-shadow:var(--soromi-shadow-popover)]">
       {commands.map((command, index) => (
         <button
           key={command.name}

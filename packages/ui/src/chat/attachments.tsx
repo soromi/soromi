@@ -172,11 +172,11 @@ const KIND_META: Record<
   Exclude<FileKind, 'image'>,
   { icon: ComponentType<{ className?: string }>; accent: string }
 > = {
-  pdf: { icon: FileText, accent: 'text-[#e08585]' },
+  pdf: { icon: FileText, accent: 'text-[var(--soromi-danger-soft)]' },
   code: { icon: FileCode, accent: 'text-[var(--soromi-accent)]' },
   text: { icon: FileText, accent: 'text-[#8fa2c4]' },
   audio: { icon: FileAudio, accent: 'text-[#c99bd8]' },
-  video: { icon: FileVideo, accent: 'text-[#e0b341]' },
+  video: { icon: FileVideo, accent: 'text-[var(--soromi-amber)]' },
   archive: { icon: FileArchive, accent: 'text-[#c4a06a]' },
   file: { icon: FileIcon, accent: 'text-[var(--soromi-text-faint)]' },
 }

@@ -2,6 +2,7 @@
 // preload bridge (`packages/gui/src/lib/host.ts`).
 
 import { app, dialog, ipcMain, shell } from 'electron'
+import { applyAppearance, isAppearance } from './appearance'
 import { markQuitting } from './lifecycle'
 import { showNativeNotification } from './notifications'
 import { getMainWindow, showMainWindow } from './window'
@@ -27,6 +28,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('reveal', (_event, target: string) => shell.showItemInFolder(target))
 
   ipcMain.handle('focus-window', () => showMainWindow())
+
+  // The renderer's appearance changed (or it started): the window and the native parts follow, and
+  // the next launch opens in it.
+  ipcMain.handle('set-appearance', (_event, appearance: unknown) => {
+    if (isAppearance(appearance)) applyAppearance(appearance, getMainWindow())
+  })
 
   ipcMain.handle(
     'notify',

@@ -1,6 +1,11 @@
-import type { FastifyPluginAsync } from 'fastify'
+//Types
+import type { Env } from '../types'
 
-/** Uptime check for load balancers and monitors. */
-export const healthController: FastifyPluginAsync = async (app) => {
-  app.get('/health', async () => 'ok')
+/** `GET /health`, for uptime checks: `ok`, or `503` while the relay has no access key set. */
+export function healthController(env: Env): Response {
+  if (env.RELAY_ACCESS_KEY === undefined) {
+    return new Response('RELAY_ACCESS_KEY is not set', { status: 503 })
+  }
+
+  return new Response('ok')
 }

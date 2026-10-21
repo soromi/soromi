@@ -26,8 +26,8 @@ import PencilSvg from '@/assets/icons/pencil.svg?react'
 import PlusSvg from '@/assets/icons/plus.svg?react'
 import TrashSvg from '@/assets/icons/trash.svg?react'
 
-//Styles
-import { CARD, CARD_NAME, DESC, H2, SECTION, SECTION_HEAD } from '../styles'
+//Components
+import { SETTINGS_ICON, SETTINGS_PRIMARY, SettingsGroup, SettingsPage } from '../layout'
 
 //Types
 import type { AccountProfile } from '@soromi/protocol'
@@ -140,92 +140,83 @@ export function AccountsSection() {
 
   return (
     <>
-      <section className={SECTION}>
-        <div className={SECTION_HEAD}>
-          <div>
-            <h2 className={H2}>Accounts</h2>
-            <p className={DESC}>
-              An account bundles per-provider logins. Point a provider at a config directory you
-              already use, or a new one you'll log into from a workspace.
-            </p>
-          </div>
-          <span className="flex-shrink-0 text-[var(--soromi-text-faint)] text-sm">
-            {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
-          </span>
-        </div>
-
-        {accountRows.map((account) => (
-          <div key={account.name} className={CARD}>
-            <div className="flex items-center gap-3.5 px-[18px] py-4">
-              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[11px] bg-[#1a2f24] font-bold text-[15px] text-[var(--soromi-accent)]">
+      <SettingsPage
+        title="Accounts"
+        description="Each account is a set of logins, one per agent, kept in a folder of its own. A workspace runs its agents under one of them."
+        action={
+          <button type="button" className={SETTINGS_PRIMARY} onClick={startNew}>
+            <PlusSvg width={14} height={14} />
+            Add account
+          </button>
+        }
+      >
+        <SettingsGroup
+          label={`${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}`}
+          hint="Point an agent at a folder you already use (~/.claude), or a new one you sign in to from a workspace."
+        >
+          {accountRows.length === 0 && (
+            <div className="px-4 py-6 text-center text-[12.5px] text-[var(--soromi-text-faint)]">
+              No accounts yet. Add one to run agents under a login of their own.
+            </div>
+          )}
+          {accountRows.map((account) => (
+            <div key={account.name} className="group flex items-start gap-3 px-4 py-3">
+              <span className="mt-px flex h-7 w-7 flex-none items-center justify-center rounded-[8px] bg-[var(--soromi-accent-dim)] font-semibold text-[12px] text-[var(--soromi-accent)]">
                 {account.initial}
               </span>
               <div className="min-w-0 flex-1">
-                <div className={CARD_NAME}>{account.name}</div>
-                <div className="mt-0.5 text-[13px] text-[var(--soromi-text-faint)]">
-                  {account.providers.length}{' '}
-                  {account.providers.length === 1 ? 'provider' : 'providers'} connected
+                <div className="flex h-7 items-center font-medium text-[13px] text-[var(--soromi-text)]">
+                  {account.name}
+                </div>
+                <div className="flex flex-col gap-1 pb-0.5">
+                  {account.providers.map((entry) => (
+                    <div key={entry.provider} className="flex min-w-0 items-center gap-2">
+                      <span
+                        title={entry.connected ? 'Signed in' : 'Not signed in'}
+                        className={cn(
+                          'h-1.5 w-1.5 flex-none rounded-full',
+                          entry.connected
+                            ? 'bg-[var(--soromi-accent)]'
+                            : 'bg-[var(--soromi-amber)]',
+                        )}
+                      />
+                      <span className="w-12 flex-none text-[12px] text-[var(--soromi-text-dim)]">
+                        {entry.label}
+                      </span>
+                      <span className="min-w-0 truncate text-[11.5px] text-[var(--soromi-text-faint)] [font-family:var(--soromi-font-mono)]">
+                        {entry.dir || '(no folder)'}
+                      </span>
+                      {!entry.connected && (
+                        <span className="flex-none text-[11.5px] text-[var(--soromi-amber-text)]">
+                          · not signed in
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              <button
-                type="button"
-                className="inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-2.5 py-1.5 font-medium text-[var(--soromi-text-dim)] text-sm hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text)]"
-                onClick={() => startEdit(account)}
-              >
-                <PencilSvg width={15} height={15} />
-                Edit
-              </button>
-              <button
-                type="button"
-                className="inline-flex cursor-pointer appearance-none items-center gap-1.5 rounded-lg border-none bg-transparent px-2.5 py-1.5 font-medium text-[#e08585] text-sm hover:bg-[rgb(224_133_133/0.1)]"
-                onClick={() => setDeleteTarget(account.name)}
-              >
-                <TrashSvg width={15} height={15} />
-                Delete
-              </button>
+              <div className="flex flex-none items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                <button
+                  type="button"
+                  title={`Edit ${account.name}`}
+                  className={SETTINGS_ICON}
+                  onClick={() => startEdit(account)}
+                >
+                  <PencilSvg width={14} height={14} />
+                </button>
+                <button
+                  type="button"
+                  title={`Delete ${account.name}`}
+                  className={cn(SETTINGS_ICON, 'hover:text-[var(--soromi-danger-soft)]')}
+                  onClick={() => setDeleteTarget(account.name)}
+                >
+                  <TrashSvg width={14} height={14} />
+                </button>
+              </div>
             </div>
-            <div className="flex flex-col gap-2.5 border-[var(--soromi-border)] border-t px-[18px] py-3.5">
-              {account.providers.map((entry) => (
-                <div key={entry.provider} className="flex items-center gap-4">
-                  <span className="w-[70px] flex-none font-semibold text-[var(--soromi-text)] text-sm">
-                    {entry.label}
-                  </span>
-                  <span
-                    className={cn(
-                      'inline-flex w-[130px] flex-none items-center gap-1.5 text-[13px]',
-                      entry.connected
-                        ? 'text-[var(--soromi-accent)]'
-                        : 'text-[var(--soromi-text-faint)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'h-2 w-2 rounded-full',
-                        entry.connected
-                          ? 'bg-[var(--soromi-accent)]'
-                          : 'bg-[var(--soromi-text-faint)]',
-                      )}
-                    />
-                    {entry.connected ? 'Connected' : 'Not connected'}
-                  </span>
-                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-tab)] px-3 py-2 text-[13px] text-[var(--soromi-text-dim)] [font-family:var(--soromi-font-mono)]">
-                    {entry.dir || '(no path)'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          className="inline-flex cursor-pointer appearance-none items-center gap-2 self-start rounded-[10px] border-none bg-[var(--soromi-accent)] px-[18px] py-[11px] font-bold text-[13.5px] text-[var(--soromi-accent-on)] hover:bg-[#4bdb9a]"
-          onClick={startNew}
-        >
-          <PlusSvg width={16} height={16} />
-          Add account
-        </button>
-      </section>
+          ))}
+        </SettingsGroup>
+      </SettingsPage>
 
       <Dialog
         open={formOpen}

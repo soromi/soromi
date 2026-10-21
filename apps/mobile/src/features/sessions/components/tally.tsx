@@ -26,6 +26,8 @@ export const WorkspaceTally = (props: TallyProps) => {
   const tally = useMemo(() => getTally(sessions), [sessions])
 
   if (tally.running === 0 && tally.review === 0) {
+    if (props.quiet) return null
+
     return (
       <Text variant="caption" tone="muted">
         {SESSIONS.tally.idle}

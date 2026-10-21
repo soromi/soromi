@@ -8,6 +8,9 @@ import { defineStyles, useTheme, useThemedStyles } from '@/config/theme'
 //Constants
 import { NAVIGATION } from '@/features/layout/constants/navigation'
 
+//Helpers
+import { getHeaderTitle } from '@/features/layout/helpers'
+
 //Hooks
 import { useBanners } from '@/features/sessions/hooks/use-banners'
 import { useLayout } from '@/hooks/use-layout'
@@ -50,16 +53,31 @@ export const RootNavigator = () => {
     [theme, wide],
   )
 
+  const settingsOptions = useMemo(() => getHeaderTitle(NAVIGATION.screens.settings.title), [])
+  const pairOptions = useMemo(() => getHeaderTitle(NAVIGATION.screens.pair.title), [])
+
   return (
     <View style={styles.root}>
       {wide && paired && <Sidebar />}
       <View style={styles.main}>
         <Stack screenOptions={screenOptions}>
           <Stack.Screen name="index" options={NAVIGATION.screens.sessions} />
-          <Stack.Screen name="settings" options={NAVIGATION.screens.settings} />
-          <Stack.Screen name="pair" options={NAVIGATION.screens.pair} />
+          <Stack.Screen name="settings" options={settingsOptions} />
+          <Stack.Screen name="pair" options={pairOptions} />
           <Stack.Screen name="session/[id]/index" options={NAVIGATION.screens.session} />
           <Stack.Screen name="session/[id]/panel" options={NAVIGATION.screens.panel} />
+          <Stack.Screen name="session/[id]/agent" options={NAVIGATION.screens.agent} />
+          <Stack.Screen name="workspace/new" options={NAVIGATION.screens.newWorkspace} />
+          <Stack.Screen name="workspace/[name]/sessions" options={NAVIGATION.screens.workspace} />
+          <Stack.Screen
+            name="workspace/[name]/settings"
+            options={NAVIGATION.screens.workspaceSettings}
+          />
+          <Stack.Screen
+            name="workspace/[name]/conversations"
+            options={NAVIGATION.screens.conversations}
+          />
+          <Stack.Screen name="workspace/[name]/usage" options={NAVIGATION.screens.usage} />
           <Stack.Screen name="workspace/[name]/file" options={NAVIGATION.screens.file} />
           <Stack.Screen name="workspace/[name]/diff" options={NAVIGATION.screens.diff} />
         </Stack>

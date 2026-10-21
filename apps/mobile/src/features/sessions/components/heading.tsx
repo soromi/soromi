@@ -2,12 +2,13 @@ import { useCallback, useMemo } from 'react'
 import { Pressable } from 'react-native'
 
 //Components
-import { Icon, Text } from '@/components'
+import { Icon, IconButton, Text } from '@/components'
 
 //Config
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Components
+import { NewSessionAction } from './new-session-action'
 import { WorkspaceTally } from './tally'
 
 //Constants
@@ -21,16 +22,19 @@ import type { PressableStateCallbackType } from 'react-native'
 import type { HeadingProps } from '../types'
 
 /**
- * A workspace above its sessions: its name, and what its sessions are up to in a glance. A tap
- * folds the sessions away, or shows them again.
+ * A workspace above its sessions in the sessions column: its name, and what its sessions are up to
+ * in a glance. A tap folds the sessions away, or shows them again; its plus starts a session there,
+ * and its dots offer the rest (earlier conversations, usage, settings).
  */
 export const WorkspaceHeading = (props: HeadingProps) => {
   const styles = useThemedStyles(makeStyles)
   const actions = useWorkspaceActions()
   const name = props.workspace.name
   const open = props.open
+  const onMore = props.onMore
 
-  const handleToggle = useCallback(() => actions.toggleGroup(name), [actions, name])
+  const handleToggle = useCallback(() => actions.setCollapsed(name, open), [actions, name, open])
+  const handleMore = useCallback(() => onMore(name), [onMore, name])
 
   const getStyle = useCallback(
     (state: PressableStateCallbackType) => [styles.root, state.pressed && styles.pressed],
@@ -57,6 +61,8 @@ export const WorkspaceHeading = (props: HeadingProps) => {
         {name}
       </Text>
       <WorkspaceTally sessions={props.workspace.sessions} />
+      <NewSessionAction workspace={props.workspace} />
+      <IconButton icon="more" size="sm" label={SESSIONS.group.more} onPress={handleMore} />
     </Pressable>
   )
 }

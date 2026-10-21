@@ -24,4 +24,17 @@ export const layout = {
   sheet: 520,
   /** The least room a session's card takes in the home's grid: what decides how many fit a row. */
   card: 170,
+  /**
+   * How far the two columns can be dragged wider or narrower, as on the desktop. The sessions
+   * column takes at most a share of the window; a docked panel leaves the conversation at least
+   * `content` of it, and one over the conversation leaves `gap` of it showing to tap away.
+   */
+  resize: {
+    sidebar: { min: 240, max: 480, share: 0.4 },
+    panel: { min: 300, max: 640 },
+    content: 360,
+    gap: 48,
+    /** How much a screen reader's swipe up or down moves an edge. */
+    step: 40,
+  },
 } as const

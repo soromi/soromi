@@ -15,35 +15,33 @@ import {
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
-import { colors } from '@/config/theme'
+import { terminalTheme } from '@/config/theme'
+
+//Types
+import type { ShellSummary } from '@soromi/protocol'
 
 /**
  * The Terminal tab in the Explorer: ad-hoc shell terminals as sub-tabs, each rooted at a chosen
  * workspace folder (or the root). Shells are plain PTYs (no agent) keyed by their own `shell:<uuid>`
- * ids and reuse the shared `TerminalSurface`. They live only for the app session — not persisted.
+ * ids and reuse the shared `TerminalSurface`. The daemon keeps the list (`workspace.shells`), so one
+ * opened, renamed or closed here is opened, renamed or closed on the phone too, and the reverse;
+ * which one is in front is this window's own. They end with the daemon: not persisted.
  */
 export function TerminalPanel() {
   const transport = useTransport()
-  const { active, shellList, activeShell } = useAppStore(
+  const { active, activeShell, selectShell } = useAppStore(
     useShallow((s) => ({
       active: s.active,
-      // Return the stored array (or undefined) as-is — never a fresh `[]`, or useShallow would see a
-      // new value every render and loop forever. Default to [] in the body below.
-      shellList: s.active ? s.shells[s.active] : undefined,
       activeShell: s.active ? s.activeShell[s.active] : undefined,
-    })),
-  )
-  const shells = shellList ?? []
-  // The workspace's folders come from the client store (root + relative folders).
-  const workspace = useClientStore((c) => c.workspaces.find((w) => w.name === active))
-  const { openShell, closeShell, selectShell, renameShell } = useAppStore(
-    useShallow((s) => ({
-      openShell: s.openShell,
-      closeShell: s.closeShell,
       selectShell: s.selectShell,
-      renameShell: s.renameShell,
     })),
   )
+  const terminalColors = terminalTheme(useAppStore((s) => s.theme))
+  // The workspace's folders and its shells come from the client store, as the daemon lists them.
+  const workspace = useClientStore((c) => c.workspaces.find((w) => w.name === active))
+  const shells = workspace?.shells ?? EMPTY
+  // The one in front: the one picked here, while it is open; otherwise the first.
+  const shown = shells.find((shell) => shell.id === activeShell) ?? shells[0]
   // The shell being renamed inline (double-click its tab), and the draft text.
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
 
@@ -64,16 +62,24 @@ export function TerminalPanel() {
   ]
 
   const create = (folder: string) => {
-    const id = openShell(active, folder)
+    const id = `shell:${crypto.randomUUID()}`
+    // In front from the start: it shows as soon as the daemon lists it.
+    selectShell(active, id)
     transport.send({ type: 'open-shell', workspace: active, shell: id, folder })
   }
   const createDefault = () => create(folderChoices[0]?.folder ?? '')
   const close = (id: string) => {
-    closeShell(active, id)
+    // Closing the one in front brings its right neighbour forward, else its left.
+    if (id === shown?.id) {
+      const index = shells.findIndex((shell) => shell.id === id)
+      const neighbour = shells[index + 1] ?? shells[index - 1]
+      if (neighbour) selectShell(active, neighbour.id)
+    }
     transport.send({ type: 'close-session', session: id })
   }
   const commitRename = () => {
-    if (editing) renameShell(active, editing.id, editing.draft)
+    const title = editing?.draft.trim()
+    if (editing && title) transport.send({ type: 'rename-shell', shell: editing.id, title })
     setEditing(null)
   }
 
@@ -86,7 +92,7 @@ export function TerminalPanel() {
             key={shell.id}
             className={cn(
               'group flex flex-none items-center gap-1 rounded-md pr-1 pl-2 text-[12px] hover:bg-[var(--soromi-bg-hover)]',
-              shell.id === activeShell
+              shell.id === shown?.id
                 ? 'bg-[var(--soromi-bg-hover)] text-[var(--soromi-text)]'
                 : 'text-[var(--soromi-text-faint)]',
             )}
@@ -194,9 +200,8 @@ export function TerminalPanel() {
               key={shell.id}
               transport={transport}
               session={shell.id}
-              active={shell.id === activeShell}
-              background={colors.bgTerminal}
-              foreground={colors.text}
+              active={shell.id === shown?.id}
+              theme={terminalColors}
               fontSize={12}
             />
           ))
@@ -205,6 +210,9 @@ export function TerminalPanel() {
     </div>
   )
 }
+
+/** No shells, the same array every time so a render does not see a new list. */
+const EMPTY: ShellSummary[] = []
 
 function PlusGlyph() {
   return (

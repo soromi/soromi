@@ -11,7 +11,7 @@ import { Markdown } from '../chat/markdown'
 import { cn } from '../lib/utils'
 
 //Constants
-import { darkTheme } from './code-viewer-theme'
+import { editorTheme } from './code-viewer-theme'
 
 const isMarkdownPath = (path: string) => /\.(md|mdx|markdown)$/i.test(path)
 
@@ -167,7 +167,7 @@ function SourceView({
           codeFolding(),
           foldGutter(),
           keymap.of(foldKeymap),
-          darkTheme,
+          editorTheme,
           language.of([]),
           ...editing,
         ],

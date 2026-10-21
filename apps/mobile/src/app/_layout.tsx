@@ -1,6 +1,7 @@
 import '@/config/runtime'
 
-import { StatusBar } from 'expo-status-bar'
+//Components
+import { SystemBars } from '@/components'
 
 //Config
 import { ThemeProvider } from '@/config/theme'
@@ -16,7 +17,7 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <StatusBar style="light" />
+      <SystemBars />
       <RootNavigator />
     </ThemeProvider>
   )

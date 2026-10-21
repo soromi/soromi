@@ -14,6 +14,7 @@ import { LinkBanner } from '@/features/layout/components/link-banner'
 
 //Helpers
 import { getFileName } from '@/features/files/helpers'
+import { getHeaderTitle } from '@/features/layout/helpers'
 
 //Hooks
 import { useDiff } from '@/features/git/hooks/use-diff'
@@ -29,7 +30,7 @@ export const DiffScreen = () => {
   }>()
   const diff = useDiff(params.name, params.folder ?? '', params.path, params.staged === '1')
 
-  const options = useMemo(() => ({ title: getFileName(params.path) }), [params.path])
+  const options = useMemo(() => getHeaderTitle(getFileName(params.path)), [params.path])
 
   return (
     <View style={styles.root}>

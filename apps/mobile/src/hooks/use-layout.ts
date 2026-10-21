@@ -15,6 +15,7 @@ export const useLayout = () => {
 
   return useMemo(
     () => ({
+      width,
       wide: width >= layout.breakpoints.wide,
       docked: width >= layout.breakpoints.docked,
       // Never fewer than two: one card a row is the list.

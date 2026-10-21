@@ -10,6 +10,12 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 
+/*
+ * `dark:` follows the app's appearance (dark unless the root has `so-light`), not the system's: a
+ * Mac in dark mode with Soromi in light would otherwise give the shadcn parts their dark styles.
+ */
+@custom-variant dark (&:where(:root:not(.so-light), :root:not(.so-light) *));
+
 @layer base {
   /*
    * Suppress the WebKit default focus ring on buttons and menu triggers. WKWebView colors it with
@@ -97,7 +103,7 @@
 
 /*
  * shadcn's semantic tokens, aliased to Soromi's palette (the single source of truth in
- * @soromi/ui/theme.css), so shadcn components match the app with no visual drift. Dark-only.
+ * @soromi/ui/theme.css), so shadcn components match the app in either appearance.
  */
 :root {
   --background: var(--soromi-bg-app);
@@ -114,16 +120,16 @@
   --muted-foreground: var(--soromi-text-faint);
   --accent: var(--soromi-bg-active);
   --accent-foreground: var(--soromi-text);
-  --destructive: #f47070;
-  --destructive-foreground: #ffffff;
+  --destructive: var(--soromi-danger);
+  --destructive-foreground: var(--soromi-danger-on);
   --border: var(--soromi-border);
   --input: var(--soromi-border);
   --ring: var(--soromi-accent);
   --radius: 0.5rem;
 
-  /* App-wide scrollbar thumb (mockup values). */
-  --sb-thumb: rgb(255 255 255 / 0.13);
-  --sb-thumb-hover: rgb(255 255 255 / 0.24);
+  /* App-wide scrollbar thumb, light on dark and dark on light. */
+  --sb-thumb: var(--soromi-scrollbar);
+  --sb-thumb-hover: var(--soromi-scrollbar-hover);
 }
 
 /*
@@ -171,13 +177,13 @@
 
   @keyframes status-pulse {
     0% {
-      box-shadow: 0 0 0 0 rgb(217 165 63 / 55%);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--soromi-warn) 55%, transparent);
     }
     70% {
-      box-shadow: 0 0 0 5px rgb(217 165 63 / 0%);
+      box-shadow: 0 0 0 5px color-mix(in srgb, var(--soromi-warn) 0%, transparent);
     }
     100% {
-      box-shadow: 0 0 0 0 rgb(217 165 63 / 0%);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--soromi-warn) 0%, transparent);
     }
   }
 }

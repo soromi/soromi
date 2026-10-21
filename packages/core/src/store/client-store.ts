@@ -7,10 +7,13 @@ import { appendEvents, withFile } from './chat-log'
 import type { ModelCatalog } from '../chat/models'
 import type {
   AccountProfile,
+  AgentUsage,
   ChatCursor,
   ChatEvent,
   ChatFile,
+  HostInfo,
   KeepAwakeMode,
+  PastConversation,
   SessionSummary,
   Skill,
   SlashCommand,
@@ -20,6 +23,25 @@ import type {
 } from '@soromi/protocol'
 
 export type WorkspaceInfo = WorkspaceSummary
+
+/** What a watched background agent did, as far as the daemon has sent it (`watch-agent`). */
+export interface AgentLog {
+  events: ChatEvent[]
+  /** The log goes back further than what was sent. */
+  earlier: boolean
+  /** The daemon has answered: until then the log is being looked for. */
+  loaded: boolean
+}
+
+/** A workspace's earlier conversations, as the daemon last listed them (`list-conversations`). */
+export interface Conversations {
+  /** The search they answer, `null` for the whole list: a reply to an older search says so. */
+  query: string | null
+  list: PastConversation[]
+}
+
+/** What a background agent's log is kept under: its session, then its id. */
+export const agentLogKey = (session: string, agent: string): string => `${session}\n${agent}`
 
 /** A newer release the daemon found. Notify-only: `url` opens the release page. */
 export interface AppUpdate {
@@ -63,6 +85,14 @@ export interface ClientState {
   connected: boolean
   /** True once the first workspace list has arrived, so the shell can wait behind a splash. */
   ready: boolean
+  /**
+   * The computer the daemon runs on and what started it (the desktop app, a terminal, a service),
+   * from its answer to `hello`. What an app offers can depend on it. `null` until that answer, and
+   * from a daemon too old to send it.
+   */
+  host: HostInfo | null
+  /** The daemon's release, from the same answer. */
+  daemonVersion: string | null
   keepAwake: boolean
   keepAwakeMode: KeepAwakeMode
   workspaces: WorkspaceInfo[]
@@ -89,6 +119,12 @@ export interface ClientState {
   /** Whether earlier messages exist on the daemon beyond what's loaded, keyed by session id (drives
    * the "Load earlier" button). */
   chatEarlier: Record<string, boolean>
+  /** The logs of the background agents watched, by `agentLogKey(session, agent)`. */
+  agentLogs: Record<string, AgentLog>
+  /** Each workspace's earlier conversations, by its name, as last listed. */
+  conversations: Record<string, Conversations>
+  /** The plan usage of each workspace's agents, by its name, as the daemon last read it. */
+  usage: Record<string, AgentUsage[]>
   /** Every provider's models, as the daemon lists them. Empty until its catalog arrives. */
   models: ModelCatalog
   /** Bumped each time the daemon's model catalog is (re)applied — a reactivity signal so the composer
@@ -103,6 +139,8 @@ export interface ClientState {
   controlHolder: string | null
   setControlHolder: (holder: string | null) => void
   setConnected: (connected: boolean) => void
+  /** The daemon answered `hello`: its release, and the computer it runs on (if it said). */
+  setWelcome: (version: string, host: HostInfo | null) => void
   setKeepAwake: (keepAwake: boolean) => void
   setKeepAwakeMode: (mode: KeepAwakeMode) => void
   setWorkspaces: (workspaces: WorkspaceInfo[]) => void
@@ -119,6 +157,16 @@ export interface ClientState {
   /** Events for the end of a session's chat; `seq` is the place of the last one in the log. */
   appendChat: (session: string, events: ChatEvent[], seq: number) => void
   prependChatHistory: (session: string, events: ChatEvent[], hasMore: boolean) => void
+  /** A watched agent's log arrived: in place of what was held (`reset`), or after it. */
+  applyAgentLog: (
+    session: string,
+    agent: string,
+    events: ChatEvent[],
+    reset: boolean,
+    earlier: boolean,
+  ) => void
+  setConversations: (workspace: string, query: string | null, list: PastConversation[]) => void
+  setUsage: (workspace: string, agents: AgentUsage[]) => void
   /** The chat held for a session is void: start over at `seq` of the run of the log named `log`. */
   resetChat: (session: string, log: string, seq: number) => void
   /** The chat held for a session is still good; its approvals and streaming text are sent again. */
@@ -141,6 +189,8 @@ export const createClientStore = (options: ClientStoreOptions = {}) =>
   createStore<ClientState>()((set) => ({
     connected: false,
     ready: false,
+    host: null,
+    daemonVersion: null,
     keepAwake: false,
     keepAwakeMode: 'off',
     workspaces: [],
@@ -156,11 +206,15 @@ export const createClientStore = (options: ClientStoreOptions = {}) =>
     commands: {},
     chatApproval: {},
     chatEarlier: {},
+    agentLogs: {},
+    conversations: {},
+    usage: {},
     update: null,
     dismissedUpdate: options.storage?.get(DISMISSED_UPDATE_KEY) ?? null,
     controlHolder: null,
     setControlHolder: (controlHolder) => set({ controlHolder }),
     setConnected: (connected) => set({ connected }),
+    setWelcome: (daemonVersion, host) => set({ daemonVersion, host }),
     setKeepAwake: (keepAwake) => set({ keepAwake }),
     setKeepAwakeMode: (keepAwakeMode) => set({ keepAwakeMode }),
     setWorkspaces: (workspaces) => set({ workspaces, ready: true }),
@@ -213,6 +267,22 @@ export const createClientStore = (options: ClientStoreOptions = {}) =>
           chatDelta: { ...state.chatDelta, [session]: '' },
         }
       }),
+    applyAgentLog: (session, agent, events, reset, earlier) =>
+      set((state) => {
+        const key = agentLogKey(session, agent)
+        const held = state.agentLogs[key]
+        const log: AgentLog =
+          reset || !held
+            ? { events, earlier, loaded: true }
+            : { events: [...held.events, ...events], earlier: held.earlier, loaded: true }
+        return { agentLogs: { ...state.agentLogs, [key]: log } }
+      }),
+    setConversations: (workspace, query, list) =>
+      set((state) => ({
+        conversations: { ...state.conversations, [workspace]: { query, list } },
+      })),
+    setUsage: (workspace, agents) =>
+      set((state) => ({ usage: { ...state.usage, [workspace]: agents } })),
     prependChatHistory: (session, events, hasMore) =>
       set((state) => ({
         chat: { ...state.chat, [session]: [...events, ...(state.chat[session] ?? [])] },

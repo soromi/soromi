@@ -1,7 +1,7 @@
 import type { FileKind, FileNode } from '@soromi/core'
 
 //Components
-import type { IconName, SegmentedOption } from '@/components'
+import type { HighlightLine, IconName, SegmentedOption } from '@/components'
 
 //Type
 import type { FileContent } from '@/states/workspace/workspace.state.type'
@@ -43,9 +43,13 @@ export type CodeLine = {
   key: string
   number: number
   text: string
+  /** The line in colour, when the file is in a language the phone colours. */
+  tokens: HighlightLine | null
 }
 
 export type CodeProps = {
+  /** The file's path, which says what language it is in. */
+  path: string
   content: string
   /** The file is longer than what was sent. */
   truncated: boolean

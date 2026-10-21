@@ -9,10 +9,14 @@ import { isSeen } from '../helpers'
 import { useOpenSession } from './use-open-session'
 
 //Services
+import { AnswerService } from '@/services/answers'
+import { ComputersService } from '@/services/computers'
 import { LinkService } from '@/services/link'
 import { NotificationService } from '@/services/notifications'
+import { toAnswered } from '@/services/notifications.helpers'
 
 //State
+import { LinkStore } from '@/states/link/link.state'
 import { useLinkPaired } from '@/states/link/link.state.hook'
 
 /**
@@ -76,7 +80,12 @@ export const useBanners = () => {
         const about = banner.session ?? undefined
         const view = { active: AppState.currentState === 'active', session: viewed.current }
         if (isSeen(about, view)) return
-        void NotificationService.show({ title: banner.title, body: banner.body, session: about })
+        void NotificationService.show({
+          title: banner.title,
+          body: banner.body,
+          session: about,
+          approval: banner.approval ?? undefined,
+        })
       })
       // For when the app is not there to be told: without a token it only has the link.
       const token = await NotificationService.getPushToken()
@@ -93,6 +102,21 @@ export const useBanners = () => {
   useEffect(() => {
     if (!paired) return
 
-    return NotificationService.onOpen((target) => open(target.session))
+    // One of a tool request's buttons answers it where the app is, out of sight or not, on the
+    // computer that asked; nothing is opened. A tap on a banner opens its session, bringing in
+    // first the computer that pushed it when that is another one the phone is paired with.
+    return NotificationService.onOpen((target) => {
+      const answered = toAnswered(target)
+      if (answered) {
+        void AnswerService.answer(answered)
+        return
+      }
+      const current = LinkStore.getState().pairing.current?.device
+      if (target.device && target.device !== current) {
+        void ComputersService.use(target.device).then(() => open(target.session))
+        return
+      }
+      open(target.session)
+    })
   }, [paired, open])
 }

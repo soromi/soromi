@@ -5,67 +5,71 @@ import * as SecureStore from 'expo-secure-store'
 import { KEYCHAIN } from './keychain.constants'
 
 //Helpers
-import { toPreferences, toRoutes, toShells } from './keychain.helpers'
+import { toComputers, toPairing, toPreferences, toRoutes } from './keychain.helpers'
 
 //Type
-import type { Pairing } from '@soromi/core'
+import type { Computer } from '@/states/link/link.state.type'
 import type { Preferences } from '@/states/preferences/preferences.state.type'
-import type { Shell } from '@/states/workspace/workspace.state.type'
 
 /**
- * What the app keeps in the device's keychain: the pairing with the user's computer (it holds the
- * secret the link's encryption is keyed from), the direct routes that computer last reported, the
- * terminals opened on it from here, this install's id, and the person's preferences (the one
- * place the app has to keep anything). Nothing else imports `expo-secure-store`.
+ * What the app keeps in the device's keychain: the computers it is paired with (each pairing holds
+ * the secret its link's encryption is keyed from) and which one is in use, the direct routes each
+ * last reported, this install's id, and the person's preferences (the one place the app has to
+ * keep anything). Nothing else imports `expo-secure-store`.
  */
 export const KeychainService = {
-  /** The stored pairing, or `null` until a code has been scanned. */
-  loadPairing: async (): Promise<Pairing | null> => {
+  /**
+   * The computers the phone is paired with and the device id of the one in use. A phone paired by
+   * a build that knew only one computer has that one moved into the list, its routes with it.
+   */
+  loadComputers: async (): Promise<{ computers: Computer[]; active: string | null }> => {
     try {
-      const stored = await SecureStore.getItemAsync(KEYCHAIN.pairing)
-      if (!stored) return null
-      const pairing = JSON.parse(stored) as Partial<Pairing>
-      if (!pairing.relay || !pairing.room || !pairing.key || !pairing.device) return null
+      const computers = toComputers(await SecureStore.getItemAsync(KEYCHAIN.computers))
+      const active = await SecureStore.getItemAsync(KEYCHAIN.active)
+      if (computers.length > 0) return { computers, active }
 
-      return pairing as Pairing
+      const single = await SecureStore.getItemAsync(KEYCHAIN.pairing)
+      const pairing = single ? toPairing(JSON.parse(single)) : null
+      if (!pairing) return { computers: [], active: null }
+      const moved = [{ pairing, name: null }]
+      await SecureStore.setItemAsync(KEYCHAIN.computers, JSON.stringify(moved))
+      await SecureStore.setItemAsync(KEYCHAIN.active, pairing.device)
+      const routes = await SecureStore.getItemAsync(KEYCHAIN.routes)
+      if (routes) await SecureStore.setItemAsync(KEYCHAIN.routesOf(pairing.device), routes)
+      await SecureStore.deleteItemAsync(KEYCHAIN.pairing)
+      await SecureStore.deleteItemAsync(KEYCHAIN.routes)
+
+      return { computers: moved, active: pairing.device }
     } catch {
-      return null
+      return { computers: [], active: null }
+    }
+  },
+
+  /** Keeps the computers, and which one is in use (`null`: none, the phone is paired with none). */
+  saveComputers: async (computers: Computer[], active: string | null): Promise<void> => {
+    await SecureStore.setItemAsync(KEYCHAIN.computers, JSON.stringify(computers))
+    if (active) await SecureStore.setItemAsync(KEYCHAIN.active, active)
+    else await SecureStore.deleteItemAsync(KEYCHAIN.active)
+  },
+
+  /** What is kept for one computer and nothing else: its routes. Its place in the list goes with `saveComputers`. */
+  forgetComputer: async (device: string): Promise<void> => {
+    try {
+      await SecureStore.deleteItemAsync(KEYCHAIN.routesOf(device))
+    } catch {
+      // Nothing was kept for it.
     }
   },
 
   /**
-   * Keeps a pairing. The routes and terminals kept for the one before it are dropped: they were
-   * another computer's.
+   * Drops the list of terminals that builds before the shared list kept here. The computer keeps
+   * the list now, for every device.
    */
-  savePairing: async (pairing: Pairing): Promise<void> => {
-    await SecureStore.setItemAsync(KEYCHAIN.pairing, JSON.stringify(pairing))
-    await SecureStore.deleteItemAsync(KEYCHAIN.routes)
-    await SecureStore.deleteItemAsync(KEYCHAIN.shells)
-  },
-
-  forgetPairing: async (): Promise<void> => {
-    await SecureStore.deleteItemAsync(KEYCHAIN.pairing)
-    await SecureStore.deleteItemAsync(KEYCHAIN.routes)
-    await SecureStore.deleteItemAsync(KEYCHAIN.shells)
-  },
-
-  /**
-   * The terminals opened on the computer from here, by workspace. They keep running there when the
-   * app is closed, so they are kept: the next launch shows them again, to go on with or to close.
-   */
-  loadShells: async (): Promise<Record<string, Shell[]>> => {
+  forgetOldShells: async (): Promise<void> => {
     try {
-      return toShells(await SecureStore.getItemAsync(KEYCHAIN.shells))
+      await SecureStore.deleteItemAsync(KEYCHAIN.shells)
     } catch {
-      return {}
-    }
-  },
-
-  saveShells: async (lists: Record<string, Shell[]>): Promise<void> => {
-    try {
-      await SecureStore.setItemAsync(KEYCHAIN.shells, JSON.stringify(lists))
-    } catch {
-      // The terminals still work for as long as the app runs.
+      // Nothing was kept, or it will go with the pairing.
     }
   },
 
@@ -73,18 +77,18 @@ export const KeychainService = {
    * Where the computer said it can be reached directly, the last time it was asked. Empty until it
    * has said, and whenever what is stored cannot be read.
    */
-  loadRoutes: async (): Promise<string[]> => {
+  loadRoutes: async (device: string): Promise<string[]> => {
     try {
-      return toRoutes(await SecureStore.getItemAsync(KEYCHAIN.routes))
+      return toRoutes(await SecureStore.getItemAsync(KEYCHAIN.routesOf(device)))
     } catch {
       return []
     }
   },
 
   /** Kept so the next launch can try them at once, before the relay has said anything. */
-  saveRoutes: async (routes: string[]): Promise<void> => {
+  saveRoutes: async (device: string, routes: string[]): Promise<void> => {
     try {
-      await SecureStore.setItemAsync(KEYCHAIN.routes, JSON.stringify(routes))
+      await SecureStore.setItemAsync(KEYCHAIN.routesOf(device), JSON.stringify(routes))
     } catch {
       // Not worth failing over: the computer says them again on the next connection.
     }

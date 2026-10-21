@@ -3,13 +3,17 @@ import { useCallback } from 'react'
 import { ScrollView } from 'react-native'
 
 //Components
-import { Text } from '@/components'
+import { KeyboardView, Text } from '@/components'
 
 //Config
 import { layout } from '@/config/layout'
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Features
+import { AppearanceChoice } from '@/features/settings/components/appearance'
+import { ConnectionStats } from '@/features/settings/components/connection'
+import { ComputerHost } from '@/features/settings/components/host'
+import { RelayAddress } from '@/features/settings/components/relay'
 import { SettingsSection } from '@/features/settings/components/section'
 import { Unpair } from '@/features/settings/components/unpair'
 
@@ -30,14 +34,27 @@ export const SettingsScreen = () => {
   }, [router])
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <SettingsSection title={SETTINGS.computer.title}>
-        <Text variant="bodySm" tone="body">
-          {SETTINGS.computer.about}
-        </Text>
-        <Unpair onUnpaired={handleUnpaired} />
-      </SettingsSection>
-    </ScrollView>
+    // The relay is typed in: the screen stays above the keyboard.
+    <KeyboardView style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <SettingsSection title={SETTINGS.computer.title}>
+          <ComputerHost />
+          <Text variant="bodySm" tone="body">
+            {SETTINGS.computer.about}
+          </Text>
+          <Unpair onUnpaired={handleUnpaired} />
+        </SettingsSection>
+        <SettingsSection title={SETTINGS.connection.title}>
+          <ConnectionStats />
+        </SettingsSection>
+        <SettingsSection title={SETTINGS.appearance.title}>
+          <AppearanceChoice />
+        </SettingsSection>
+        <SettingsSection title={SETTINGS.relay.title}>
+          <RelayAddress />
+        </SettingsSection>
+      </ScrollView>
+    </KeyboardView>
   )
 }
 

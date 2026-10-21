@@ -8,11 +8,14 @@ import { defineStyles, useThemedStyles } from '@/config/theme'
 import { SessionsEmpty } from './empty'
 import { WorkspaceHeading } from './heading'
 import { SessionMenu } from './menu'
-import { NewSession } from './new-session'
 import { SessionRow } from './row'
+import { WorkspaceMenu } from './workspace-menu'
 
 //Helpers
 import { getSessionKey, toSections } from '../helpers'
+
+//Hooks
+import { useClock } from '@/hooks/use-clock'
 
 //State
 import { useDaemonReady, useDaemonWorkspaces } from '@/states/daemon/daemon.state.hook'
@@ -25,9 +28,9 @@ import type { SectionListData, SectionListRenderItemInfo } from 'react-native'
 import type { ListProps, SessionSection, SessionTarget } from '../types'
 
 /**
- * Every workspace on the computer and its sessions, live: the phone's home, and a tablet's
- * sessions column. A workspace folds away at a tap on its name, an open one ends with the way to
- * start a new session, and a long press on a session offers its menu.
+ * Every workspace on the computer and its sessions, live: a wide screen's sessions column, as the
+ * desktop's sidebar. A workspace folds away at a tap on its name, its heading starts a session
+ * and offers the rest, and a long press on a session offers its menu.
  */
 export const SessionList = (props: ListProps) => {
   const styles = useThemedStyles(makeStyles)
@@ -36,12 +39,16 @@ export const SessionList = (props: ListProps) => {
   const ready = useDaemonReady()
   const collapsed = useWorkspaceCollapsed()
   const active = props.active
+  const now = useClock()
   // The session that was long-pressed, while its menu is open.
   const [target, setTarget] = useState<SessionTarget | null>(null)
+  // The workspace whose dots were tapped, while its menu is open.
+  const [menu, setMenu] = useState<string | null>(null)
 
   const sections = useMemo(() => toSections(workspaces, collapsed), [workspaces, collapsed])
 
   const handleMenuClose = useCallback(() => setTarget(null), [])
+  const handleWorkspaceMenuClose = useCallback(() => setMenu(null), [])
 
   const renderItem = useCallback(
     (info: SectionListRenderItemInfo<SessionSummary, SessionSection>) => (
@@ -49,23 +56,21 @@ export const SessionList = (props: ListProps) => {
         session={info.item}
         peers={info.section.workspace.sessions}
         active={info.item.id === active}
+        now={now}
         onMenu={setTarget}
       />
     ),
-    [active],
+    [active, now],
   )
 
   const renderHeading = useCallback(
     (info: { section: SectionListData<SessionSummary, SessionSection> }) => (
-      <WorkspaceHeading workspace={info.section.workspace} open={info.section.open} />
+      <WorkspaceHeading
+        workspace={info.section.workspace}
+        open={info.section.open}
+        onMore={setMenu}
+      />
     ),
-    [],
-  )
-
-  // Under an open workspace's sessions, the way to start another.
-  const renderFooter = useCallback(
-    (info: { section: SectionListData<SessionSummary, SessionSection> }) =>
-      info.section.open ? <NewSession workspace={info.section.workspace} /> : null,
     [],
   )
 
@@ -80,10 +85,10 @@ export const SessionList = (props: ListProps) => {
         contentContainerStyle={styles.list}
         renderItem={renderItem}
         renderSectionHeader={renderHeading}
-        renderSectionFooter={renderFooter}
         ListEmptyComponent={empty}
       />
       <SessionMenu target={target} onClose={handleMenuClose} />
+      <WorkspaceMenu workspace={menu} onClose={handleWorkspaceMenuClose} />
     </>
   )
 }

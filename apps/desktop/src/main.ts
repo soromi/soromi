@@ -34,13 +34,13 @@ app.whenReady().then(async () => {
   setDevDockIcon()
   serveRenderer()
 
-  const daemonPort = await startDaemon()
-  createMainWindow(daemonPort)
+  const daemon = await startDaemon()
+  createMainWindow(daemon)
 
   // macOS: clicking the dock icon reopens/focuses the hidden window.
   app.on('activate', () => {
     if (getMainWindow()) showMainWindow()
-    else createMainWindow(daemonPort)
+    else createMainWindow(daemon)
   })
 })
 

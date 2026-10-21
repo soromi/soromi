@@ -25,7 +25,7 @@ function CodeChild({ className, children }: { className?: string; children?: Rea
   const isBlock = Boolean(language) || raw.includes('\n')
   if (!isBlock) {
     return (
-      <code className="rounded bg-[var(--soromi-bg-active)] px-1.5 py-0.5 text-[0.85em] text-[var(--soromi-text-dim)] [font-family:var(--soromi-font-mono)]">
+      <code className="rounded bg-[var(--soromi-bg-bubble)] px-1.5 py-0.5 text-[0.85em] text-[var(--soromi-text-dim)] [font-family:var(--soromi-font-mono)]">
         {children}
       </code>
     )
@@ -52,7 +52,13 @@ export function CodeBlock({ code, language }: { code: string; language: string }
   useEffect(() => {
     let alive = true
     const id = setTimeout(() => {
-      codeToHtml(code, { lang: language as BundledLanguage, theme: 'github-dark-default' })
+      codeToHtml(code, {
+        lang: language as BundledLanguage,
+        // Both appearances at once: the dark colors inline, the light ones as `--shiki-light`,
+        // which theme.css switches to under `.so-light`.
+        themes: { dark: 'github-dark-default', light: 'github-light-default' },
+        defaultColor: 'dark',
+      })
         .then((out) => alive && setHtml(out))
         .catch(() => alive && setHtml('')) // unknown language: fall back to the plain <pre> below
     }, 90)
@@ -73,7 +79,7 @@ export function CodeBlock({ code, language }: { code: string; language: string }
   }
 
   return (
-    <div className="my-2 overflow-hidden rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-active)]">
+    <div className="my-2 overflow-hidden rounded-[10px] border border-[var(--soromi-border)] bg-[var(--soromi-bg-inset)]">
       <div className="flex items-center justify-between border-[var(--soromi-border)] border-b py-1.5 pr-2 pl-3">
         <span className="text-[11px] text-[var(--soromi-text-faint)] [font-family:var(--soromi-font-mono)]">
           {language}

@@ -4,6 +4,7 @@ pub mod decoder;
 pub mod delta;
 pub mod exec_chat;
 pub mod manager;
+pub mod queue;
 pub mod screen;
 pub mod session;
 pub mod stream_json;

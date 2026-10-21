@@ -23,6 +23,9 @@ use soromi_daemon::transport::server::serve;
 use soromi_daemon::workspaces::service::WorkspaceService;
 use soromi_protocol::{KeepAwakeMode, PROTOCOL_VERSION};
 
+/// What the local link takes from a client here (`transport::local`).
+const TOKEN: &str = "test-local-token";
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn say(ws: &mut Socket, value: Value) {
@@ -95,9 +98,15 @@ async fn a_chat_stays_followed_when_its_agent_is_started_over() {
             port: 0,
         },
     );
-    tokio::spawn(serve(listener, hub.clone(), accounts, pairing));
+    tokio::spawn(serve(
+        listener,
+        hub.clone(),
+        accounts,
+        pairing,
+        TOKEN.into(),
+    ));
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/?token={TOKEN}"))
         .await
         .unwrap();
     say(

@@ -6,9 +6,10 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use soromi_protocol::{
     AccountProfile, AgentAccount, ChatCursor, ChatEvent, ChatFile, ClientMessage, DeviceRoute,
-    DeviceSummary, DirEntry, EntryKind, IncompatibleAction, KeepAwakeMode, PermissionMode,
-    ProviderConfig, RemoteConfig, RemoteDefaults, ServerMessage, SessionMode, SessionSummary,
-    SlashCommand, Status, SubAgent, WorkspaceSummary,
+    DeviceSummary, DirEntry, EntryKind, HostInfo, IncompatibleAction, KeepAwakeMode, Launcher,
+    PastConversation, PermissionMode, ProviderConfig, QueuedTurn, RemoteConfig, RemoteDefaults,
+    ServerMessage, SessionMode, SessionSummary, ShellSummary, SlashCommand, Status, SubAgent,
+    WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -17,6 +18,81 @@ fn assert_client(msg: ClientMessage, expected: Value) {
         serde_json::from_value::<ClientMessage>(expected).unwrap(),
         msg,
         "deserialize"
+    );
+}
+
+#[test]
+fn conversations_are_listed_and_resumed() {
+    assert_client(
+        ClientMessage::ListConversations {
+            workspace: "kazomi".into(),
+            query: Some("login".into()),
+        },
+        json!({ "type": "list-conversations", "workspace": "kazomi", "query": "login" }),
+    );
+    assert_client(
+        ClientMessage::ResumeConversation {
+            workspace: "kazomi".into(),
+            conversation: "c1".into(),
+            agent: "claude".into(),
+            account: "personal".into(),
+            mode: None,
+        },
+        json!({
+            "type": "resume-conversation",
+            "workspace": "kazomi",
+            "conversation": "c1",
+            "agent": "claude",
+            "account": "personal"
+        }),
+    );
+    assert_server(
+        ServerMessage::ConversationList {
+            workspace: "kazomi".into(),
+            query: None,
+            conversations: vec![PastConversation {
+                id: "c1".into(),
+                agent: "claude".into(),
+                account: "personal".into(),
+                title: "Fix the login bug".into(),
+                last_prompt: Some("now add a test".into()),
+                updated: 1_700_000_000,
+                session: Some("s1".into()),
+            }],
+        },
+        json!({
+            "type": "conversation-list",
+            "workspace": "kazomi",
+            "conversations": [{
+                "id": "c1",
+                "agent": "claude",
+                "account": "personal",
+                "title": "Fix the login bug",
+                "lastPrompt": "now add a test",
+                "updated": 1_700_000_000,
+                "session": "s1"
+            }]
+        }),
+    );
+}
+
+#[test]
+fn client_chat_queue_and_unqueue() {
+    assert_client(
+        ClientMessage::ChatQueue {
+            session: "s1".into(),
+            text: "then run the tests".into(),
+            files: Vec::new(),
+        },
+        json!({ "type": "chat-queue", "session": "s1", "text": "then run the tests", "files": [] }),
+    );
+    assert_client(
+        ClientMessage::ChatUnqueue {
+            session: "s1".into(),
+            id: "q1".into(),
+            send: true,
+        },
+        json!({ "type": "chat-unqueue", "session": "s1", "id": "q1", "send": true }),
     );
 }
 
@@ -206,6 +282,9 @@ fn server_session_opened() {
                 model: None,
                 effort: None,
                 context_tokens: None,
+                queued: Vec::new(),
+                queue_paused: false,
+                updated: None,
             },
         },
         json!({
@@ -376,6 +455,7 @@ fn server_workspace_list_and_summary() {
                     status: Status::Idle,
                     title: Some("build".into()),
                     subagents: vec![SubAgent {
+                        id: None,
                         name: "Map v1 to v2".into(),
                         status: Status::Thinking,
                         started_at: Some(1_700_000_000),
@@ -386,7 +466,21 @@ fn server_workspace_list_and_summary() {
                     model: None,
                     effort: None,
                     context_tokens: Some(120_000),
+                    queued: vec![QueuedTurn {
+                        id: "q1".into(),
+                        text: "then run the tests".into(),
+                        files: 1,
+                    }],
+                    queue_paused: true,
+                    updated: Some(1_700_000_100),
                 }],
+                shells: vec![ShellSummary {
+                    id: "shell:1".into(),
+                    folder: "api".into(),
+                    title: "api".into(),
+                    opened_by: Some("phone-1".into()),
+                }],
+                muted: false,
                 instructions: None,
             }],
         },
@@ -408,8 +502,12 @@ fn server_workspace_list_and_summary() {
                     "activity": "Editing config.ts",
                     "mode": "terminal",
                     "permissionMode": "default",
-                    "context_tokens": 120_000
-                }]
+                    "context_tokens": 120_000,
+                    "queued": [{ "id": "q1", "text": "then run the tests", "files": 1 }],
+                    "queuePaused": true,
+                    "updated": 1_700_000_100
+                }],
+                "shells": [{ "id": "shell:1", "folder": "api", "title": "api", "openedBy": "phone-1" }]
             }]
         }),
     );
@@ -541,20 +639,58 @@ fn server_update_available_omits_absent_notes() {
 }
 
 #[test]
+fn a_device_is_told_the_relay_it_reaches_the_computer_through() {
+    assert_server(
+        ServerMessage::Relay {
+            url: "wss://relay.example.com".into(),
+        },
+        json!({ "type": "relay", "url": "wss://relay.example.com" }),
+    );
+}
+
+#[test]
 fn hello_and_welcome_carry_the_protocol_version() {
     assert_client(
         ClientMessage::Hello {
             protocol: 2,
             client_id: "c-1".into(),
+            device_name: None,
         },
         json!({ "type": "hello", "protocol": 2, "clientId": "c-1" }),
+    );
+    // A paired device also says what it is called.
+    assert_client(
+        ClientMessage::Hello {
+            protocol: 4,
+            client_id: "c-1".into(),
+            device_name: Some("Pixel 9 Pro".into()),
+        },
+        json!({ "type": "hello", "protocol": 4, "clientId": "c-1", "deviceName": "Pixel 9 Pro" }),
     );
     assert_server(
         ServerMessage::Welcome {
             protocol: 2,
             version: "1.0.0".into(),
+            host: None,
         },
         json!({ "type": "welcome", "protocol": 2, "version": "1.0.0" }),
+    );
+    assert_server(
+        ServerMessage::Welcome {
+            protocol: 3,
+            version: "1.0.0".into(),
+            host: Some(HostInfo {
+                name: "build-box".into(),
+                os: "linux".into(),
+                launcher: Launcher::Service,
+            }),
+        },
+        json!({
+            "type": "welcome",
+            "protocol": 3,
+            "version": "1.0.0",
+            "host": { "name": "build-box", "os": "linux", "launcher": "service" },
+        }),
     );
     assert_server(
         ServerMessage::Incompatible {

@@ -7,11 +7,9 @@ import { KeyboardView, Text } from '@/components'
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Features
+import { PairingHero } from '@/features/pairing/components/hero'
 import { Paste } from '@/features/pairing/components/paste'
 import { Scanner } from '@/features/pairing/components/scanner'
-
-//Constants
-import { PAIRING } from '@/features/pairing/constants/pairing'
 
 //Hooks
 import { usePair } from '@/features/pairing/hooks/use-pair'
@@ -27,9 +25,7 @@ export const PairScreen = () => {
   return (
     <KeyboardView style={styles.root}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text variant="bodySm" tone="body">
-          {PAIRING.steps}
-        </Text>
+        <PairingHero />
         <Scanner onScan={pair.accept} />
         {pair.error && (
           <Text variant="bodySm" tone="danger">

@@ -39,5 +39,5 @@
 }
 
 .terminal :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background: #34343a;
+  background: var(--soromi-text-ghost);
 }

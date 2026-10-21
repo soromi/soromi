@@ -10,7 +10,7 @@ import { useLinkOnline } from '@/states/link/link.state.hook'
 
 //Type
 import type { TerminalHandle } from '@/components'
-import type { ShellSpot, TerminalSize } from '../types'
+import type { TerminalSize } from '../types'
 
 /**
  * A session's live terminal, wired to the daemon. The device in control drives it: what is typed
@@ -22,11 +22,10 @@ import type { ShellSpot, TerminalSize } from '../types'
  * done once the terminal is on screen (and sized, when driving), and again each time the link
  * comes back or the session's agent is started over.
  *
- * With a `shell`, the terminal is a plain shell opened from here rather than a session's.
+ * A plain shell is attached to the same way, by its id: it was opened when it was asked for, and
+ * shows here once the daemon lists it.
  */
-export const useTerminal = (session: string, shell?: ShellSpot) => {
-  const workspace = shell?.workspace
-  const folder = shell?.folder
+export const useTerminal = (session: string) => {
   const terminal = useRef<TerminalHandle | null>(null)
   const ready = useRef(false)
   // The size last claimed, to claim again on a new connection.
@@ -34,13 +33,6 @@ export const useTerminal = (session: string, shell?: ShellSpot) => {
   const inControl = useDaemonInControl()
   const online = useLinkOnline()
   const driving = inControl && online
-
-  // A shell opened from here is asked for before anything is said about it: the daemon keeps the
-  // one it has under that id, and starts one if it has none (the first time, or after it restarted).
-  const ensure = useCallback(() => {
-    if (workspace === undefined) return
-    LinkService.send({ type: 'open-shell', workspace, shell: session, folder: folder ?? '' })
-  }, [session, workspace, folder])
 
   const attach = useCallback(() => {
     // What is held of the conversation goes along, so only what was missed is sent again.
@@ -76,13 +68,12 @@ export const useTerminal = (session: string, shell?: ShellSpot) => {
     () =>
       LinkService.onOpen(() => {
         if (!ready.current) return
-        ensure()
         const claimed = size.current
         const controls = DaemonStore.getState().controlHolder === null
         if (claimed && controls) LinkService.send({ type: 'resize', session, ...claimed })
         attach()
       }),
-    [session, attach, ensure],
+    [session, attach],
   )
 
   const handleReady = useCallback(() => {
@@ -90,19 +81,17 @@ export const useTerminal = (session: string, shell?: ShellSpot) => {
     // Driving, the attach waits for the size, which the terminal reports as soon as it is laid
     // out: attaching first and resizing after would have the redraw arrive at the wrong size.
     if (DaemonStore.getState().controlHolder === null) return
-    ensure()
     attach()
-  }, [attach, ensure])
+  }, [attach])
 
   const handleSize = useCallback(
     (cols: number, rows: number) => {
       const first = size.current === null
       size.current = { cols, rows }
-      if (first) ensure()
       LinkService.send({ type: 'resize', session, cols, rows })
       if (first) attach()
     },
-    [session, attach, ensure],
+    [session, attach],
   )
 
   const handleInput = useCallback(

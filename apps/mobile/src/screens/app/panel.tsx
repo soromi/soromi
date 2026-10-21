@@ -12,7 +12,7 @@ import { LinkBanner } from '@/features/layout/components/link-banner'
 import { PanelTabs } from '@/features/panel/components/tabs'
 
 //Helpers
-import { getHeaderActions } from '@/features/layout/helpers'
+import { getHeaderActions, getHeaderTitle } from '@/features/layout/helpers'
 import { toPanelView } from '@/features/panel/helpers'
 
 //Screens
@@ -35,7 +35,7 @@ export const PanelScreen = () => {
 
   const options = useMemo(
     () => ({
-      title: workspace ?? '',
+      ...getHeaderTitle(workspace ?? ''),
       ...getHeaderActions(() => <PanelTabs active={view} onSelect={setView} />),
     }),
     [workspace, view],

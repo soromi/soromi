@@ -414,6 +414,53 @@ describe('liveness', () => {
   })
 })
 
+describe('how good the link is', () => {
+  it('times each round trip on the link in use, by the route it went', () => {
+    const { transport, link } = setup()
+    const timed: Array<[number, string]> = []
+    transport.onLatency((ms, route) => timed.push([ms, route]))
+    transport.connect()
+    link('relay')?.hear(WELCOME)
+
+    transport.measure()
+    vi.advanceTimersByTime(120)
+    link('relay')?.answerPing()
+
+    expect(timed).toEqual([[120, 'relay']])
+  })
+
+  it('times the checks it makes on its own too, and nothing without a link', () => {
+    const { transport, link } = setup()
+    const timed: number[] = []
+    transport.onLatency((ms) => timed.push(ms))
+    transport.measure()
+    transport.connect()
+    link('relay')?.hear(WELCOME)
+
+    // Quiet long enough to be checked.
+    vi.advanceTimersByTime(7500)
+    vi.advanceTimersByTime(40)
+    link('relay')?.answerPing()
+
+    expect(timed).toHaveLength(1)
+  })
+
+  it('does not time an answer twice, or one it did not ask for', () => {
+    const { transport, link } = setup()
+    const timed: number[] = []
+    transport.onLatency((ms) => timed.push(ms))
+    transport.connect()
+    link('relay')?.hear(WELCOME)
+
+    transport.measure()
+    link('relay')?.answerPing()
+    link('relay')?.answerPing()
+    link('relay')?.hear({ type: 'pong', nonce: 999 })
+
+    expect(timed).toEqual([0])
+  })
+})
+
 describe('what the app is told', () => {
   it('learns why the computer cannot be reached from the relay, while no route is up', () => {
     const { transport, seen, link } = setup()

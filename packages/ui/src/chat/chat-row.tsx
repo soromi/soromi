@@ -40,7 +40,7 @@ export const ChatRow = memo(function ChatRow({ row }: { row: Row }) {
   }
   if (row.kind === 'user') {
     return (
-      <div className="flex max-w-[85%] flex-col gap-2 self-end rounded-2xl bg-[var(--soromi-bg-active)] px-3.5 py-2">
+      <div className="flex max-w-[85%] flex-col gap-2 self-end rounded-2xl bg-[var(--soromi-bg-bubble)] px-3.5 py-2">
         <MessageAttachments files={row.files} />
         {/* Verbatim, not markdown: a prompt is shown exactly as typed. Rendering it as markdown drops
             raw HTML (no rehype-raw), so a message that's all HTML/JS — a pasted `<script>` snippet —

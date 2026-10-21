@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use soromi_protocol::{
-    ChatCursor, ClientMessage, IncompatibleAction, PROTOCOL_VERSION, ServerMessage, Status,
+    ChatCursor, ClientMessage, IncompatibleAction, PROTOCOL_VERSION, ServerMessage, SessionMode,
+    Status,
 };
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -59,6 +60,8 @@ pub struct Connection {
     /// subscription is what tells the controller to route banners to it instead of firing them via
     /// the OS.
     notify_task: Option<JoinHandle<()>>,
+    /// Follows the background agent this viewport is watching, one at a time (`WatchAgent`).
+    agent_watch: Option<JoinHandle<()>>,
     /// This viewport's id, used to gate input/resize to the controller and to claim control.
     viewer_id: u64,
     /// On a paired device's link: where it can reach this computer without the relay.
@@ -89,6 +92,7 @@ impl Connection {
             attached: HashMap::new(),
             slots: HashMap::new(),
             notify_task: None,
+            agent_watch: None,
             viewer_id,
             routes: None,
             device: None,
@@ -153,7 +157,11 @@ impl Connection {
             return;
         }
         match message {
-            ClientMessage::Hello { protocol, .. } => {
+            ClientMessage::Hello {
+                protocol,
+                device_name,
+                ..
+            } => {
                 // A hello starts a client from scratch. On a relay link a new device can take over
                 // the daemon's standing socket, so whatever the last one had attached is dropped.
                 self.reset_client();
@@ -162,12 +170,28 @@ impl Connection {
                     self.send(ServerMessage::Welcome {
                         protocol: PROTOCOL_VERSION,
                         version: crate::updates::current_version().to_string(),
+                        host: Some(crate::system::host().clone()),
                     });
                     // A device learns here where else it can reach this computer; the routes
                     // task tells it of any change after this.
                     if let Some(routes) = &mut self.routes {
                         let routes = routes.borrow_and_update().clone();
                         self.send(ServerMessage::Routes { routes });
+                        // And the relay it reaches this computer through, which it keeps.
+                        let url = self.hub.subscribe_relay().borrow().clone();
+                        if !url.is_empty() {
+                            self.send(ServerMessage::Relay { url });
+                        }
+                    }
+                    // A device says what it is called, and is listed under that name. Only a
+                    // device's own link names it, and only itself.
+                    if let (Some(device), Some(name)) = (
+                        &self.device,
+                        device_name
+                            .as_deref()
+                            .and_then(crate::pairing::device::device_label),
+                    ) {
+                        self.hub.name_device(device, &name);
                     }
                 } else {
                     self.refused = true;
@@ -257,6 +281,37 @@ impl Connection {
                 }),
             },
             ClientMessage::CloseSession { session } => self.hub.close_session(&session),
+            ClientMessage::ListConversations { workspace, query } => {
+                // Reads the conversations' files (all of them, for a search): off the message loop.
+                let hub = self.hub.clone();
+                let out = self.out.clone();
+                tokio::task::spawn_blocking(move || {
+                    let conversations = hub.conversations(&workspace, query.as_deref());
+                    let _ = out.send(ServerMessage::ConversationList {
+                        workspace,
+                        query,
+                        conversations,
+                    });
+                });
+            }
+            ClientMessage::ResumeConversation {
+                workspace,
+                conversation,
+                agent,
+                account,
+                mode,
+            } => match self.hub.resume_conversation(
+                &workspace,
+                &conversation,
+                agent,
+                account,
+                mode.unwrap_or(SessionMode::Chat),
+            ) {
+                Ok(session) => self.send(ServerMessage::SessionOpened { workspace, session }),
+                Err(error) => self.send(ServerMessage::Error {
+                    message: error.to_string(),
+                }),
+            },
             ClientMessage::ChatTurn {
                 session,
                 text,
@@ -266,22 +321,44 @@ impl Connection {
                 if self.hub.drives(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
                 {
+                    // A queue held by a stop follows this turn once it ends.
+                    self.hub.resume_queue(&session);
                     tokio::spawn(async move { chat.send_turn(&text, &files).await });
                 }
             }
+            ClientMessage::ChatQueue {
+                session,
+                text,
+                files,
+            } => {
+                if self.hub.drives(self.viewer_id) {
+                    self.hub.queue_turn(&session, text, files);
+                }
+            }
+            ClientMessage::ChatUnqueue { session, id, send } => {
+                if self.hub.drives(self.viewer_id) {
+                    self.hub.unqueue_turn(&session, &id, send);
+                }
+            }
             ClientMessage::ChatInterrupt { session } => {
-                // Stop button: interrupt the running turn. Same control gate as a chat turn.
+                // Stop button: interrupt the running turn. Same control gate as a chat turn. What
+                // is queued waits rather than going out as the stopped turn settles.
                 if self.hub.drives(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
                 {
+                    self.hub.pause_queue(&session);
                     tokio::spawn(async move { chat.interrupt().await });
                 }
             }
             ClientMessage::ChatApprovalResponse { session, id, allow } => {
-                // Allow/deny a pending tool approval — the same control gate as driving the agent.
-                if self.hub.drives(self.viewer_id)
-                    && let Some(chat) = self.hub.get_chat(&session)
-                {
+                // Allow/deny a pending tool approval. Any viewport may answer, without taking
+                // control: every one is shown the question (the phone in a banner, maybe while the
+                // desktop holds control), and the first answer is the one taken; a later one finds
+                // nothing pending. The controller answering counts as driving, as before.
+                if self.hub.is_controller(self.viewer_id) {
+                    self.hub.drives(self.viewer_id);
+                }
+                if let Some(chat) = self.hub.get_chat(&session) {
                     tokio::spawn(async move { chat.respond_approval(&id, allow).await });
                 }
             }
@@ -425,10 +502,44 @@ impl Connection {
             } => {
                 // Spawning a shell only makes it viewable; typing into it is still gated by `Input`,
                 // so this isn't controller-gated. Surface a spawn failure instead of swallowing it.
-                if let Err(error) = self.hub.open_shell(&workspace, &shell, &folder) {
+                if let Err(error) =
+                    self.hub
+                        .open_shell(&workspace, &shell, &folder, self.device.clone())
+                {
                     self.send(ServerMessage::Error {
                         message: format!("couldn't open terminal: {error}"),
                     });
+                }
+            }
+            ClientMessage::RenameShell { shell, title } => self.hub.rename_shell(&shell, &title),
+            ClientMessage::BrowseFolders { path } => {
+                match crate::files::browse::browse(path.as_deref()) {
+                    Ok(listing) => self.send(ServerMessage::FolderListing {
+                        path: listing.path,
+                        parent: listing.parent,
+                        home: listing.home,
+                        dirs: listing.dirs,
+                        space_file: listing.space_file,
+                    }),
+                    Err(error) => self.send(ServerMessage::Error {
+                        message: format!(
+                            "couldn't open {}: {error}",
+                            path.as_deref().unwrap_or("the home folder")
+                        ),
+                    }),
+                }
+            }
+            ClientMessage::WatchAgent { session, agent } => {
+                if let Some(task) = self.agent_watch.take() {
+                    task.abort();
+                }
+                if let Some(agent) = agent {
+                    self.agent_watch = Some(super::agent_log::follow(
+                        self.hub.clone(),
+                        self.out.clone(),
+                        session,
+                        agent,
+                    ));
                 }
             }
             ClientMessage::GitStatus { workspace, folder } => {
@@ -637,6 +748,7 @@ impl Connection {
                                 body: banner.body,
                                 workspace: Some(banner.workspace),
                                 session: banner.session,
+                                approval: banner.approval,
                             })
                             .is_err()
                         {
@@ -673,6 +785,9 @@ impl Connection {
     pub fn reset_client(&mut self) {
         for (_, handle) in self.attached.drain() {
             handle.abort();
+        }
+        if let Some(task) = self.agent_watch.take() {
+            task.abort();
         }
         self.slots.clear();
         if let Some(task) = self.notify_task.take() {
@@ -1150,6 +1265,9 @@ impl Drop for Connection {
         // Drop the notification subscription so a disconnecting native viewer stops holding the
         // controller in "route to wire" mode (the OS notifier resumes when none remain).
         if let Some(task) = self.notify_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.agent_watch.take() {
             task.abort();
         }
         self.update_watching();

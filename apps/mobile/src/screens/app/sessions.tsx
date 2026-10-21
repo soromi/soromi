@@ -11,15 +11,14 @@ import { routes } from '@/config/router'
 import { defineStyles, useThemedStyles } from '@/config/theme'
 
 //Features
-import { Brand } from '@/features/layout/components/brand'
+import { ComputerSwitcher } from '@/features/layout/components/computer-switcher'
 import { ControlBar } from '@/features/layout/components/control-bar'
 import { LinkBanner } from '@/features/layout/components/link-banner'
 import { RouteBadge } from '@/features/layout/components/route-badge'
-import { SessionGrid } from '@/features/sessions/components/grid'
-import { SessionList } from '@/features/sessions/components/list'
 import { SessionPlaceholder } from '@/features/sessions/components/placeholder'
-import { ViewToggle } from '@/features/sessions/components/view-toggle'
+import { WorkspaceList } from '@/features/sessions/components/workspaces'
 import { SettingsAction } from '@/features/settings/components/action'
+import { NewWorkspaceAction } from '@/features/workspaces/components/new-action'
 
 //Helpers
 import { getHeaderActions } from '@/features/layout/helpers'
@@ -29,12 +28,11 @@ import { useLayout } from '@/hooks/use-layout'
 
 //State
 import { useLinkLoaded, useLinkOnline, useLinkPaired } from '@/states/link/link.state.hook'
-import { usePreferencesView } from '@/states/preferences/preferences.state.hook'
 
 /**
- * Home. On a phone: every workspace on the computer and its sessions, live, as a list or as a grid
- * of cards, whichever the header's switch was last left on. On a tablet the sessions have a column
- * of their own (see `Sidebar`), so home is the space beside it, waiting for one to be picked.
+ * Home. On a phone: what needs the person, from every workspace, then the workspaces on the
+ * computer, live, each a tap away from its own screen. On a tablet the sessions have a column of
+ * their own (see `Sidebar`), so home is the space beside it, waiting for one to be picked.
  */
 export const SessionsScreen = () => {
   const styles = useThemedStyles(makeStyles)
@@ -42,7 +40,6 @@ export const SessionsScreen = () => {
   const loaded = useLinkLoaded()
   const paired = useLinkPaired()
   const online = useLinkOnline()
-  const view = usePreferencesView()
   const wide = layout.wide
   const insets = useSafeAreaInsets()
 
@@ -50,11 +47,11 @@ export const SessionsScreen = () => {
     () => ({
       // The column has the title and these actions when it is there.
       headerShown: !wide,
-      headerTitle: () => <Brand />,
+      headerTitle: () => <ComputerSwitcher />,
       ...getHeaderActions(() => (
         <View style={styles.actions}>
           <RouteBadge />
-          <ViewToggle />
+          <NewWorkspaceAction />
           <SettingsAction />
         </View>
       )),
@@ -85,7 +82,7 @@ export const SessionsScreen = () => {
       <LinkBanner />
       <ControlBar />
       {wide && <SessionPlaceholder online={online} />}
-      {!wide && (view === 'grid' ? <SessionGrid /> : <SessionList />)}
+      {!wide && <WorkspaceList />}
     </View>
   )
 }

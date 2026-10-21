@@ -124,6 +124,9 @@ impl ExecChatSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
+        for key in crate::system::DAEMON_ONLY {
+            cmd.env_remove(key);
+        }
         if let Some(env) = &self.env {
             cmd.env_clear();
             for (key, value) in env {

@@ -8,9 +8,10 @@ import { TakeoverBar, TerminalSurface, useClientStore } from '@soromi/client'
 import { useAppStore } from '@/stores/app-store'
 
 //Constants
-import { colors } from '@/config/theme'
+import { terminalTheme } from '@/config/theme'
 
 //Components
+import { NoSession } from './no-session'
 import { ChatPane } from './chat-pane'
 import { ExplorerTabs } from '@/features/explorer/explorer-tabs'
 import { ProviderIcon } from '@/shared/provider-icon'
@@ -36,6 +37,7 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
       setSidebarMode: s.setSidebarMode,
     })),
   )
+  const terminalColors = terminalTheme(useAppStore((s) => s.theme))
   const openExplorer = (mode: SidebarMode) => {
     setSidebarMode(mode)
     setExplorerOpen(true)
@@ -104,6 +106,8 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
       {/* Another device is in control: say so, and keep showing the sessions underneath. */}
       <TakeoverBar />
       <div className="relative isolate flex min-h-0 flex-1 flex-col">
+        {/* Nothing open: the way to start one, over the panes kept for later. */}
+        {workspace && !session && <NoSession workspace={workspace} />}
         {visited.map((id) => {
           // Chat panes render their whole transcript (streamdown markdown + shiki highlighting), which
           // is heavy — and their state lives in the store, so we only mount the *active* one and let
@@ -120,8 +124,7 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
               transport={transport}
               session={id}
               active={id === currentSession}
-              background={colors.bgTerminal}
-              foreground={colors.text}
+              theme={terminalColors}
             />
           )
         })}

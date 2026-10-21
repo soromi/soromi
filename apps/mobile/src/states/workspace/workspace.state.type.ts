@@ -1,4 +1,4 @@
-import type { DirEntry, GitStatusInfo } from '@soromi/protocol'
+import type { DirEntry, GitStatusInfo, ServerMessage } from '@soromi/protocol'
 
 /** A file as the daemon read it. */
 export type FileContent = {
@@ -52,29 +52,32 @@ export type WorkspaceGit = {
 }
 
 export type WorkspaceGroups = {
-  /** Which workspaces are folded away in the session list, by name. One not named is open. */
+  /**
+   * Which workspaces were folded away in the session list (`true`) or opened (`false`), by name.
+   * One not named is as it starts: the first workspace open, every other folded away.
+   */
   collapsed: Record<string, boolean>
 }
 
-/** A terminal opened from here in a workspace: a plain shell on the computer, with no agent. */
-export type Shell = {
-  /** Made here; the daemon knows the shell by it from then on. */
-  id: string
-  /** Where it starts, relative to the workspace (`''` is its root). */
-  folder: string
-  title: string
+export type WorkspaceRenames = {
+  /**
+   * What workspaces renamed from this phone are called now, by the name they had: a screen opened
+   * under the old name follows it to the new one.
+   */
+  to: Record<string, string>
 }
 
 export type WorkspaceShells = {
-  /** The terminals opened from here, by workspace, in the order they were opened. */
-  lists: Record<string, Shell[]>
-  /** The one on screen, by workspace. */
+  /**
+   * The terminal on screen, by workspace. The terminals themselves are the daemon's list
+   * (`workspace.shells`), the same on every device; which one this phone shows is its own.
+   */
   active: Record<string, string>
 }
 
 export type WorkspaceActions = {
-  /** Folds a workspace's sessions away in the list, or shows them again. */
-  toggleGroup: (workspace: string) => void
+  /** Folds a workspace's sessions away in the list (`true`), or shows them again (`false`). */
+  setCollapsed: (workspace: string, collapsed: boolean) => void
   setListing: (workspace: string, path: string, entries: DirEntry[]) => void
   toggleDir: (workspace: string, path: string) => void
   /** A file or folder went to the computer's Trash: the tree lets go of it. */
@@ -98,12 +101,19 @@ export type WorkspaceActions = {
     diff: DiffContent,
   ) => void
   /** The terminals kept from the last time the app ran. */
-  setShells: (lists: Record<string, Shell[]>) => void
-  /** Adds a terminal to a workspace, puts it on screen, and returns it to be opened. */
-  openShell: (workspace: string, folder: string) => Shell
-  /** Forgets a terminal; the one beside it takes its place on screen. */
-  closeShell: (workspace: string, id: string) => void
   selectShell: (workspace: string, id: string) => void
+  /** The daemon listed one of the computer's folders. */
+  setFolderListing: (listing: FolderListing) => void
+  /** A workspace was renamed from here. */
+  setRenamed: (from: string, to: string) => void
+}
+
+/** One of the computer's folders, as the daemon listed it for picking a workspace's folders. */
+export type FolderListing = Omit<Extract<ServerMessage, { type: 'folder-listing' }>, 'type'>
+
+export type WorkspaceBrowse = {
+  /** The folder last listed, `null` until one is asked for. */
+  listing: FolderListing | null
 }
 
 export type WorkspaceType = {
@@ -111,7 +121,9 @@ export type WorkspaceType = {
   files: WorkspaceFiles
   git: WorkspaceGit
   groups: WorkspaceGroups
+  renames: WorkspaceRenames
   shells: WorkspaceShells
+  browse: WorkspaceBrowse
   /** Grouped so the object stays reference-stable: `useWorkspaceActions` needs no shallow compare. */
   actions: WorkspaceActions
 }

@@ -5,8 +5,8 @@ import type { PageMessage } from './types'
 /** The page with the app's colours and type size written in. */
 export const fillPage = (page: string, theme: Theme, fontSize: number): string =>
   page
-    .replaceAll('__BACKGROUND__', theme.surface.page)
-    .replaceAll('__FOREGROUND__', theme.text.heading)
+    .replaceAll('__BACKGROUND__', theme.terminal.background)
+    .replaceAll('__FOREGROUND__', theme.terminal.foreground)
     .replaceAll('__FONT_SIZE__', String(fontSize))
 
 /**

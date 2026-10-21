@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use soromi_protocol::{
-    AgentAccount, DirEntry, KeepAwakeMode, PermissionMode, SessionMode, SessionSummary, Status,
-    SubAgent, ToolKind, WorkspaceSummary,
+    AgentAccount, ChatFile, DirEntry, KeepAwakeMode, PastConversation, PermissionMode, SessionMode,
+    SessionSummary, ShellSummary, Status, SubAgent, ToolKind, WorkspaceSummary,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::accounts::loader::{accounts_dir, load_account_profile};
 use crate::accounts::resolver::{expand_home, resolve_launch_env};
@@ -23,6 +23,7 @@ use crate::notifications::controller::{Audience, NotificationController};
 use crate::sessions::chat::ChatSession;
 use crate::sessions::exec_chat::ExecChatSession;
 use crate::sessions::manager::SessionManager;
+use crate::sessions::queue::TurnQueues;
 use crate::sessions::session::{Session, SessionOptions};
 use crate::sessions::stream_json::StreamJsonSession;
 use crate::sound::player::{Cue, SoundPlayer, cue_for};
@@ -67,6 +68,9 @@ pub enum Change {
     Global,
 }
 
+/// Renames a paired device's record (the pairing service's), given its id and the name it gave.
+pub type DeviceNamer = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
 /// A viewport attached to the daemon: the desktop app, or one of a paired device's links.
 struct Viewer {
     id: u64,
@@ -90,11 +94,10 @@ pub struct WorkspaceService {
     change_tx: broadcast::Sender<Change>,
     /// A newer release than the running build, once the update check finds one.
     update: Mutex<Option<UpdateInfo>>,
-    /// Whether the app window is focused. While it is, agent-event sounds and banners are
-    /// suppressed here (the user is already looking at the app). Set by the shell; false by default,
-    /// so the standalone daemon always fires. Shared (`Arc`) so background status watchers can read
-    /// it from their own tasks.
-    focused: Arc<AtomicBool>,
+    /// Where the person is, which decides who a banner is for: at the app on this computer, on a
+    /// paired device, or neither. Shared (`Arc`) so background status watchers can read it from
+    /// their own tasks.
+    presence: Arc<Presence>,
     /// PATH to launch sessions with, when the process's own PATH is too narrow (a GUI-launched
     /// app has no shell PATH). The shell resolves it and passes it here; `None` keeps the
     /// process PATH (a terminal-launched daemon already has the full one).
@@ -113,6 +116,11 @@ pub struct WorkspaceService {
     controller: Mutex<Option<u64>>,
     /// Attached viewports, in join order, for control transfer + the takeover label.
     viewers: Mutex<Vec<Viewer>>,
+    /// The names paired devices gave themselves this run, by device id: a link that registers
+    /// later is shown under it, not under the name it was dialed with.
+    device_names: Mutex<HashMap<String, String>>,
+    /// Hands a device's name on to its record; set by the pairing service.
+    device_namer: Mutex<Option<DeviceNamer>>,
     /// The paired device whose last link left while it was in control. Control went to another
     /// viewport so nothing was left undriven, and goes back when the device returns, however long
     /// that takes: a phone's app is cut off whenever it is put behind another one, and coming back
@@ -121,11 +129,36 @@ pub struct WorkspaceService {
     control_owed: Mutex<Option<String>>,
     /// Fires when control changes, so each viewport re-derives its own control state.
     control_tx: broadcast::Sender<()>,
+    /// The relay paired devices reach this computer through, for their links to tell them (and
+    /// to tell them again when it changes). Empty until the pairing service says.
+    relay_tx: watch::Sender<String>,
+    /// The plain shells open in each workspace, oldest first, as `(workspace, shell)`. Every
+    /// viewport shows the same list; a shell leaves it when closed, when it exits, or with its
+    /// workspace. Not persisted: the shells end with the daemon.
+    shells: Mutex<Vec<(String, ShellSummary)>>,
     /// The last thing each session did, read from its transcript once on startup (keyed by session
     /// id). It's the subtitle a restored-but-not-yet-attached tab shows, so an old conversation reads
     /// as its last activity instead of "New session". A live tab's own activity takes precedence.
     restored_activity: Mutex<HashMap<String, String>>,
+    /// When each session's status last changed, in Unix seconds, by session id. Shared (`Arc`)
+    /// with the status watchers, which mark it from their own tasks.
+    touched: Arc<Mutex<HashMap<String, u32>>>,
+    /// The messages each chat session holds back while its agent works, sent one turn at a time as
+    /// each turn ends. Shared with the chat watchers, which send them.
+    queues: Arc<Mutex<TurnQueues>>,
 }
+
+/// How long a chat must stay idle after a turn ends before its next queued message goes out. A
+/// message that steered the turn can come back as a turn of its own, a moment after the first one
+/// ends; the queue waits for that rather than cut in.
+const QUEUE_SETTLE: Duration = Duration::from_millis(600);
+
+/// How many of a workspace's earlier conversations are listed, and found by a search.
+const CONVERSATIONS_LISTED: usize = 100;
+const CONVERSATIONS_FOUND: usize = 50;
+
+/// How much of an earlier conversation's title names the tab that resumes it.
+const RESUMED_TITLE_CHARS: usize = 40;
 
 /// How long a stable usage result (fetched, scope-denied, or not signed in) stays cached.
 const USAGE_TTL: Duration = Duration::from_secs(15 * 60);
@@ -153,7 +186,7 @@ impl WorkspaceService {
             sound,
             change_tx,
             update: Mutex::new(None),
-            focused: Arc::new(AtomicBool::new(false)),
+            presence: Arc::new(Presence::default()),
             launch_path,
             watcher,
             dir_change_tx,
@@ -161,10 +194,28 @@ impl WorkspaceService {
             usage_cache: Mutex::new(HashMap::new()),
             controller: Mutex::new(None),
             viewers: Mutex::new(Vec::new()),
+            device_names: Mutex::new(HashMap::new()),
+            device_namer: Mutex::new(None),
             control_owed: Mutex::new(None),
             control_tx: broadcast::channel(64).0,
+            relay_tx: watch::channel(String::new()).0,
+            shells: Mutex::new(Vec::new()),
             restored_activity: Mutex::new(HashMap::new()),
+            touched: Arc::new(Mutex::new(HashMap::new())),
+            queues: Arc::new(Mutex::new(TurnQueues::default())),
         });
+        // A banner about a session waiting on a tool request says what it asks, and can answer it.
+        let sessions = Arc::downgrade(&service);
+        service
+            .notifications
+            .set_approvals(Arc::new(move |session: &str| {
+                sessions
+                    .upgrade()?
+                    .get_chat(session)?
+                    .approval_snapshot()
+                    .into_iter()
+                    .last()
+            }));
         // Agent-event hooks: listen on the socket the `hook` bridge delivers cues to.
         crate::hooks::listen::spawn(service.clone());
         let mut dirty = false;
@@ -194,6 +245,56 @@ impl WorkspaceService {
             seeded.emit_change();
         });
         service
+    }
+
+    /// The file a session's agent keeps its conversation in, and its provider: for a tab whose
+    /// transcript is being followed, that one; otherwise where the provider keeps the conversation
+    /// the tab resumes. `None` for a provider that keeps none, or before it has written one.
+    pub fn conversation_file(
+        &self,
+        session_id: &str,
+    ) -> Option<(PathBuf, &'static dyn crate::providers::Provider)> {
+        let (agent, convo_id, root, folders, account) = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata.iter().find_map(|(_, meta)| {
+                let spec = meta.sessions.iter().find(|spec| spec.id == session_id)?;
+                Some((
+                    spec.agent.clone(),
+                    spec.resume_id.clone().unwrap_or_else(|| spec.id.clone()),
+                    meta.root.clone(),
+                    meta.folders.clone(),
+                    session_account(&meta.accounts, spec),
+                ))
+            })?
+        };
+        let command = parse_agent_command(&agent)
+            .map(|parsed| parsed.command)
+            .unwrap_or_default();
+        let provider = crate::providers::provider(basename(&command))?;
+        if let Some(path) = self
+            .get(session_id)
+            .and_then(|session| session.transcript())
+        {
+            return Some((path, provider));
+        }
+        let config_dir = provider_config_dir(&account, provider);
+        let (cwd, _) = session_dirs(&root, &folders);
+        let path = provider
+            .transcript_path(&config_dir, &cwd, &convo_id)
+            .filter(|path| path.exists())?;
+        Some((path, provider))
+    }
+
+    /// Where one of a session's background agents keeps its own conversation, by the id its
+    /// `SubAgent` carries, with the provider that reads it.
+    pub fn agent_log(
+        &self,
+        session_id: &str,
+        agent: &str,
+    ) -> Option<(PathBuf, &'static dyn crate::providers::Provider)> {
+        let (transcript, provider) = self.conversation_file(session_id)?;
+        let log = provider.agent_log_path(&transcript, agent)?;
+        Some((log, provider))
     }
 
     /// Populates `restored_activity` by reading the tail of each session's transcript. Best-effort:
@@ -255,6 +356,20 @@ impl WorkspaceService {
         self.reset_tx.subscribe()
     }
 
+    /// Sets the relay paired devices reach this computer through; their links tell them.
+    pub fn set_relay(&self, url: String) {
+        self.relay_tx.send_if_modified(|current| {
+            let changed = *current != url;
+            *current = url;
+            changed
+        });
+    }
+
+    /// The relay paired devices reach this computer through, as it changes.
+    pub fn subscribe_relay(&self) -> watch::Receiver<String> {
+        self.relay_tx.subscribe()
+    }
+
     /// Subscribes to terminal-control changes, so each viewport re-derives whether it is in control.
     pub fn subscribe_control(&self) -> broadcast::Receiver<()> {
         self.control_tx.subscribe()
@@ -274,11 +389,43 @@ impl WorkspaceService {
     /// changes; its links are told apart from other viewports so control can follow the device
     /// (see [`Self::follow_device`]).
     pub fn register_device_viewer(&self, id: u64, name: String, device: &str) {
+        let name = self
+            .device_names
+            .lock()
+            .unwrap()
+            .get(device)
+            .cloned()
+            .unwrap_or(name);
         self.add_viewer(Viewer {
             id,
             name,
             device: Some(device.to_string()),
         });
+    }
+
+    /// Sets what hands a device's name on to its record (the pairing service, as it starts).
+    pub fn set_device_namer(&self, namer: DeviceNamer) {
+        *self.device_namer.lock().unwrap() = Some(namer);
+    }
+
+    /// A paired device said what it is called: its links are shown under that name (to whoever
+    /// sees it drive), and its record takes it, so the device list says it too.
+    pub fn name_device(&self, device: &str, name: &str) {
+        self.device_names
+            .lock()
+            .unwrap()
+            .insert(device.to_string(), name.to_string());
+        for viewer in self.viewers.lock().unwrap().iter_mut() {
+            if viewer.device.as_deref() == Some(device) {
+                viewer.name = name.to_string();
+            }
+        }
+        let namer = self.device_namer.lock().unwrap().clone();
+        if let Some(namer) = namer {
+            namer(device, name);
+        }
+        // Whoever is shown it driving is told its new name.
+        self.control_changed();
     }
 
     fn add_viewer(&self, viewer: Viewer) {
@@ -292,7 +439,7 @@ impl WorkspaceService {
                 *controller = Some(id);
             }
         }
-        let _ = self.control_tx.send(());
+        self.control_changed();
     }
 
     /// A paired device has started talking through this viewport's link. Control moves here if it
@@ -329,7 +476,7 @@ impl WorkspaceService {
             }
         };
         if moved {
-            let _ = self.control_tx.send(());
+            self.control_changed();
         }
     }
 
@@ -360,7 +507,7 @@ impl WorkspaceService {
                 *controller = sibling.or(viewers.first()).map(|viewer| viewer.id);
             }
         }
-        let _ = self.control_tx.send(());
+        self.control_changed();
     }
 
     /// Hands sole terminal control to a viewport (its "Take control" action).
@@ -368,7 +515,7 @@ impl WorkspaceService {
         *self.controller.lock().unwrap() = Some(id);
         // Someone chose who drives: nothing is owed to whoever drove before.
         *self.control_owed.lock().unwrap() = None;
-        let _ = self.control_tx.send(());
+        self.control_changed();
     }
 
     /// Whether a viewport currently controls the terminals (drives input / owns the size).
@@ -385,7 +532,11 @@ impl WorkspaceService {
         if !self.is_controller(id) {
             return false;
         }
-        *self.control_owed.lock().unwrap() = None;
+        let was_owed = self.control_owed.lock().unwrap().take().is_some();
+        // Someone here acted in its place: the device it stood in for no longer has the person.
+        if was_owed {
+            self.control_changed();
+        }
         true
     }
 
@@ -403,7 +554,23 @@ impl WorkspaceService {
     /// suppressed on this computer; they fire only when the user is away from the app. A paired
     /// device is told either way.
     pub fn set_focused(&self, focused: bool) {
-        self.focused.store(focused, Ordering::Relaxed);
+        self.presence.focused.store(focused, Ordering::Relaxed);
+    }
+
+    /// Who drives changed: viewports re-derive whether they are in control, and banners follow the
+    /// person to a device that drives, or that did when its app went away (it is owed control
+    /// back, so it is still where the person is).
+    fn control_changed(&self) {
+        let on_device = {
+            let viewers = self.viewers.lock().unwrap();
+            let controller = *self.controller.lock().unwrap();
+            let drives = viewers
+                .iter()
+                .any(|viewer| Some(viewer.id) == controller && viewer.device.is_some());
+            drives || self.control_owed.lock().unwrap().is_some()
+        };
+        self.presence.on_device.store(on_device, Ordering::Relaxed);
+        let _ = self.control_tx.send(());
     }
 
     /// Subscribes a viewer that shows notification banners itself. The Electron shell: while it is
@@ -620,6 +787,7 @@ impl WorkspaceService {
         self.persist();
         self.emit_change();
         let account = session_account(&accounts, &session);
+        let updated = touch(&self.touched, &session.id);
         Ok(SessionSummary {
             id: session.id,
             account,
@@ -633,7 +801,176 @@ impl WorkspaceService {
             model: None,
             effort: None,
             context_tokens: None,
+            queued: Vec::new(),
+            queue_paused: false,
+            updated: Some(updated),
         })
+    }
+
+    /// The conversations the workspace's agents kept on disk for it, newest first, each marked with
+    /// the tab that shows it, if one does. Every account the workspace binds is looked in (two
+    /// that share a login are looked in once). With `query`, only those that mention it, in their
+    /// name or in what was said: the files are read, so this is run off the message loop.
+    pub fn conversations(&self, workspace: &str, query: Option<&str>) -> Vec<PastConversation> {
+        let Some((root, folders, accounts, sessions)) = self.workspace_parts(workspace) else {
+            return Vec::new();
+        };
+        let (cwd, _) = session_dirs(&root, &folders);
+        let query = query
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .and_then(|text| {
+                regex::bytes::RegexBuilder::new(&regex::escape(text))
+                    .case_insensitive(true)
+                    .build()
+                    .ok()
+            });
+
+        let mut looked = std::collections::HashSet::new();
+        let mut found = Vec::new();
+        for binding in &accounts {
+            let Some(provider) = provider_of(&binding.agent) else {
+                continue;
+            };
+            let config_dir = provider_config_dir(&binding.id, provider);
+            if !looked.insert((provider.key(), config_dir.clone())) {
+                continue;
+            }
+            for conversation in provider.conversations(&config_dir, &cwd) {
+                found.push((conversation, binding, provider));
+            }
+        }
+        found.sort_by_key(|(conversation, ..)| std::cmp::Reverse(conversation.updated));
+
+        let limit = if query.is_some() {
+            CONVERSATIONS_FOUND
+        } else {
+            CONVERSATIONS_LISTED
+        };
+        found
+            .into_iter()
+            .filter(|(conversation, _, provider)| match &query {
+                None => true,
+                Some(query) => {
+                    let named = |text: &str| query.is_match(text.as_bytes());
+                    named(&conversation.title)
+                        || conversation.last_prompt.as_deref().is_some_and(named)
+                        || provider.conversation_mentions(&conversation.path, query)
+                }
+            })
+            .take(limit)
+            .map(|(conversation, binding, _)| PastConversation {
+                session: sessions
+                    .iter()
+                    .find(|spec| {
+                        spec.agent == binding.agent
+                            && spec.resume_id.as_deref().unwrap_or(&spec.id) == conversation.id
+                    })
+                    .map(|spec| spec.id.clone()),
+                updated: unix_seconds(conversation.updated),
+                id: conversation.id,
+                agent: binding.agent.clone(),
+                account: binding.id.clone(),
+                title: conversation.title,
+                last_prompt: conversation.last_prompt,
+            })
+            .collect()
+    }
+
+    /// Opens a tab that carries on an earlier conversation of the workspace's where it stopped:
+    /// the agent resumes it, and the tab shows its history and is named after it. A conversation
+    /// a tab already shows is that tab.
+    pub fn resume_conversation(
+        &self,
+        workspace: &str,
+        conversation: &str,
+        agent: String,
+        account: String,
+        mode: SessionMode,
+    ) -> anyhow::Result<SessionSummary> {
+        let (root, folders, accounts, sessions) = self
+            .workspace_parts(workspace)
+            .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
+        if let Some(open) = sessions.iter().find(|spec| {
+            spec.agent == agent && spec.resume_id.as_deref().unwrap_or(&spec.id) == conversation
+        }) {
+            let id = open.id.clone();
+            return self
+                .session_update(&id)
+                .map(|(_, _, summary)| summary)
+                .ok_or_else(|| anyhow::anyhow!("session not found: {id}"));
+        }
+        if !accounts
+            .iter()
+            .any(|binding| binding.agent == agent && binding.id == account)
+        {
+            anyhow::bail!("\"{workspace}\" has no {agent} account called \"{account}\"");
+        }
+        let provider = provider_of(&agent)
+            .ok_or_else(|| anyhow::anyhow!("{agent} keeps no conversations to resume"))?;
+        let (cwd, _) = session_dirs(&root, &folders);
+        let config_dir = provider_config_dir(&account, provider);
+        let found = provider
+            .conversation(&config_dir, &cwd, conversation)
+            .ok_or_else(|| anyhow::anyhow!("that conversation is no longer there"))?;
+
+        let mut spec = SessionSpec {
+            account: pin_for(&accounts, &agent, Some(account)),
+            id: new_session_id(),
+            agent,
+            title: Some(truncate_chars(&found.title, RESUMED_TITLE_CHARS)),
+            resume_id: Some(found.id),
+            mode,
+            permission_mode: PermissionMode::default(),
+            model: None,
+            effort: None,
+        };
+        let instructions = {
+            let mut metadata = self.metadata.lock().unwrap();
+            let (_, meta) = metadata
+                .iter_mut()
+                .find(|(name, _)| name == workspace)
+                .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
+            meta.sessions.push(spec.clone());
+            meta.instructions.clone()
+        };
+        // Until the tab is opened and the agent says what it does, it reads as what it last did.
+        if let Some(activity) = last_transcript_activity(&found.path, provider) {
+            self.restored_activity
+                .lock()
+                .unwrap()
+                .insert(spec.id.clone(), activity);
+        }
+        self.start_session(
+            workspace,
+            &root,
+            &folders,
+            &accounts,
+            instructions.as_deref(),
+            &spec,
+        );
+        self.persist();
+        self.emit_change();
+        let id = std::mem::take(&mut spec.id);
+        self.session_update(&id)
+            .map(|(_, _, summary)| summary)
+            .ok_or_else(|| anyhow::anyhow!("session not found: {id}"))
+    }
+
+    /// A workspace's folders, account bindings and tabs, as they stand.
+    #[allow(clippy::type_complexity)]
+    fn workspace_parts(
+        &self,
+        workspace: &str,
+    ) -> Option<(String, Vec<String>, Vec<AgentAccount>, Vec<SessionSpec>)> {
+        let metadata = self.metadata.lock().unwrap();
+        let (_, meta) = metadata.iter().find(|(name, _)| name == workspace)?;
+        Some((
+            meta.root.clone(),
+            meta.folders.clone(),
+            meta.accounts.clone(),
+            meta.sessions.clone(),
+        ))
     }
 
     /// Switches a tab between the terminal and headless chat, keeping the same conversation. Flips the
@@ -667,6 +1004,10 @@ impl WorkspaceService {
         };
         // Tear down the current backend, then restart in the new mode (resumes the same conversation).
         self.manager.dispose(session_id);
+        // A terminal takes no chat turns: what was queued for the chat has nowhere to go.
+        if mode == SessionMode::Terminal {
+            self.queues.lock().unwrap().forget(session_id);
+        }
         self.start_session(
             &workspace,
             &root,
@@ -836,9 +1177,15 @@ impl WorkspaceService {
         }
     }
 
-    /// Closes a tab (by session id) and disposes its PTY.
+    /// Closes a tab (by session id) and disposes its PTY. A shell's id closes the shell, for every
+    /// viewport.
     pub fn close_session(&self, session_id: &str) {
         self.manager.dispose(session_id);
+        self.queues.lock().unwrap().forget(session_id);
+        self.shells
+            .lock()
+            .unwrap()
+            .retain(|(_, shell)| shell.id != session_id);
         {
             let mut metadata = self.metadata.lock().unwrap();
             for (_, meta) in metadata.iter_mut() {
@@ -863,7 +1210,16 @@ impl WorkspaceService {
         };
         for id in ids {
             self.manager.dispose(&id);
+            self.queues.lock().unwrap().forget(&id);
         }
+        // Its shells go with it.
+        self.shells.lock().unwrap().retain(|(workspace, shell)| {
+            let keep = workspace != name;
+            if !keep {
+                self.manager.dispose(&shell.id);
+            }
+            keep
+        });
         self.metadata.lock().unwrap().retain(|(n, _)| n != name);
         self.watcher.unwatch_workspace(name);
         self.persist();
@@ -918,6 +1274,8 @@ impl WorkspaceService {
                     folders: meta.folders.clone(),
                     accounts: meta.accounts.clone(),
                     sessions,
+                    shells: self.shells_of(name),
+                    muted: self.notifications.is_muted(name),
                     instructions: meta.instructions.clone(),
                 }
             })
@@ -945,6 +1303,7 @@ impl WorkspaceService {
     fn session_summary(&self, meta: &WorkspaceMeta, session: &SessionSpec) -> SessionSummary {
         let live = self.manager.get(&session.id);
         let live_chat = self.manager.get_chat(&session.id);
+        let (queued, queue_paused) = self.queues.lock().unwrap().summary(&session.id);
         SessionSummary {
             id: session.id.clone(),
             agent: session.agent.clone(),
@@ -974,6 +1333,9 @@ impl WorkspaceService {
             model: session.model.clone(),
             effort: session.effort.clone(),
             context_tokens: live_chat.as_ref().and_then(|s| s.context_tokens()),
+            queued,
+            queue_paused,
+            updated: self.touched.lock().unwrap().get(&session.id).copied(),
         }
     }
 
@@ -1096,10 +1458,21 @@ impl WorkspaceService {
     }
 
     /// Spawns an ad-hoc shell PTY for a workspace, rooted at `folder` (relative to the workspace root;
-    /// "" or "." = the root). Not persisted and not a workspace tab — a bare user shell keyed by
-    /// `shell_id` in the session manager, so Attach/Input/Resize/Output/CloseSession all reuse it by
-    /// id. The command is `$SHELL` with an unknown provider, so `Session::spawn` runs a raw terminal.
-    pub fn open_shell(&self, workspace: &str, shell_id: &str, folder: &str) -> anyhow::Result<()> {
+    /// "" or "." = the root), and adds it to the workspace's shells, which every viewport shows. Not
+    /// persisted and not a workspace tab — a bare user shell keyed by `shell_id` in the session
+    /// manager, so Attach/Input/Resize/Output/CloseSession all reuse it by id. The command is
+    /// `$SHELL` with an unknown provider, so `Session::spawn` runs a raw terminal. A shell already
+    /// open is left as it is. `opened_by` is the paired device that asked, if one did.
+    pub fn open_shell(
+        self: &Arc<Self>,
+        workspace: &str,
+        shell_id: &str,
+        folder: &str,
+        opened_by: Option<String>,
+    ) -> anyhow::Result<()> {
+        if self.shell(shell_id).is_some() {
+            return Ok(());
+        }
         let root = self
             .workspace_root(workspace)
             .ok_or_else(|| anyhow::anyhow!("workspace not found: {workspace}"))?;
@@ -1120,8 +1493,109 @@ impl WorkspaceService {
             cols: 80,
             rows: 24,
         };
-        self.manager.ensure(shell_id, options)?;
+        let session = self.manager.ensure(shell_id, options)?;
+
+        {
+            let mut shells = self.shells.lock().unwrap();
+            let peers: Vec<&str> = shells
+                .iter()
+                .filter(|(name, _)| name == workspace)
+                .map(|(_, shell)| shell.title.as_str())
+                .collect();
+            let title = shell_title(folder, &peers);
+            shells.push((
+                workspace.to_string(),
+                ShellSummary {
+                    id: shell_id.to_string(),
+                    folder: folder.to_string(),
+                    title,
+                    opened_by,
+                },
+            ));
+        }
+        self.forget_shell_when_it_ends(shell_id, session.subscribe_ended());
+        self.emit_change();
         Ok(())
+    }
+
+    /// Renames a shell for every viewport. An empty title, or a shell that is gone, changes nothing.
+    pub fn rename_shell(&self, shell_id: &str, title: &str) {
+        let title = title.trim();
+        if title.is_empty() {
+            return;
+        }
+        let renamed = {
+            let mut shells = self.shells.lock().unwrap();
+            match shells.iter_mut().find(|(_, shell)| shell.id == shell_id) {
+                Some((_, shell)) => {
+                    shell.title = title.to_string();
+                    true
+                }
+                None => false,
+            }
+        };
+        if renamed {
+            self.emit_change();
+        }
+    }
+
+    /// A shell, by its id.
+    pub fn shell(&self, shell_id: &str) -> Option<ShellSummary> {
+        self.shells
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, shell)| shell.id == shell_id)
+            .map(|(_, shell)| shell.clone())
+    }
+
+    /// A workspace's open shells, oldest first.
+    fn shells_of(&self, workspace: &str) -> Vec<ShellSummary> {
+        self.shells
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, _)| name == workspace)
+            .map(|(_, shell)| shell.clone())
+            .collect()
+    }
+
+    /// A shell that exits (`exit`, or its program ending) closes for everyone, as if it had been
+    /// closed: no viewport is left showing a terminal that cannot be typed into.
+    fn forget_shell_when_it_ends(
+        self: &Arc<Self>,
+        shell_id: &str,
+        mut ended: watch::Receiver<bool>,
+    ) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let service = Arc::downgrade(self);
+        let shell_id = shell_id.to_string();
+        runtime.spawn(async move {
+            while !*ended.borrow_and_update() {
+                if ended.changed().await.is_err() {
+                    break;
+                }
+            }
+            let Some(service) = service.upgrade() else {
+                return;
+            };
+            // Closed on purpose already, it is not in the list any more.
+            if service.shell(&shell_id).is_some() {
+                service.close_shell(&shell_id);
+            }
+        });
+    }
+
+    /// Takes a shell out of the list and stops its PTY.
+    fn close_shell(&self, shell_id: &str) {
+        self.manager.dispose(shell_id);
+        self.shells
+            .lock()
+            .unwrap()
+            .retain(|(_, shell)| shell.id != shell_id);
+        self.emit_change();
     }
 
     /// The on-disk root of a workspace, if it exists.
@@ -1289,8 +1763,13 @@ impl WorkspaceService {
         }
     }
 
+    /// Silences a workspace's banners, or lets them through again, and tells every viewport.
     pub fn set_muted(&self, workspace: &str, muted: bool) {
+        if self.notifications.is_muted(workspace) == muted {
+            return;
+        }
         self.notifications.set_muted(workspace, muted);
+        self.emit_change();
     }
 
     pub fn dispose(&self) {
@@ -1415,6 +1894,11 @@ impl WorkspaceService {
                     .find(|(n, _)| n == name)
                 {
                     entry.0 = target.clone();
+                }
+                for (workspace, _) in self.shells.lock().unwrap().iter_mut() {
+                    if workspace == name {
+                        *workspace = target.clone();
+                    }
                 }
                 self.watcher.unwatch_workspace(name);
                 target
@@ -1569,7 +2053,7 @@ impl WorkspaceService {
             }
         }
 
-        let mut base_env: Vec<(String, String)> = std::env::vars().collect();
+        let mut base_env: Vec<(String, String)> = crate::system::child_env();
         // Use the shell-resolved PATH when set, so a GUI-launched app's agents find their
         // binaries, without mutating this process's global environment.
         if let Some(path) = &self.launch_path {
@@ -1733,15 +2217,22 @@ impl WorkspaceService {
     /// therefore the notification source for chat — when the agent reaches an attention state
     /// (a permission prompt or a question) it plays the cue and fires the banner, gated on mute and
     /// focus exactly like the hook path.
-    fn watch_chat(&self, workspace: &str, session_id: &str, session: &ChatSession) {
+    ///
+    /// It is also what sends the session's queued messages: once a turn ends and the chat stays
+    /// idle for [`QUEUE_SETTLE`], the oldest goes out as the next turn.
+    fn watch_chat(&self, workspace: &str, session_id: &str, session: &Arc<ChatSession>) {
         let mut status_rx = session.subscribe_status();
         let mut subagents_rx = session.subscribe_subagents();
         let mut context_rx = session.subscribe_context();
+        // Not kept alive by its own watcher: the loop ends when the session goes.
+        let chat = Arc::downgrade(session);
+        let queues = self.queues.clone();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
         let notifications = self.notifications.clone();
         let sound = self.sound.clone();
-        let focused = self.focused.clone();
+        let presence = self.presence.clone();
+        let touched = self.touched.clone();
         let workspace = workspace.to_string();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
@@ -1749,6 +2240,10 @@ impl WorkspaceService {
             // real change is worth telling viewports about.
             let mut last_status = *status_rx.borrow();
             let mut last_context = *context_rx.borrow();
+            // Armed when a turn ends; the queue's next message goes out when it fires.
+            let settle = tokio::time::sleep(QUEUE_SETTLE);
+            tokio::pin!(settle);
+            let mut settling = false;
             let changed = || {
                 let _ = change_tx.send(Change::Session(session_id.clone()));
             };
@@ -1759,7 +2254,17 @@ impl WorkspaceService {
                         let status = *status_rx.borrow_and_update();
                         keep_awake.handle(&session_id, awake_status(status, &subagents_rx.borrow()));
                         if status != last_status {
+                            // A turn ended: the queue goes on once the chat has stayed idle.
+                            if status == Status::Idle {
+                                settle
+                                    .as_mut()
+                                    .reset(tokio::time::Instant::now() + QUEUE_SETTLE);
+                                settling = true;
+                            } else {
+                                settling = false;
+                            }
                             last_status = status;
+                            touch(&touched, &session_id);
                             changed();
                         }
 
@@ -1768,16 +2273,27 @@ impl WorkspaceService {
                         if let Some(cue) = cue_for(status)
                             && !notifications.is_muted(&workspace)
                         {
-                            let audience = audience_for(focused.load(Ordering::Relaxed));
+                            let audience = presence.audience();
                             if audience == Audience::Everyone {
                                 sound.play(cue);
                             }
-                            notifications.fire(
-                                &workspace,
-                                Some(&session_id),
-                                cue_text(cue),
-                                audience,
-                            );
+                            // Waiting on a tool request: the banner says what it asks, and a
+                            // device can answer it from there.
+                            if status == Status::WaitingInput {
+                                notifications.fire_waiting(
+                                    &workspace,
+                                    &session_id,
+                                    cue_text(cue),
+                                    audience,
+                                );
+                            } else {
+                                notifications.fire(
+                                    &workspace,
+                                    Some(&session_id),
+                                    cue_text(cue),
+                                    audience,
+                                );
+                            }
                         }
                     }
                     // The running sub-agents changed (a Task spawned or finished), so the chat tab's
@@ -1798,9 +2314,79 @@ impl WorkspaceService {
                             changed();
                         }
                     }
+                    // The chat has stayed idle since its turn ended: the next queued message goes.
+                    () = &mut settle, if settling => {
+                        settling = false;
+                        if *status_rx.borrow() != Status::Idle {
+                            continue;
+                        }
+                        let Some(chat) = chat.upgrade() else { break };
+                        let next = queues.lock().unwrap().next(&session_id);
+                        if let Some(turn) = next {
+                            changed();
+                            chat.send_turn(&turn.text, &turn.files).await;
+                        }
+                    }
                 }
             }
         });
+    }
+
+    /// Queues a chat turn, to be sent once the running one ends (see [`Self::watch_chat`]). With
+    /// the agent idle there is nothing to wait for: the queue is let go and its oldest message is
+    /// sent now, which is this one unless others were held back.
+    pub fn queue_turn(&self, session_id: &str, text: String, files: Vec<ChatFile>) {
+        let Some(chat) = self.get_chat(session_id) else {
+            return;
+        };
+        let next = {
+            let mut queues = self.queues.lock().unwrap();
+            queues.push(session_id, text, files);
+            if chat.status() == Status::Idle {
+                queues.resume(session_id);
+                queues.next(session_id)
+            } else {
+                None
+            }
+        };
+        self.emit_session(session_id);
+        if let Some(turn) = next {
+            tokio::spawn(async move { chat.send_turn(&turn.text, &turn.files).await });
+        }
+    }
+
+    /// Takes a message out of a chat's queue: `send` sends it now (steering a running turn, and
+    /// letting a held queue go after it), otherwise it is dropped.
+    pub fn unqueue_turn(&self, session_id: &str, id: &str, send: bool) {
+        let turn = {
+            let mut queues = self.queues.lock().unwrap();
+            let turn = queues.take(session_id, id);
+            if turn.is_some() && send {
+                queues.resume(session_id);
+            }
+            turn
+        };
+        let Some(turn) = turn else {
+            return;
+        };
+        self.emit_session(session_id);
+        if send && let Some(chat) = self.get_chat(session_id) {
+            tokio::spawn(async move { chat.send_turn(&turn.text, &turn.files).await });
+        }
+    }
+
+    /// Holds a chat's queue: its turn is being stopped, which is no time to send the next message.
+    pub fn pause_queue(&self, session_id: &str) {
+        if self.queues.lock().unwrap().pause(session_id) {
+            self.emit_session(session_id);
+        }
+    }
+
+    /// Lets a held queue go again: a turn was sent by hand, and the queue follows it once it ends.
+    pub fn resume_queue(&self, session_id: &str) {
+        if self.queues.lock().unwrap().resume(session_id) {
+            self.emit_session(session_id);
+        }
     }
 
     /// Forwards a session's parsed status to keep-awake and the rail (change events). Sound and
@@ -1811,6 +2397,7 @@ impl WorkspaceService {
         let mut activity_rx = session.subscribe_activity();
         let keep_awake = self.keep_awake.clone();
         let change_tx = self.change_tx.clone();
+        let touched = self.touched.clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
             // A hook re-sends `Thinking` on every tool start; only a real change is worth sending.
@@ -1826,6 +2413,7 @@ impl WorkspaceService {
                         keep_awake.handle(&session_id, awake_status(status, &subagents_rx.borrow()));
                         if status != last_status {
                             last_status = status;
+                            touch(&touched, &session_id);
                             changed();
                         }
                     }
@@ -1879,7 +2467,7 @@ impl WorkspaceService {
         }
         // While the user is looking at the app, a sound and banner here add nothing; only a paired
         // device is told then.
-        let audience = audience_for(self.focused.load(Ordering::Relaxed));
+        let audience = self.presence.audience();
         if audience == Audience::Everyone {
             self.sound.play(cue);
         }
@@ -1943,6 +2531,10 @@ impl WorkspaceService {
         let _ = self.change_tx.send(Change::Structure);
     }
 
+    fn emit_session(&self, session_id: &str) {
+        let _ = self.change_tx.send(Change::Session(session_id.to_string()));
+    }
+
     fn emit_global(&self) {
         let _ = self.change_tx.send(Change::Global);
     }
@@ -1950,6 +2542,25 @@ impl WorkspaceService {
 
 fn new_session_id() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// The provider an agent command runs, if it is one Soromi knows.
+fn provider_of(agent: &str) -> Option<&'static dyn crate::providers::Provider> {
+    let command = parse_agent_command(agent).ok()?.command;
+    crate::providers::provider(basename(&command))
+}
+
+/// Marks a session as changed now, and says when that was.
+fn touch(touched: &Mutex<HashMap<String, u32>>, session: &str) -> u32 {
+    let now = unix_seconds(std::time::SystemTime::now());
+    touched.lock().unwrap().insert(session.to_string(), now);
+    now
+}
+
+fn unix_seconds(time: std::time::SystemTime) -> u32 {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map(|since| u32::try_from(since.as_secs()).unwrap_or(u32::MAX))
+        .unwrap_or(0)
 }
 
 fn basename(command: &str) -> &str {
@@ -2044,6 +2655,24 @@ fn truncate_chars(text: &str, max: usize) -> String {
     format!("{truncated}…")
 }
 
+/// What a new shell is called: the folder it starts in (`root` for the workspace's root), numbered
+/// when another shell of the workspace already has that name.
+fn shell_title(folder: &str, peers: &[&str]) -> String {
+    let base = folder
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty() && *name != ".")
+        .unwrap_or("root");
+    if !peers.contains(&base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|index| format!("{base} {index}"))
+        .find(|title| !peers.contains(&title.as_str()))
+        .unwrap_or_else(|| base.to_string())
+}
+
 /// A provider's config dir for an account: its profile `configDir` if set, else the provider's
 /// config env var (e.g. `CLAUDE_CONFIG_DIR` / `CODEX_HOME`), else `~/<default>`.
 fn provider_config_dir(account: &str, provider: &dyn crate::providers::Provider) -> PathBuf {
@@ -2133,9 +2762,31 @@ fn awake_status(status: Status, subagents: &[SubAgent]) -> Status {
     }
 }
 
-/// Who a banner is for, given whether the app window on this computer is being looked at.
-fn audience_for(focused: bool) -> Audience {
-    if focused {
+/// Where the person is, as far as banners go. `focused`: the app window on this computer is being
+/// looked at (set by the shell; false by default, so the standalone daemon always fires).
+/// `on_device`: a paired device drives the sessions, or did when its app went away and nobody here
+/// has acted since.
+#[derive(Default)]
+struct Presence {
+    focused: AtomicBool,
+    on_device: AtomicBool,
+}
+
+impl Presence {
+    fn audience(&self) -> Audience {
+        audience_for(
+            self.focused.load(Ordering::Relaxed),
+            self.on_device.load(Ordering::Relaxed),
+        )
+    }
+}
+
+/// Who a banner is for: the person on a device is told there, however the app on this computer
+/// is; otherwise it depends on whether the app here is being looked at.
+fn audience_for(focused: bool, on_device: bool) -> Audience {
+    if on_device {
+        Audience::Elsewhere
+    } else if focused {
         Audience::Devices
     } else {
         Audience::Everyone
@@ -2287,9 +2938,79 @@ mod tests {
         WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None)
     }
 
+    #[tokio::test]
+    async fn a_device_is_shown_under_the_name_it_gives_itself() {
+        let service = service();
+        let named = Arc::new(Mutex::new(Vec::new()));
+        let record = named.clone();
+        service.set_device_namer(Arc::new(move |id: &str, name: &str| {
+            record
+                .lock()
+                .unwrap()
+                .push((id.to_string(), name.to_string()));
+        }));
+        service.register_device_viewer(2, "My phone".into(), "phone");
+        service.take_control(2);
+
+        service.name_device("phone", "Pixel 9 Pro");
+
+        assert_eq!(service.controller_name().as_deref(), Some("Pixel 9 Pro"));
+        assert_eq!(
+            *named.lock().unwrap(),
+            vec![("phone".to_string(), "Pixel 9 Pro".to_string())]
+        );
+        // A link it opens later, dialed under its old name, is shown under the new one.
+        service.register_device_viewer(3, "My phone".into(), "phone");
+        service.take_control(3);
+        assert_eq!(service.controller_name().as_deref(), Some("Pixel 9 Pro"));
+    }
+
+    #[test]
+    fn a_session_is_marked_with_when_it_last_changed() {
+        let touched = Mutex::new(HashMap::new());
+        let before = unix_seconds(std::time::SystemTime::now());
+
+        let at = touch(&touched, "s1");
+
+        assert!(at >= before);
+        assert_eq!(touched.lock().unwrap().get("s1"), Some(&at));
+        assert_eq!(touched.lock().unwrap().get("s2"), None);
+    }
+
+    #[test]
+    fn banners_follow_the_person() {
+        assert_eq!(audience_for(false, false), Audience::Everyone);
+        assert_eq!(audience_for(true, false), Audience::Devices);
+        // On a device, the app here being on screen or not says nothing about where they are.
+        assert_eq!(audience_for(true, true), Audience::Elsewhere);
+        assert_eq!(audience_for(false, true), Audience::Elsewhere);
+    }
+
+    #[tokio::test]
+    async fn banners_go_to_the_phone_that_drives_until_someone_here_acts() {
+        let service = service();
+        service.set_focused(true);
+        service.register_viewer(1, "Mac".into());
+        service.register_device_viewer(2, "Phone".into(), "phone");
+        assert_eq!(service.presence.audience(), Audience::Devices);
+
+        service.take_control(2);
+        assert_eq!(service.presence.audience(), Audience::Elsewhere);
+
+        // Put away: its link drops and the Mac stands in, but the phone is still where they are.
+        service.unregister_viewer(2);
+        assert!(service.is_controller(1));
+        assert_eq!(service.presence.audience(), Audience::Elsewhere);
+
+        // Someone at the Mac sends a message: they are here now.
+        assert!(service.drives(1));
+        assert_eq!(service.presence.audience(), Audience::Devices);
+    }
+
     #[test]
     fn a_session_is_at_work_while_its_background_agents_are() {
         let agent = |status| SubAgent {
+            id: None,
             name: "explore".into(),
             status,
             started_at: None,
@@ -2345,6 +3066,106 @@ mod tests {
 
         service.remove_space("kazomi");
         assert!(service.summaries().is_empty());
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[test]
+    fn a_shell_is_named_for_its_folder_and_numbered_when_taken() {
+        assert_eq!(shell_title("", &[]), "root");
+        assert_eq!(shell_title(".", &[]), "root");
+        assert_eq!(shell_title("apps/mobile", &[]), "mobile");
+        assert_eq!(shell_title("apps/mobile/", &["mobile"]), "mobile 2");
+        assert_eq!(shell_title("", &["root", "root 2"]), "root 3");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_shell_is_listed_for_every_viewport_until_it_is_closed() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("api")).unwrap();
+
+        let service = service();
+        service
+            .create_space(CreateSpaceInput {
+                name: "kazomi".into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "/bin/cat".into(),
+                account: "personal".into(),
+                folders: None,
+            })
+            .unwrap();
+        let shells = |service: &WorkspaceService| service.summaries()[0].shells.clone();
+
+        service
+            .open_shell("kazomi", "shell:a", "api", Some("phone-1".into()))
+            .unwrap();
+        service.open_shell("kazomi", "shell:b", "", None).unwrap();
+        // Asked again for one it has, it keeps it as it is.
+        service.open_shell("kazomi", "shell:a", "", None).unwrap();
+
+        let listed = shells(&service);
+        assert_eq!(
+            listed
+                .iter()
+                .map(|shell| (shell.id.as_str(), shell.title.as_str()))
+                .collect::<Vec<_>>(),
+            [("shell:a", "api"), ("shell:b", "root")]
+        );
+        assert_eq!(listed[0].opened_by.as_deref(), Some("phone-1"));
+        assert_eq!(listed[1].opened_by, None);
+
+        service.rename_shell("shell:b", "  server  ");
+        service.rename_shell("shell:b", "   ");
+        assert_eq!(shells(&service)[1].title, "server");
+
+        service.close_session("shell:a");
+        assert_eq!(shells(&service).len(), 1);
+        assert!(service.get("shell:a").is_none());
+
+        // A workspace takes its shells with it.
+        service.remove_space("kazomi");
+        assert!(service.get("shell:b").is_none());
+        assert!(service.shell("shell:b").is_none());
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_shell_that_exits_closes_for_everyone() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+
+        let service = service();
+        service
+            .create_space(CreateSpaceInput {
+                name: "kazomi".into(),
+                root: root.path().to_string_lossy().into_owned(),
+                agent: "/bin/cat".into(),
+                account: "personal".into(),
+                folders: None,
+            })
+            .unwrap();
+        service.open_shell("kazomi", "shell:a", "", None).unwrap();
+        let mut changes = service.subscribe_changes();
+
+        service.get("shell:a").unwrap().write("exit\n");
+        let gone = tokio::time::timeout(Duration::from_secs(10), async {
+            while service.shell("shell:a").is_some() {
+                let _ = changes.recv().await;
+            }
+        })
+        .await;
+
+        assert!(gone.is_ok(), "the shell was still listed after it exited");
+        assert!(service.summaries()[0].shells.is_empty());
+        assert!(service.get("shell:a").is_none());
 
         service.dispose();
         crate::home::set_soromi_home(None);
@@ -2764,6 +3585,237 @@ mod tests {
             folders: None,
         });
         assert!(result.is_err());
+        crate::home::set_soromi_home(None);
+    }
+
+    /// A stand-in for Claude's headless chat: each message it is sent is a turn of `secs` that
+    /// ends with a `result`, as Claude's do.
+    fn chat_taking(service: &WorkspaceService, id: &str, secs: &str) -> Arc<ChatSession> {
+        let provider = crate::providers::provider("claude").expect("claude provider");
+        let script = format!(
+            r#"while IFS= read -r line; do case "$line" in *'"type":"user"'*) sleep {secs}; printf '%s\n' '{{"type":"result","subtype":"success"}}';; esac; done"#
+        );
+        let chat = service
+            .manager
+            .ensure_chat(id, || {
+                Ok(ChatSession::StreamJson(StreamJsonSession::spawn(
+                    provider,
+                    "/bin/sh",
+                    &["-c".to_string(), script],
+                    ".",
+                    None,
+                    Vec::new(),
+                    PermissionMode::Default,
+                )?))
+            })
+            .unwrap();
+        service.watch_chat("kazomi", id, &chat);
+        chat
+    }
+
+    fn prompts(chat: &ChatSession) -> Vec<String> {
+        chat.chat_log()
+            .snapshot()
+            .into_iter()
+            .filter_map(|event| match event {
+                soromi_protocol::ChatEvent::User { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn until(what: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !what() {
+            assert!(Instant::now() < deadline, "timed out");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn queued_messages_go_out_one_turn_at_a_time_after_the_running_one() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let service = service();
+        let chat = chat_taking(&service, "s1", "0.3");
+        let queued = |service: &WorkspaceService| -> Vec<String> {
+            let (turns, _) = service.queues.lock().unwrap().summary("s1");
+            turns.into_iter().map(|turn| turn.text).collect()
+        };
+
+        chat.send_turn("first", &[]).await;
+        service.queue_turn("s1", "second".into(), Vec::new());
+        service.queue_turn("s1", "third".into(), Vec::new());
+        assert_eq!(queued(&service), ["second", "third"]);
+        // Held back while the first turn runs.
+        assert_eq!(prompts(&chat), ["first"]);
+
+        until(|| prompts(&chat).len() == 3).await;
+        assert_eq!(prompts(&chat), ["first", "second", "third"]);
+        assert!(queued(&service).is_empty());
+
+        // With the agent idle, a queued message goes at once.
+        until(|| chat.status() == Status::Idle).await;
+        service.queue_turn("s1", "fourth".into(), Vec::new());
+        until(|| prompts(&chat).len() == 4).await;
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_stopped_turn_holds_the_queue_and_one_can_be_sent_or_dropped_by_hand() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let service = service();
+        let chat = chat_taking(&service, "s1", "0.3");
+
+        chat.send_turn("first", &[]).await;
+        service.queue_turn("s1", "second".into(), Vec::new());
+        service.queue_turn("s1", "third".into(), Vec::new());
+        service.pause_queue("s1");
+        chat.interrupt().await;
+        // The stop settles the chat, and the turn's own result follows: nothing goes out.
+        tokio::time::sleep(QUEUE_SETTLE + Duration::from_millis(700)).await;
+        assert_eq!(prompts(&chat), ["first"]);
+        let (turns, paused) = service.queues.lock().unwrap().summary("s1");
+        assert!(paused);
+
+        service.unqueue_turn("s1", &turns[1].id, false);
+        service.unqueue_turn("s1", &turns[0].id, true);
+        until(|| prompts(&chat).len() == 2).await;
+        assert_eq!(prompts(&chat), ["first", "second"]);
+        assert_eq!(
+            service.queues.lock().unwrap().summary("s1"),
+            (Vec::new(), false)
+        );
+
+        service.dispose();
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn earlier_conversations_are_listed_searched_and_resumed_as_a_tab() {
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let root = tempfile::tempdir().unwrap();
+        let root_path = root.path().canonicalize().unwrap();
+        let root_text = root_path.to_string_lossy().into_owned();
+        // The account's own Claude login, kept apart from this machine's.
+        let config = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts/personal");
+        std::fs::create_dir_all(&accounts).unwrap();
+        std::fs::write(
+            accounts.join("profile.json"),
+            format!(
+                r#"{{"name":"personal","providers":{{"claude":{{"configDir":"{}"}}}}}}"#,
+                config.path().display()
+            ),
+        )
+        .unwrap();
+        // A stand-in for `claude`, which notes how it was started.
+        let bin = tempfile::tempdir().unwrap();
+        let agent = bin.path().join("claude");
+        std::fs::write(
+            &agent,
+            format!(
+                "#!/bin/sh\necho \"$@\" > {}/args\nexec cat >/dev/null\n",
+                bin.path().display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let agent = agent.to_string_lossy().into_owned();
+
+        let project = config.path().join("projects").join(
+            root_text
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>(),
+        );
+        std::fs::create_dir_all(&project).unwrap();
+        let prompt = |text: &str| {
+            format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}}}}"#)
+        };
+        std::fs::write(project.join("c1.jsonl"), prompt("Fix the login bug") + "\n").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(project.join("c2.jsonl"), prompt("Write the docs") + "\n").unwrap();
+
+        let service = service();
+        service.register_space(PersistedSpace {
+            name: "kazomi".into(),
+            folders: vec![".".into()],
+            root: root_text.clone(),
+            accounts: vec![AgentAccount {
+                id: "personal".into(),
+                agent: agent.clone(),
+            }],
+            sessions: vec![SessionSpec {
+                account: None,
+                id: "tab-1".into(),
+                agent: agent.clone(),
+                title: None,
+                resume_id: Some("c2".into()),
+                mode: SessionMode::Chat,
+                permission_mode: PermissionMode::default(),
+                model: None,
+                effort: None,
+            }],
+            instructions: None,
+            agent: None,
+            account: None,
+        });
+
+        // Newest first; the one a tab shows says which.
+        let listed = service.conversations("kazomi", None);
+        let ids: Vec<&str> = listed.iter().map(|one| one.id.as_str()).collect();
+        assert_eq!(ids, ["c2", "c1"]);
+        assert_eq!(listed[0].session.as_deref(), Some("tab-1"));
+        assert_eq!(listed[1].title, "Fix the login bug");
+        assert_eq!(listed[1].account, "personal");
+        let found = service.conversations("kazomi", Some("LOGIN"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "c1");
+        assert!(service.conversations("kazomi", Some("nowhere")).is_empty());
+
+        let tab = service
+            .resume_conversation(
+                "kazomi",
+                "c1",
+                agent.clone(),
+                "personal".into(),
+                SessionMode::Chat,
+            )
+            .unwrap();
+        assert_eq!(tab.title.as_deref(), Some("Fix the login bug"));
+        assert_eq!(tab.mode, SessionMode::Chat);
+        // The agent is started on that conversation.
+        let args = bin.path().join("args");
+        until(|| std::fs::read_to_string(&args).is_ok_and(|text| text.contains("--resume c1")))
+            .await;
+        // Asked again, it is the same tab.
+        let again = service
+            .resume_conversation(
+                "kazomi",
+                "c1",
+                agent.clone(),
+                "personal".into(),
+                SessionMode::Chat,
+            )
+            .unwrap();
+        assert_eq!(again.id, tab.id);
+        assert!(
+            service
+                .resume_conversation("kazomi", "c1", agent, "work".into(), SessionMode::Chat)
+                .is_ok(),
+            "a conversation a tab shows is that tab, whoever asks"
+        );
+
+        service.dispose();
         crate::home::set_soromi_home(None);
     }
 }

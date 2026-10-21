@@ -65,6 +65,12 @@ export const getPanelHref = (session: string, view: string): Href => ({
   params: { id: session, view },
 })
 
+/** Where a background agent's own log is shown: the session it works for, its id there, its name. */
+export const getAgentHref = (session: string, agent: string, name: string): Href => ({
+  pathname: routes.app.agent,
+  params: { id: session, agent, name },
+})
+
 /** Whether there is anything to send: something written, or a picture. */
 export const hasMessage = (text: string, attachments: number): boolean =>
   text.trim() !== '' || attachments > 0
@@ -112,6 +118,13 @@ export const getSwitchMessage = (option: AgentOption): string =>
 /** "3 agents working in the background". */
 export const getAgentsLabel = (count: number): string =>
   `${count} ${count === 1 ? CHAT.agents.one : CHAT.agents.many}`
+
+/** What is said over the queued messages: how many, and when they go. */
+export const getQueueLabel = (count: number, paused: boolean): string => {
+  if (paused) return CHAT.queue.paused
+
+  return count === 1 ? CHAT.queue.one : `${count} ${CHAT.queue.many}`
+}
 
 /** How long an agent has run: "48s", "1m 12s". */
 export const getAgentElapsed = (startedAt: number, now: number): string => {

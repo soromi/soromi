@@ -10,15 +10,6 @@ import type { DirEntry, GitStatusInfo } from '@soromi/protocol'
 /** Which view the contextual sidebar shows. */
 export type SidebarMode = 'files' | 'skills' | 'git' | 'terminal'
 
-/** An ad-hoc shell terminal in the Terminal tab: its PTY id, its cwd folder, and a display title. */
-export interface ShellTab {
-  /** The PTY id (`shell:<uuid>`), keyed in the daemon's session manager. */
-  id: string
-  /** Workspace-relative folder it's rooted at ("" = root). */
-  folder: string
-  title: string
-}
-
 export interface FileContent {
   content: string
   truncated: boolean
@@ -149,9 +140,19 @@ export type Overlay =
       patch: string | null
       truncated: boolean
     }
+  | {
+      id: string
+      type: 'agent'
+      /** The session the background agent works for, and its id there (`SubAgent.id`). */
+      session: string
+      agent: string
+      /** What it is called, kept for when it has stopped and left the session's list. */
+      name: string
+    }
   | { id: string; type: 'create-space' }
   | { id: string; type: 'settings' }
   | { id: string; type: 'workspace-settings'; workspace: string }
+  | { id: string; type: 'conversations'; workspace: string }
 
 /**
  * How much an overlay covers. `full` covers the whole shell (rail + sidebar + content) for
@@ -159,8 +160,10 @@ export type Overlay =
  * visible so it reads as workspace-scoped.
  */
 export function overlayScope(overlay: Overlay): 'full' | 'content' {
-  // `file` and `diff` dock beside the chat (content scope); the rest cover the whole shell.
-  return overlay.type === 'file' || overlay.type === 'diff' ? 'content' : 'full'
+  // `file`, `diff` and `agent` dock beside the chat (content scope); the rest cover the whole shell.
+  return overlay.type === 'file' || overlay.type === 'diff' || overlay.type === 'agent'
+    ? 'content'
+    : 'full'
 }
 
 /**
@@ -183,8 +186,8 @@ interface UiState {
   gitFolder: Record<string, string>
   /** The folders of each workspace that are repositories, as the daemon last listed them. */
   gitRepos: Record<string, string[]>
-  /** Ad-hoc shell terminals per workspace (Terminal tab), and the active one — in-memory only. */
-  shells: Record<string, ShellTab[]>
+  /** The shell this window shows in each workspace's Terminal tab. The list itself is the daemon's
+   * (`workspace.shells`), the same on every device; which one is in front is this window's own. */
   activeShell: Record<string, string>
   sidebarMode: SidebarMode
   /** Light/dark appearance (persisted; applied as a `so-light` root class). */
@@ -210,6 +213,8 @@ interface UiState {
   /** Re-derive active workspace/tab against a fresh workspace list from the daemon. */
   reconcile: (workspaces: WorkspaceInfo[]) => void
   openFile: (workspace: string, path: string) => void
+  /** Open a background agent's log in the docked panel (filled as the daemon streams it). */
+  openAgent: (session: string, agent: string, name: string) => void
   /** Open a file's git diff in the docked panel (patch fetched, then filled by `setDiffPatch`). */
   openDiff: (workspace: string, folder: string, path: string, staged: boolean) => void
   setGitStatus: (workspace: string, folder: string, status: GitStatusInfo, repos: string[]) => void
@@ -224,13 +229,12 @@ interface UiState {
     truncated: boolean,
   ) => void
   /** Add a shell terminal rooted at `folder` and make it active; returns its new PTY id. */
-  openShell: (workspace: string, folder: string) => string
-  closeShell: (workspace: string, id: string) => void
   selectShell: (workspace: string, id: string) => void
-  renameShell: (workspace: string, id: string, title: string) => void
   openCreateSpace: () => void
   openSettings: () => void
   openWorkspaceSettings: (workspace: string) => void
+  /** A workspace's earlier conversations, to carry one on in a tab. */
+  openConversations: (workspace: string) => void
   popOverlay: () => void
   closeOverlays: () => void
   setFileContent: (workspace: string, path: string, content: FileContent) => void
@@ -260,7 +264,6 @@ export const useAppStore = create<UiState>()((set) => ({
   gitStatus: {},
   gitFolder: {},
   gitRepos: {},
-  shells: {},
   activeShell: {},
   sidebarMode: 'files',
   theme: readTheme(),
@@ -328,6 +331,16 @@ export const useAppStore = create<UiState>()((set) => ({
         top?.type === 'file' ? [...state.overlays.slice(0, -1), entry] : [...state.overlays, entry]
       return { overlays }
     }),
+  openAgent: (session, agent, name) =>
+    set((state) => {
+      const entry: Overlay = { id: crypto.randomUUID(), type: 'agent', session, agent, name }
+      // In place of a docked panel already up, so moving between agents doesn't stack them.
+      const top = state.overlays.at(-1)
+      const docked = top && overlayScope(top) === 'content'
+      return {
+        overlays: docked ? [...state.overlays.slice(0, -1), entry] : [...state.overlays, entry],
+      }
+    }),
   openDiff: (workspace, folder, path, staged) =>
     set((state) => {
       const entry: Overlay = {
@@ -355,47 +368,8 @@ export const useAppStore = create<UiState>()((set) => ({
     })),
   selectGitFolder: (workspace, folder) =>
     set((state) => ({ gitFolder: { ...state.gitFolder, [workspace]: folder } })),
-  openShell: (workspace, folder) => {
-    const id = `shell:${crypto.randomUUID()}`
-    const title = folder ? (folder.split('/').pop() ?? folder) : 'root'
-    set((state) => {
-      const list = state.shells[workspace] ?? []
-      return {
-        shells: { ...state.shells, [workspace]: [...list, { id, folder, title }] },
-        activeShell: { ...state.activeShell, [workspace]: id },
-      }
-    })
-    return id
-  },
-  closeShell: (workspace, id) =>
-    set((state) => {
-      const list = state.shells[workspace] ?? []
-      const index = list.findIndex((s) => s.id === id)
-      const next = list.filter((s) => s.id !== id)
-      const activeShell = { ...state.activeShell }
-      // If the closed tab was active, fall to its right neighbour, else its left, else none.
-      if (state.activeShell[workspace] === id) {
-        const neighbour = next[index] ?? next[index - 1]
-        if (neighbour) activeShell[workspace] = neighbour.id
-        else delete activeShell[workspace]
-      }
-      return { shells: { ...state.shells, [workspace]: next }, activeShell }
-    }),
   selectShell: (workspace, id) =>
     set((state) => ({ activeShell: { ...state.activeShell, [workspace]: id } })),
-  renameShell: (workspace, id, title) =>
-    set((state) => {
-      const list = state.shells[workspace]
-      if (!list) return {}
-      const trimmed = title.trim()
-      if (!trimmed) return {}
-      return {
-        shells: {
-          ...state.shells,
-          [workspace]: list.map((s) => (s.id === id ? { ...s, title: trimmed } : s)),
-        },
-      }
-    }),
   setDiffPatch: (workspace, folder, path, staged, patch, truncated) =>
     set((state) => ({
       overlays: state.overlays.map((o) =>
@@ -428,6 +402,17 @@ export const useAppStore = create<UiState>()((set) => ({
         overlays: [
           ...state.overlays,
           { id: crypto.randomUUID(), type: 'workspace-settings', workspace },
+        ],
+      }
+    }),
+  openConversations: (workspace) =>
+    set((state) => {
+      const top = state.overlays.at(-1)
+      if (top?.type === 'conversations' && top.workspace === workspace) return {}
+      return {
+        overlays: [
+          ...state.overlays,
+          { id: crypto.randomUUID(), type: 'conversations', workspace },
         ],
       }
     }),

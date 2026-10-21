@@ -15,7 +15,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   cn,
@@ -24,6 +23,8 @@ import {
 //Store
 import { agentOptionKey, agentOptionsFor } from '@/shared/agent-options'
 import { ProviderIcon } from '@/shared/provider-icon'
+import { AboutHero } from '@/shared/about-hero'
+import { SoromiMark } from '@/shared/soromi-mark'
 import { useAppStore } from '@/stores/app-store'
 
 //Utils
@@ -36,35 +37,26 @@ import { APP_VERSION, REPO_URL } from '@/config'
 
 //Icons
 import CaretSvg from '@/assets/icons/caret.svg?react'
-import CheckSvg from '@/assets/icons/check.svg?react'
-import MugSvg from '@/assets/icons/mug.svg?react'
 import PlusSvg from '@/assets/icons/plus.svg?react'
 import SettingsSvg from '@/assets/icons/settings.svg?react'
 
 //Types
 import type { SessionMode, SessionSummary, Status, SubAgent } from '@soromi/protocol'
 import type { WorkspaceInfo } from '@soromi/client'
-import type { KeepAwakeMode } from '@soromi/protocol'
-
-const KEEP_AWAKE_MODES: { mode: KeepAwakeMode; label: string }[] = [
-  { mode: 'off', label: 'Off' },
-  { mode: 'working', label: 'While agent works' },
-  { mode: 'always', label: 'Always on' },
-]
 
 /** Per-status dot color + label for an agent (session) row. The dot alone carries the status now
  * (no text), so each state that matters has its own color: amber = running, blue = waiting on YOU,
  * red = blocked, green = review, gray = idle. Working/waiting pulse to draw the eye. */
 const AGENT_STATE: Record<Status, { dot: string; pulse: boolean; label: string }> = {
   thinking: { dot: 'var(--soromi-warn)', pulse: true, label: 'Running' },
-  'waiting-input': { dot: '#6b93d6', pulse: true, label: 'Waiting' },
-  blocked: { dot: '#f47070', pulse: false, label: 'Blocked' },
+  'waiting-input': { dot: 'var(--soromi-info)', pulse: true, label: 'Waiting' },
+  blocked: { dot: 'var(--soromi-danger)', pulse: false, label: 'Blocked' },
   done: { dot: 'var(--soromi-accent)', pulse: false, label: 'Review' },
   idle: { dot: 'var(--soromi-text-faint)', pulse: false, label: 'Idle' },
 }
 
 const NEW_SESSION_CLASS =
-  'flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[#6e6e6e] text-[12px] hover:bg-[#1f1f1f] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]'
+  'flex cursor-pointer appearance-none items-center gap-[9px] rounded-[8px] border-none bg-transparent px-[9px] py-1.5 text-left text-[var(--soromi-text-faint)] text-[12px] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-accent)] data-[state=open]:text-[var(--soromi-accent)]'
 
 /** The little `+` that leads the "New session" row. */
 function NewSessionGlyph() {
@@ -86,13 +78,23 @@ function NewSessionGlyph() {
   )
 }
 
-/** The Soromi brand mark: three emerald rounded bars, drawn bare (no chip) per the design. */
-function SoromiMark({ width = 15, height = 14 }: { width?: number; height?: number }) {
+/** A clock turned back: a workspace's earlier conversations, in its menu. */
+function HistoryGlyph() {
   return (
-    <svg width={width} height={height} viewBox="0 0 22 20" fill="#3ecf8e" aria-hidden="true">
-      <rect x="0" y="1" width="22" height="4.4" rx="2.2" />
-      <rect x="0" y="7.8" width="14" height="4.4" rx="2.2" />
-      <rect x="0" y="14.6" width="18" height="4.4" rx="2.2" />
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l4 2" />
     </svg>
   )
 }
@@ -128,7 +130,7 @@ function sessionLabel(session: SessionSummary, sessions: SessionSummary[]): stri
 }
 
 /**
- * The left sidebar: a top bar (app menu + keep-awake + settings), a "Jump to workspace" filter, and
+ * The left sidebar: a top bar (the app menu), a "Jump to workspace" filter, and
  * the workspaces list. Each workspace is a collapsible group whose rows are its sessions (name +
  * what it's working on + state + sub-agents), with a "New session" row. Files/Skills live in the
  * separate right-hand Explorer panel. The width (right edge) is draggable and persisted.
@@ -358,7 +360,7 @@ export function Sidebar() {
           <span className="text-[10.5px] text-[var(--soromi-text-faint)] uppercase tracking-[0.09em]">
             Workspaces
           </span>
-          <span className="rounded-full bg-[#1f1f1f] px-1.5 py-px text-[10px] font-semibold text-[#6e6e6e]">
+          <span className="rounded-full bg-[var(--soromi-bg-hover)] px-1.5 py-px text-[10px] font-semibold text-[var(--soromi-text-faint)]">
             {workspaces.length}
           </span>
         </div>
@@ -406,11 +408,11 @@ export function Sidebar() {
               height="14"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#565656"
+              stroke="currentColor"
               strokeWidth="1.9"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="flex-none"
+              className="flex-none text-[var(--soromi-text-ghost)]"
               aria-hidden="true"
             >
               <circle cx="11" cy="11" r="7" />
@@ -420,7 +422,7 @@ export function Sidebar() {
               value={wsQuery}
               onChange={(e) => setWsQuery(e.currentTarget.value)}
               placeholder="Jump to workspace"
-              className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[#565656]"
+              className="min-w-0 flex-1 border-none bg-transparent py-[7px] font-[inherit] text-[12.5px] text-[var(--soromi-text)] outline-none placeholder:text-[var(--soromi-text-ghost)]"
             />
           </div>
         </div>
@@ -484,18 +486,11 @@ function endDrag(onMove: (event: PointerEvent) => void, cursor: string) {
   document.body.style.userSelect = 'none'
 }
 
-/** The top bar: app menu (logo), keep-awake, and settings. Replaces the removed rail. */
+/** The top bar: the app menu (logo). Settings and keep-awake are in the status bar. */
 function TopBar() {
   const transport = useTransport()
   const { openSettings, setNotice } = useAppStore(
     useShallow((s) => ({ openSettings: s.openSettings, setNotice: s.setNotice })),
-  )
-  const { keepAwake, keepAwakeMode, setKeepAwakeMode } = useClientStore(
-    useShallow((s) => ({
-      keepAwake: s.keepAwake,
-      keepAwakeMode: s.keepAwakeMode,
-      setKeepAwakeMode: s.setKeepAwakeMode,
-    })),
   )
   const [aboutOpen, setAboutOpen] = useState(false)
 
@@ -503,13 +498,6 @@ function TopBar() {
     setNotice('Checking for updates…')
     transport.send({ type: 'check-update' })
   }
-  const selectKeepAwake = (mode: KeepAwakeMode) => {
-    setKeepAwakeMode(mode)
-    transport.send({ type: 'set-keep-awake-mode', mode })
-  }
-
-  const iconBtn =
-    'flex h-[30px] w-[30px] cursor-pointer appearance-none items-center justify-center rounded-lg border-none bg-transparent text-[var(--soromi-text-faint)] hover:bg-[var(--soromi-bg-hover)] hover:text-[var(--soromi-text-dim)]'
 
   return (
     // Drag region so the window moves by dragging the top bar; on macOS the left inset clears the
@@ -567,22 +555,19 @@ function TopBar() {
       </DropdownMenu>
 
       <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
-        <DialogContent hideClose className="max-w-[340px]">
-          <div className="flex flex-col items-center gap-2 px-1 pt-2 pb-1 text-center">
-            <span className="mb-2 flex h-[52px] w-[52px] items-center justify-center">
-              <SoromiMark width={40} height={36} />
-            </span>
-            <div className="font-bold text-[var(--soromi-text)] text-lg">Soromi</div>
-            <div className="mb-2 text-[13px] text-[var(--soromi-text-faint)]">
-              Version {APP_VERSION}
-            </div>
-            <p className="text-center text-muted-foreground text-sm">
-              A small, fast home for AI coding agents. The daemon owns the terminals; this window is
-              just a viewport.
+        <DialogContent
+          hideClose
+          className="max-w-[380px] gap-0 overflow-hidden rounded-[16px] border-[var(--soromi-border)] bg-[var(--soromi-bg-sidebar)] p-0 [box-shadow:var(--soromi-shadow-float)]"
+        >
+          <AboutHero fade="var(--soromi-bg-sidebar)" />
+          <div className="flex flex-col items-center gap-3 px-7 pb-6 text-center">
+            <p className="m-0 text-[13px] text-[var(--soromi-text-dim)] leading-[1.5]">
+              A small, fast home for AI coding agents. The daemon on this computer runs them; this
+              window, and your phone, are views of it.
             </p>
             <button
               type="button"
-              className="appearance-none border-0 bg-transparent text-primary text-sm hover:underline"
+              className="cursor-pointer appearance-none border-0 bg-transparent font-medium text-[12.5px] text-[var(--soromi-accent)] hover:underline"
               onClick={() => openExternal(REPO_URL)}
             >
               github.com/soromi/soromi
@@ -592,39 +577,6 @@ function TopBar() {
       </Dialog>
 
       <div data-drag-region className="flex-1" />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            title={`Keep awake: ${KEEP_AWAKE_MODES.find((m) => m.mode === keepAwakeMode)?.label}`}
-            className={cn(iconBtn, keepAwake && 'text-[var(--soromi-accent)]')}
-          >
-            <MugSvg width={17} height={17} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[230px]">
-          <DropdownMenuLabel>Keep awake</DropdownMenuLabel>
-          {KEEP_AWAKE_MODES.map(({ mode, label }) => (
-            <DropdownMenuItem key={mode} onClick={() => selectKeepAwake(mode)}>
-              <CheckSvg
-                width={14}
-                height={14}
-                className={cn('opacity-0', mode === keepAwakeMode && 'opacity-100')}
-              />
-              {label}
-            </DropdownMenuItem>
-          ))}
-          <p className="px-2 pt-1.5 pb-1 text-[11px] text-[var(--soromi-text-faint)] leading-snug">
-            In every mode, this computer also stays awake while a paired phone is connected. A
-            sleeping computer cannot be reached from a phone.
-          </p>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <button type="button" title="Settings" className={iconBtn} onClick={openSettings}>
-        <SettingsSvg width={17} height={17} />
-      </button>
     </div>
   )
 }
@@ -695,6 +647,7 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
   onCloseSession: (id: string) => void
 }) {
   const openWorkspaceSettings = useAppStore((s) => s.openWorkspaceSettings)
+  const openConversations = useAppStore((s) => s.openConversations)
   const sessions = workspace.sessions
   // Aggregate header pills: amber = sessions still working / waiting, green = done (needs review).
   // A session with agents still running in the background counts as working, not as finished.
@@ -728,11 +681,11 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: click-to-toggle, press-and-drag to reorder. */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the menu is a focusable button; ⌘N jumps here. */}
       <div
-        className="flex cursor-pointer select-none items-center gap-2 rounded-[8px] py-[7px] pr-1.5 pl-2 hover:bg-[#1f1f1f]"
+        className="flex cursor-pointer select-none items-center gap-2 rounded-[8px] py-[7px] pr-1.5 pl-2 hover:bg-[var(--soromi-bg-hover)]"
         onClick={() => onToggle(workspace.name)}
         onPointerDown={(e) => onDragStart(workspace.name, e)}
       >
-        <span className="flex h-3 w-3 flex-none items-center justify-center text-[#565656]">
+        <span className="flex h-3 w-3 flex-none items-center justify-center text-[var(--soromi-text-ghost)]">
           <svg
             width="11"
             height="11"
@@ -760,26 +713,26 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
         {runCount > 0 && (
           <span
             title={`${runCount} running`}
-            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(224,179,65,0.13)] px-[7px] py-0.5 font-semibold text-[#c99a2e] text-[10.5px]"
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--soromi-amber)_13%,transparent)] px-[7px] py-0.5 font-semibold text-[var(--soromi-amber-text)] text-[10.5px]"
           >
-            <span className="h-[5px] w-[5px] rounded-full bg-[#e0b341] motion-safe:animate-status-pulse" />
+            <span className="h-[5px] w-[5px] rounded-full bg-[var(--soromi-amber)] motion-safe:animate-status-pulse" />
             {runCount}
           </span>
         )}
         {reviewCount > 0 && (
           <span
             title={`${reviewCount} to review`}
-            className="inline-flex flex-none items-center gap-1 rounded-full bg-[rgba(62,207,142,0.13)] px-[7px] py-0.5 font-semibold text-[#3ecf8e] text-[10.5px]"
+            className="inline-flex flex-none items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--soromi-accent)_13%,transparent)] px-[7px] py-0.5 font-semibold text-[var(--soromi-accent)] text-[10.5px]"
           >
-            <span className="h-[5px] w-[5px] rounded-full bg-[#3ecf8e]" />
+            <span className="h-[5px] w-[5px] rounded-full bg-[var(--soromi-accent)]" />
             {reviewCount}
           </span>
         )}
         {runCount === 0 && reviewCount === 0 && (
-          <span className="flex-none text-[#565656] text-[10.5px]">Idle</span>
+          <span className="flex-none text-[var(--soromi-text-ghost)] text-[10.5px]">Idle</span>
         )}
         {kbd && shortcutHeld && (
-          <span className="flex-none text-[#565656] text-[9.5px] [font-family:var(--soromi-font-mono)]">
+          <span className="flex-none text-[var(--soromi-text-ghost)] text-[9.5px] [font-family:var(--soromi-font-mono)]">
             {kbd}
           </span>
         )}
@@ -789,7 +742,7 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
               type="button"
               title="More"
               onClick={(e) => e.stopPropagation()}
-              className="flex h-5 w-5 flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#565656] hover:bg-[#2a2a2a] hover:text-[var(--soromi-text)] data-[state=open]:bg-[#2a2a2a] data-[state=open]:text-[var(--soromi-text)]"
+              className="flex h-5 w-5 flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[var(--soromi-text-ghost)] hover:bg-[var(--soromi-bg-active)] hover:text-[var(--soromi-text)] data-[state=open]:bg-[var(--soromi-bg-active)] data-[state=open]:text-[var(--soromi-text)]"
             >
               <svg
                 width="13"
@@ -808,9 +761,16 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
               header's onClick — stop menu clicks from toggling the group behind it. */}
           <DropdownMenuContent
             align="end"
-            className="w-[186px]"
+            className="w-[210px]"
             onClick={(e) => e.stopPropagation()}
           >
+            <DropdownMenuItem
+              className="whitespace-nowrap"
+              onSelect={() => openConversations(workspace.name)}
+            >
+              <HistoryGlyph />
+              Earlier conversations
+            </DropdownMenuItem>
             <DropdownMenuItem
               className="whitespace-nowrap"
               onSelect={() => openWorkspaceSettings(workspace.name)}
@@ -936,8 +896,10 @@ const SessionRow = memo(function SessionRow({
     <div>
       <div
         className={cn(
-          'group/row flex items-center gap-[9px] rounded-[8px] px-[9px] py-[7px] hover:bg-[#1f1f1f]',
-          activeSession && 'bg-[#1f1f1f]',
+          'group/row flex items-center gap-[9px] rounded-[8px] px-[9px] py-[7px] transition-[background-color,box-shadow]',
+          activeSession
+            ? 'bg-[var(--soromi-bg-selected)] [box-shadow:var(--soromi-shadow-selected)]'
+            : 'hover:bg-[var(--soromi-bg-hover)]',
         )}
       >
         {editing ? (
@@ -972,12 +934,12 @@ const SessionRow = memo(function SessionRow({
                 <div
                   className={cn(
                     'overflow-hidden text-ellipsis whitespace-nowrap font-medium text-[12.5px]',
-                    activeSession ? 'text-[var(--soromi-text)]' : 'text-[#d6d6d6]',
+                    activeSession ? 'text-[var(--soromi-text)]' : 'text-[var(--soromi-text-dim)]',
                   )}
                 >
                   {label}
                 </div>
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[#6e6e6e] text-[11px]">
+                <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--soromi-text-faint)] text-[11px]">
                   {subtitle}
                 </div>
               </div>
@@ -987,7 +949,7 @@ const SessionRow = memo(function SessionRow({
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 title={open ? 'Hide sub-agents' : 'Show sub-agents'}
-                className="inline-flex flex-none cursor-pointer appearance-none items-center gap-[3px] rounded-full border-none bg-[#1f1f1f] px-1.5 py-0.5 font-semibold text-[#8a8a8a] text-[10px] hover:bg-[#2c2c31] hover:text-[var(--soromi-text)]"
+                className="inline-flex flex-none cursor-pointer appearance-none items-center gap-[3px] rounded-full border-none bg-[var(--soromi-bg-hover)] px-1.5 py-0.5 font-semibold text-[var(--soromi-text-muted)] text-[10px] hover:bg-[var(--soromi-bg-active)] hover:text-[var(--soromi-text)]"
               >
                 {subagents.length}
                 <svg
@@ -1010,7 +972,7 @@ const SessionRow = memo(function SessionRow({
               type="button"
               onClick={() => onCloseSession(session.id)}
               title="Close session"
-              className="flex h-[19px] w-[19px] flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[#565656] hover:bg-[#363636] hover:text-[var(--soromi-text)]"
+              className="flex h-[19px] w-[19px] flex-none cursor-pointer appearance-none items-center justify-center rounded-[5px] border-none bg-transparent text-[var(--soromi-text-ghost)] hover:bg-[var(--soromi-bg-active)] hover:text-[var(--soromi-text)]"
             >
               <svg
                 width="11"
@@ -1037,21 +999,30 @@ const SessionRow = memo(function SessionRow({
 /** The sub-agents a session spawned (Claude Agent/Task calls), nested behind a connector rule; the
  * dot is each one's live status. */
 function SubAgentList({ sessionId, subagents }: { sessionId: string; subagents: SubAgent[] }) {
+  const openAgent = useAppStore((s) => s.openAgent)
   return (
-    <div className="mt-px mb-1 ml-[15px] flex flex-col gap-px border-[#2a2a2a] border-l pl-[11px]">
+    <div className="mt-px mb-1 ml-[15px] flex flex-col gap-px border-[var(--soromi-bg-active)] border-l pl-[11px]">
       {subagents.map((sub, index) => {
         const st = AGENT_STATE[sub.status]
+        const id = sub.id
         return (
-          <div
+          <button
+            type="button"
             // biome-ignore lint/suspicious/noArrayIndexKey: positional; same-named sub-agents can repeat.
             key={`${sessionId}:${sub.name}:${index}`}
-            className="flex items-center gap-2 rounded-[6px] px-[7px] py-1 hover:bg-[#1f1f1f]"
+            disabled={!id}
+            onClick={() => id && openAgent(sessionId, id, sub.name)}
+            title={id ? 'Show what this agent is doing' : undefined}
+            className={cn(
+              'flex appearance-none items-center gap-2 rounded-[6px] border-none bg-transparent px-[7px] py-1 text-left hover:bg-[var(--soromi-bg-hover)]',
+              id ? 'cursor-pointer' : 'cursor-default',
+            )}
           >
             <Dot color={st.dot} pulse={st.pulse} size={5} />
-            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[#8a8a8a] text-[11px]">
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--soromi-text-muted)] text-[11px]">
               {sub.name}
             </span>
-          </div>
+          </button>
         )
       })}
     </div>

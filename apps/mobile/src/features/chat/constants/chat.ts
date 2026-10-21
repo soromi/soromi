@@ -8,10 +8,13 @@ export const CHAT: ChatConfig = {
   },
   composer: {
     placeholder: 'Message the agent…',
+    /** While the agent works: what is sent then waits for its turn to end. */
+    queue: 'Queue a follow-up for when it finishes…',
     watching: 'Take over to send a message',
     send: 'Send',
+    queued: 'Queue it',
     stop: 'Stop',
-    attach: 'Attach pictures',
+    attach: 'Attach a picture or a file',
     terminal:
       'This session runs in a terminal. Read it here, or open the Terminal tab to type into it.',
     maxHeight: 140,
@@ -21,14 +24,29 @@ export const CHAT: ChatConfig = {
     // A message crosses the relay in one piece of at most 4 MiB, and has to leave room for its text.
     maxEncoded: 3_000_000,
     thumb: 56,
-    remove: 'Remove picture',
+    remove: 'Remove attachment',
+    title: 'Attach',
+    pickDelayMs: 400,
+    sources: {
+      library: { label: 'Photo library' },
+      camera: { label: 'Take a photo' },
+      files: { label: 'File', hint: 'A PDF, or a text file such as code or notes' },
+    },
     full: {
       title: 'No room for more',
-      message: 'A message takes up to 4 pictures. Remove one to add another.',
+      message: 'A message takes up to 4 pictures and files. Remove one to add another.',
     },
     dropped: {
-      title: 'Some pictures were left out',
+      title: 'Some were left out',
       message: 'Together they are too large to send in one message. Send them a few at a time.',
+    },
+    unsupported: {
+      title: 'Some files were left out',
+      message: 'The agent reads pictures, PDFs and text files (code, notes, logs).',
+    },
+    camera: {
+      title: 'No camera',
+      message: 'Allow Soromi to use the camera in the phone’s settings to take a photo here.',
     },
     ok: 'OK',
   },
@@ -90,6 +108,14 @@ export const CHAT: ChatConfig = {
   reasoning: {
     label: 'Thought for a few seconds',
   },
+  queue: {
+    one: 'Queued: sent when the agent finishes.',
+    many: 'queued: sent one at a time as the agent finishes.',
+    paused: 'Queued, held after Stop: they go once your next message is answered.',
+    attachments: 'Pictures only',
+    send: 'Send now',
+    remove: 'Remove from the queue',
+  },
   agents: {
     one: 'agent working in the background',
     many: 'agents working in the background',
@@ -98,6 +124,15 @@ export const CHAT: ChatConfig = {
     stop: 'Stop',
     minutes: 'm',
     seconds: 's',
+    open: 'Show what this agent is doing',
+    log: {
+      loading: 'Looking for this agent’s log…',
+      starting: 'Nothing yet: it has just started.',
+      none: 'This agent left no log.',
+      earlier: 'Showing its latest work',
+      running: 'Working in the background',
+      finished: 'Finished',
+    },
   },
   context: {
     lead: 'Context is ',
@@ -119,6 +154,8 @@ export const CHAT: ChatConfig = {
     maxHeight: 240,
   },
   files: {
+    open: 'Open picture',
+    picture: 'Picture',
     thumb: 132,
     result: 280,
     unnamed: 'Attachment',

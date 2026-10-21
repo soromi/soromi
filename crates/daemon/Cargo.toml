@@ -45,6 +45,7 @@ base64 = "0.22"
 getrandom = "0.2"
 if-addrs = "0.15.0"
 trash = "5.2.9"
+qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

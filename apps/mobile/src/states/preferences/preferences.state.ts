@@ -16,6 +16,9 @@ export const PreferencesStore = create<PreferencesType>()((set) => ({
   actions: {
     load: (preferences) => set(preferences),
     setView: (view) => set((state) => ({ home: { ...state.home, view } })),
+    setColumn: (column, width) =>
+      set((state) => ({ columns: { ...state.columns, [column]: width } })),
+    setAppearance: (appearance) => set({ appearance }),
     reset: () => {},
   },
 }))
