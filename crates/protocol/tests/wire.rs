@@ -5,9 +5,10 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use soromi_protocol::{
-    AccountProfile, AgentAccount, ClientMessage, DeviceSummary, DirEntry, EntryKind,
-    IncompatibleAction, KeepAwakeMode, PermissionMode, ProviderConfig, RemoteConfig, ServerMessage,
-    SessionMode, SessionSummary, SlashCommand, Status, SubAgent, WorkspaceSummary,
+    AccountProfile, AgentAccount, ChatCursor, ChatEvent, ChatFile, ClientMessage, DeviceRoute,
+    DeviceSummary, DirEntry, EntryKind, IncompatibleAction, KeepAwakeMode, PermissionMode,
+    ProviderConfig, RemoteConfig, RemoteDefaults, ServerMessage, SessionMode, SessionSummary,
+    SlashCommand, Status, SubAgent, WorkspaceSummary,
 };
 
 fn assert_client(msg: ClientMessage, expected: Value) {
@@ -33,6 +34,7 @@ fn client_attach_and_resize() {
     assert_client(
         ClientMessage::Attach {
             session: "s1".into(),
+            chat: None,
         },
         json!({ "type": "attach", "session": "s1" }),
     );
@@ -70,6 +72,73 @@ fn client_open_session_omits_absent_account() {
             "agent": "codex",
             "account": "work",
             "mode": "chat"
+        }),
+    );
+}
+
+#[test]
+fn client_register_push_carries_a_token_or_takes_it_back() {
+    assert_client(
+        ClientMessage::RegisterPush {
+            token: Some("ExponentPushToken[abc]".into()),
+        },
+        json!({ "type": "register-push", "token": "ExponentPushToken[abc]" }),
+    );
+    assert_client(
+        ClientMessage::RegisterPush { token: None },
+        json!({ "type": "register-push", "token": null }),
+    );
+    // A client may leave the token out to the same effect.
+    assert_eq!(
+        serde_json::from_value::<ClientMessage>(json!({ "type": "register-push" })).unwrap(),
+        ClientMessage::RegisterPush { token: None },
+    );
+}
+
+#[test]
+fn git_messages_name_the_folder_and_default_to_the_root() {
+    assert_client(
+        ClientMessage::GitStatus {
+            workspace: "kazomi".into(),
+            folder: "apps/web".into(),
+        },
+        json!({ "type": "git-status", "workspace": "kazomi", "folder": "apps/web" }),
+    );
+    assert_client(
+        ClientMessage::GitDiff {
+            workspace: "kazomi".into(),
+            folder: "".into(),
+            path: "src/a.ts".into(),
+            staged: true,
+        },
+        json!({
+            "type": "git-diff", "workspace": "kazomi", "folder": "", "path": "src/a.ts",
+            "staged": true
+        }),
+    );
+    // A client from before folders existed asks about the root.
+    assert_eq!(
+        serde_json::from_value::<ClientMessage>(
+            json!({ "type": "git-status", "workspace": "kazomi" })
+        )
+        .unwrap(),
+        ClientMessage::GitStatus {
+            workspace: "kazomi".into(),
+            folder: "".into(),
+        },
+    );
+    assert_server(
+        ServerMessage::GitDiff {
+            workspace: "kazomi".into(),
+            folder: "api".into(),
+            path: "main.rs".into(),
+            staged: false,
+            patch: "+x".into(),
+            truncated: false,
+        },
+        json!({
+            "type": "git-diff", "workspace": "kazomi", "folder": "api", "path": "main.rs",
+            "staged": false, "patch": "+x", "truncated": false
         }),
     );
 }
@@ -543,6 +612,7 @@ fn pairing_messages_carry_a_code_and_a_relay() {
                 name: "Phone".into(),
                 pairing_code: "soromi://pair#abc".into(),
                 connected: false,
+                route: None,
             },
         },
         json!({
@@ -560,11 +630,191 @@ fn pairing_messages_carry_a_code_and_a_relay() {
             config: RemoteConfig {
                 relay_url: "wss://relay.example".into(),
                 access_key: "secret".into(),
+                direct: false,
             },
         },
         json!({
             "type": "set-remote-config",
-            "config": { "relayUrl": "wss://relay.example", "accessKey": "secret" }
+            "config": { "relayUrl": "wss://relay.example", "accessKey": "secret", "direct": false }
         }),
+    );
+}
+
+#[test]
+fn a_device_is_told_its_direct_routes_and_the_desktop_which_route_it_is_on() {
+    assert_server(
+        ServerMessage::Routes {
+            routes: vec!["ws://192.168.1.20:8318".into()],
+        },
+        json!({ "type": "routes", "routes": ["ws://192.168.1.20:8318"] }),
+    );
+    // Turning direct access off is an empty list, which a device takes as "forget them".
+    assert_server(
+        ServerMessage::Routes { routes: Vec::new() },
+        json!({ "type": "routes", "routes": [] }),
+    );
+    assert_server(
+        ServerMessage::DeviceList {
+            devices: vec![DeviceSummary {
+                id: "d1".into(),
+                name: "Phone".into(),
+                pairing_code: "soromi://pair#abc".into(),
+                connected: true,
+                route: Some(DeviceRoute::Direct),
+            }],
+        },
+        json!({
+            "type": "device-list",
+            "devices": [{
+                "id": "d1",
+                "name": "Phone",
+                "pairingCode": "soromi://pair#abc",
+                "connected": true,
+                "route": "direct"
+            }]
+        }),
+    );
+    // The settings screen is told what was overridden (nothing here) and what an empty field means.
+    assert_server(
+        ServerMessage::RemoteConfig {
+            config: RemoteConfig {
+                relay_url: String::new(),
+                access_key: String::new(),
+                direct: true,
+            },
+            defaults: RemoteDefaults {
+                relay_url: "wss://relay.example".into(),
+                access_key: "soromi".into(),
+            },
+        },
+        json!({
+            "type": "remote-config",
+            "config": { "relayUrl": "", "accessKey": "", "direct": true },
+            "defaults": { "relayUrl": "wss://relay.example", "accessKey": "soromi" }
+        }),
+    );
+    // A settings message from before the option existed leaves direct access on.
+    let config: RemoteConfig =
+        serde_json::from_value(json!({ "relayUrl": "wss://r", "accessKey": "k" })).unwrap();
+    assert!(config.direct);
+}
+
+#[test]
+fn chat_is_numbered_so_a_viewport_can_come_back_to_it() {
+    // A returning viewport says how much it holds.
+    assert_client(
+        ClientMessage::Attach {
+            session: "s1".into(),
+            chat: Some(ChatCursor {
+                log: "a1b2".into(),
+                seq: 41,
+            }),
+        },
+        json!({ "type": "attach", "session": "s1", "chat": { "log": "a1b2", "seq": 41 } }),
+    );
+    assert_server(
+        ServerMessage::ChatResumed {
+            session: "s1".into(),
+        },
+        json!({ "type": "chat-resumed", "session": "s1" }),
+    );
+    assert_server(
+        ServerMessage::Chat {
+            session: "s1".into(),
+            events: vec![ChatEvent::Assistant { text: "hi".into() }],
+            seq: 42,
+        },
+        json!({
+            "type": "chat",
+            "session": "s1",
+            "events": [{ "kind": "assistant", "text": "hi" }],
+            "seq": 42
+        }),
+    );
+    assert_server(
+        ServerMessage::ChatReset {
+            session: "s1".into(),
+            log: "c3d4".into(),
+            seq: 7,
+        },
+        json!({ "type": "chat-reset", "session": "s1", "log": "c3d4", "seq": 7 }),
+    );
+}
+
+#[test]
+fn file_bytes_are_left_out_of_chat_and_fetched_by_place() {
+    // In a chat event the file is a stub; `deferred` is only written when set.
+    assert_server(
+        ServerMessage::Chat {
+            session: "s1".into(),
+            events: vec![ChatEvent::User {
+                text: "look".into(),
+                files: vec![ChatFile {
+                    media_type: "image/png".into(),
+                    data: String::new(),
+                    filename: Some("shot.png".into()),
+                    deferred: true,
+                }],
+            }],
+            seq: 3,
+        },
+        json!({
+            "type": "chat",
+            "session": "s1",
+            "events": [{
+                "kind": "user",
+                "text": "look",
+                "files": [{
+                    "mediaType": "image/png",
+                    "data": "",
+                    "filename": "shot.png",
+                    "deferred": true
+                }]
+            }],
+            "seq": 3
+        }),
+    );
+    assert_client(
+        ClientMessage::ChatFetchFile {
+            session: "s1".into(),
+            log: "c3d4".into(),
+            seq: 3,
+            index: 0,
+        },
+        json!({ "type": "chat-fetch-file", "session": "s1", "log": "c3d4", "seq": 3, "index": 0 }),
+    );
+    assert_server(
+        ServerMessage::ChatFileData {
+            session: "s1".into(),
+            log: "c3d4".into(),
+            seq: 3,
+            index: 0,
+            file: ChatFile {
+                media_type: "image/png".into(),
+                data: "aGk=".into(),
+                filename: None,
+                deferred: false,
+            },
+        },
+        json!({
+            "type": "chat-file-data",
+            "session": "s1",
+            "log": "c3d4",
+            "seq": 3,
+            "index": 0,
+            "file": { "mediaType": "image/png", "data": "aGk=" }
+        }),
+    );
+}
+
+#[test]
+fn a_terminal_reports_its_size() {
+    assert_server(
+        ServerMessage::TerminalSize {
+            session: "s1".into(),
+            cols: 120,
+            rows: 40,
+        },
+        json!({ "type": "terminal-size", "session": "s1", "cols": 120, "rows": 40 }),
     );
 }

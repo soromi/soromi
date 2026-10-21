@@ -112,13 +112,13 @@ The daemon owns the terminals, so any viewport that speaks the protocol can atta
 desktop app. A paired device gets the same live session: watch the output stream, type into it, run
 a skill, and answer permission prompts with a tap.
 
-> **Status:** the phone client is being rebuilt as a native mobile app and is not released yet. The
-> earlier browser client has been removed, so pairing a device has nothing to connect with until
-> the app ships. Everything below describes the link the app will use, which the daemon and relay
-> already implement.
+> **Status:** the phone client is a native mobile app (`apps/mobile`), in development and not
+> released yet. Today it can be run from source with Expo: it pairs, lists sessions live, and
+> follows and continues a chat. The earlier browser client has been removed.
 
-Control is exclusive and hands off cleanly. Move to the desktop app and it takes over; come back to
-the phone and it asks to take control again, so two devices never fight over the same terminal.
+Control is exclusive and hands off cleanly. One device drives the terminals at a time: it types and
+its window decides their size. Every other device keeps watching live, read-only, and takes over
+with one explicit action, so two devices never fight over the same terminal.
 
 ### Secure by design
 
@@ -127,7 +127,8 @@ middle can read your session:
 
 - **🔒 End-to-end encrypted.** Frames on the relay link are sealed with XChaCha20-Poly1305. The
   relay is a content-blind pipe that only ever forwards ciphertext, so it never sees your terminal,
-  keystrokes, or output.
+  keystrokes, or output. Every connection agrees on fresh keys, one per direction, and frames are
+  numbered, so a recorded frame cannot be played back later or turned around on its sender.
 - **🚪 No open ports.** The daemon *dials out* to the relay; it never listens for inbound
   connections. Nothing on your machine is exposed to the internet, so there's no port to scan or
   firewall to open.
@@ -138,9 +139,9 @@ middle can read your session:
   never rides along in the pairing code or in logs, and a leaked code can't expose it.
 - **📱 Per-device keys, revocable.** Pairing a phone (via QR) mints that device its own relay room
   and end-to-end key. Each paired device shows a live connection indicator, and you can revoke any
-  of them at any time from the paired-devices list. Rooms are strictly two-peer: even if a room id
-  leaked, an attacker would grab a slot at worst (a revocable nuisance) and still see nothing,
-  because the session is end-to-end encrypted.
+  of them at any time from the paired-devices list. A room holds one daemon and one device: even if a
+  room id leaked, an attacker could at worst take the device's place (a nuisance you end by revoking
+  the device) and still see nothing, because the session is end-to-end encrypted.
 - **🔑 No downgrade.** An invalid or missing key is refused rather than silently falling back to
   plaintext. Plaintext relay exists only for local development.
 - **🏠 Self-hostable.** Point the relay URL at your own infrastructure from Settings (or
@@ -250,7 +251,7 @@ the same way, just over a different transport.
 
 - **The daemon is the sole state authority.** Viewports never hold authoritative state; they render
   what the daemon sends and forward input and resize. Any viewport can drop and reattach, and
-  terminals replay their scrollback.
+  terminals are redrawn as they stand, scrollback included.
 - **Local and remote are the same client.** The transport is swappable (local WS vs. E2EE relay);
   everything above it is identical, so a feature works everywhere the moment it works once.
 - **The protocol is defined once.** The wire types live in Rust (`crates/protocol`) and the
@@ -280,11 +281,14 @@ crates/
   daemon/     Rust: PTY sessions, account resolution, status, agent hooks, WS server
 packages/
   protocol/   TypeScript types generated from crates/protocol (do not edit by hand)
-  client/     Shared viewport engine + transports (local WS, E2EE relay)
+  core/       What every client shares, no UI framework: transports (local WS, E2EE relay),
+              the store that mirrors the daemon, the pairing code
+  client/     The desktop's React bindings for core, and the xterm terminal
   relay/      Content-blind WebSocket relay that pairs a daemon with a remote viewport
   gui/        React + Zustand + xterm.js viewport (runs in the desktop app's webview)
 apps/
   desktop/    Electron app that spawns the daemon and renders the gui
+  mobile/     Expo (React Native) phone app, on core
 ```
 
 Each package and crate has a README describing its boundaries.

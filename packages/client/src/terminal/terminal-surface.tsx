@@ -13,7 +13,7 @@ import { useClientStore } from '../store/client-store'
 import styles from './terminal-surface.module.css'
 
 //Types
-import type { Transport } from '../transport/transport'
+import type { Transport } from '@soromi/core'
 
 interface TerminalSurfaceProps {
   transport: Transport
@@ -30,6 +30,10 @@ interface TerminalSurfaceProps {
  * One xterm bound to a session (tab). It mounts once and stays alive while its session exists
  * (a "parked buffer"): switching away hides it via CSS instead of unmounting, so its scrollback
  * and scroll position survive and it keeps receiving live output in the background.
+ *
+ * Only the viewport in control of the terminals types into them and decides their size, which it
+ * fits to its own pane. Any other watches: its terminal takes the size the daemon reports (output is
+ * drawn for that size, not for this pane) and its keystrokes go nowhere.
  */
 export function TerminalSurface({
   transport,
@@ -43,7 +47,7 @@ export function TerminalSurface({
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   // Whether this viewport controls the terminals: when it gains control it must re-fit and claim
-  // the size (the pane was already mounted behind the takeover, so nothing else triggers a resize).
+  // the size (until then the pane showed the terminal at the size of whoever was in control).
   const inControl = useClientStore((s) => s.controlHolder === null)
 
   useEffect(() => {
@@ -79,28 +83,46 @@ export function TerminalSurface({
       // DOM renderer stays.
     }
 
+    // Read at the moment of use: control can change hands while this terminal stays mounted.
+    const controls = () => useClientStore.getState().controlHolder === null
+
     const offOutput = transport.onOutput((target, data) => {
       if (target === session) term.write(data)
     })
+    // The daemon says what size the terminal is: on attach, ahead of the redraw, and whenever the
+    // viewport in control changes it. A viewport that is only watching follows. The change goes
+    // through the write queue so it lands between the output drawn for the old size and the new.
+    const offSize = transport.onMessage((message) => {
+      if (message.type !== 'terminal-size' || message.session !== session || controls()) return
+      const { cols, rows } = message
+      term.write('', () => {
+        if (!controls() && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows)
+      })
+    })
     const inputSub = term.onData((data) => {
-      transport.send({ type: 'input', session, data })
+      if (controls()) transport.send({ type: 'input', session, data })
     })
 
-    // Attach only after the terminal has real dimensions, so the snapshot replays at the right
-    // size (attaching first and resizing later reflows TUI content into garbage). Reconnect
-    // re-attaches; the snapshot's reset-prefix keeps that clean.
+    // Attach only once the pane is laid out. In control, that is when the terminal can be fitted
+    // to it and the size claimed, so the redraw arrives at the right size (attaching first and
+    // resizing later reflows TUI content into garbage). Reconnect re-attaches; the redraw's
+    // reset-prefix keeps that clean.
     let attached = false
     const syncSize = () => {
       if (!term.element || container.clientWidth === 0 || container.clientHeight === 0) return
-      try {
-        fit.fit()
-      } catch {
-        return
+      if (controls()) {
+        try {
+          fit.fit()
+        } catch {
+          return
+        }
+        transport.send({ type: 'resize', session, cols: term.cols, rows: term.rows })
       }
-      transport.send({ type: 'resize', session, cols: term.cols, rows: term.rows })
       if (!attached && transport.isOpen()) {
         attached = true
-        transport.send({ type: 'attach', session })
+        // The chat held from an earlier attach goes along, so only what was missed is sent again.
+        const chat = useClientStore.getState().chatCursor[session]
+        transport.send({ type: 'attach', session, chat })
       }
     }
 
@@ -124,6 +146,7 @@ export function TerminalSurface({
     return () => {
       observer.disconnect()
       offOutput()
+      offSize()
       offOpen()
       offReset()
       inputSub.dispose()
@@ -132,6 +155,12 @@ export function TerminalSurface({
       fitRef.current = null
     }
   }, [transport, session, background, foreground, fontSize])
+
+  // A terminal that is only being watched takes no keystrokes.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.disableStdin = !inControl
+  }, [inControl])
 
   // Refit and focus when this pane becomes the visible one, or when this viewport gains control (a
   // hidden pane can't be fitted; gaining control needs the size re-sent to claim the PTY).
@@ -153,7 +182,7 @@ export function TerminalSurface({
   }, [active, inControl, transport, session])
 
   return (
-    <div className={clsx(styles.pane, !active && styles.hidden)}>
+    <div className={clsx(styles.pane, !active && styles.hidden, !inControl && styles.watching)}>
       <div ref={containerRef} className={styles.terminal} />
     </div>
   )

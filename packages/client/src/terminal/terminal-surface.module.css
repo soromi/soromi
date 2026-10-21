@@ -17,6 +17,12 @@
   inset: 6px 8px;
 }
 
+/* A watched terminal has the size of the viewport in control, not of this pane: let it be scrolled
+   when it is the larger of the two. */
+.watching .terminal {
+  overflow: auto;
+}
+
 /* Subtle, theme-matched scrollbar for the xterm viewport. Vars come from the host app's globals. */
 .terminal :global(.xterm-viewport)::-webkit-scrollbar {
   width: 12px;

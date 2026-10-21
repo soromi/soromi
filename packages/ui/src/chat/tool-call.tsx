@@ -10,39 +10,30 @@ import {
   SquareTerminal,
   Wrench,
 } from 'lucide-react'
+import {
+  diffStat,
+  toolDiff,
+  toolHasBody,
+  toolOpensByDefault,
+  toolState,
+  toolTarget,
+  toolVerb,
+} from '@soromi/core'
 import { type ComponentType, useState } from 'react'
 
 //Types
+import type { ToolItem, ToolResult, ToolState } from '@soromi/core'
 import type { ToolKind } from '@soromi/protocol'
 
 //Utils
 import { cn } from '../lib/utils'
 
-export interface ToolResult {
-  ok: boolean
-  text: string
-}
+export type { ToolItem, ToolResult }
 
-export interface ToolCallProps {
-  /** The tool name (`Bash`, `Edit`, `Read`, `Agent`, …) — only the fallback label for `other` tools. */
-  name: string
-  /** The provider-agnostic category (from the daemon): picks the icon + verb, never the tool name. */
-  kind: ToolKind
-  /** The file the tool touched, shown inline in the header. */
-  path?: string
-  /** A one-glance summary of the call: a command, a diff, written content, a query. */
-  body?: string
-  /** The tool's result once it lands. */
-  result?: ToolResult
-}
+/** One tool call's data (see `ToolItem` in `@soromi/core`, shared with the mobile app). */
+export type ToolCallProps = ToolItem
 
-/** One tool call's data, shared by the single-call view and the grouped view. */
-export type ToolItem = ToolCallProps
-
-/** The past-tense verb that leads a tool row (`Edited`, `Ran`, `Read`, …). Used by group summaries. */
-export function toolVerb(kind: ToolKind, name: string): string {
-  return verbFor(kind, name)
-}
+export { toolVerb }
 
 // The mono panel shared by diffs, written content, and command output.
 const PANEL =
@@ -55,24 +46,22 @@ const PANEL =
  * (a shell command's output, a read) stay tucked behind the row and expand on click. Pairs a
  * transcript `tool` event with its matching `tool-result` so a call and its output read as one step.
  */
-export function ToolCall({ name, kind, path, body, result }: ToolCallProps) {
+export function ToolCall(tool: ToolCallProps) {
+  const { name, kind, body, result } = tool
   const Icon = iconFor(kind)
-  const diff = kind === 'edit' && body ? toDiff(body) : null
-  const stat = diff ? countStat(diff) : null
+  const diff = toolDiff(tool)
+  const stat = diff ? diffStat(diff) : null
 
   // The change matters, so edits/writes open by default; an error opens so the failure shows. Bash
   // and reads stay collapsed — their output is context, not the answer.
-  const opensByDefault = kind === 'edit' || kind === 'write' || (result != null && !result.ok)
-  const [open, setOpen] = useState(opensByDefault)
+  const [open, setOpen] = useState(toolOpensByDefault(tool))
 
-  const target = kind === 'run' ? firstLine(body) : (baseName(path) ?? firstLine(body))
+  const target = toolTarget(tool)
   // A skill row is a clean marker (icon + name); its "Launching skill …" result is noise, so the
   // row stays a non-expandable one-liner rather than hiding that behind a chevron.
-  const hasBody =
-    kind !== 'skill' &&
-    Boolean(diff || (kind === 'write' && body) || (kind === 'run' && body) || result)
+  const hasBody = toolHasBody(tool)
 
-  const state: State = result ? (result.ok ? 'done' : 'error') : 'running'
+  const state = toolState(tool)
 
   return (
     <div className="text-[13px]">
@@ -92,7 +81,7 @@ export function ToolCall({ name, kind, path, body, result }: ToolCallProps) {
           )}
         />
         <Icon className="h-3.5 w-3.5 flex-none text-[var(--soromi-text-faint)]" />
-        <span className="flex-none text-[var(--soromi-text-dim)]">{verbFor(kind, name)}</span>
+        <span className="flex-none text-[var(--soromi-text-dim)]">{toolVerb(kind, name)}</span>
         {target && (
           <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] text-[var(--soromi-text-faint)] [font-family:var(--soromi-font-mono)]">
             {target}
@@ -150,10 +139,8 @@ export function ToolCall({ name, kind, path, body, result }: ToolCallProps) {
   )
 }
 
-type State = 'running' | 'done' | 'error'
-
 /** A small status dot: amber (pulsing) while running, green done, red error. */
-function StatusDot({ state }: { state: State }) {
+function StatusDot({ state }: { state: ToolState }) {
   const color =
     state === 'done'
       ? 'bg-[var(--soromi-ok)]'
@@ -161,30 +148,6 @@ function StatusDot({ state }: { state: State }) {
         ? 'bg-[#f47070]'
         : 'bg-[var(--soromi-warn)] motion-safe:animate-status-pulse'
   return <span className={cn('h-[6px] w-[6px] flex-none rounded-full', color)} />
-}
-
-/** The muted verb that leads the row (past tense, like a work log). */
-function verbFor(kind: ToolKind, name: string): string {
-  switch (kind) {
-    case 'edit':
-      return 'Edited'
-    case 'write':
-      return 'Wrote'
-    case 'run':
-      return 'Ran'
-    case 'read':
-      return 'Read'
-    case 'search':
-      return 'Searched'
-    case 'agent':
-      return 'Agent'
-    case 'skill':
-      return 'Skill'
-    case 'plan':
-      return 'Plan'
-    default:
-      return name
-  }
 }
 
 function iconFor(kind: ToolKind): ComponentType<{ className?: string }> {
@@ -208,36 +171,4 @@ function iconFor(kind: ToolKind): ComponentType<{ className?: string }> {
     default:
       return Wrench
   }
-}
-
-function baseName(path: string | undefined): string | undefined {
-  if (!path) return undefined
-  const name = path.split('/').filter(Boolean).pop()
-  return name ?? path
-}
-
-function firstLine(text: string | undefined): string | undefined {
-  if (!text) return undefined
-  const line = text.split('\n', 1)[0].trim()
-  return line.length > 0 ? line : undefined
-}
-
-type DiffLine = { sign: '+' | '-' | ' '; text: string }
-
-function toDiff(body: string): DiffLine[] {
-  return body.split('\n').map((line) => {
-    if (line.startsWith('+ ')) return { sign: '+', text: line.slice(2) }
-    if (line.startsWith('- ')) return { sign: '-', text: line.slice(2) }
-    return { sign: ' ', text: line }
-  })
-}
-
-function countStat(diff: DiffLine[]): { add: number; del: number } {
-  let add = 0
-  let del = 0
-  for (const line of diff) {
-    if (line.sign === '+') add++
-    else if (line.sign === '-') del++
-  }
-  return { add, del }
 }

@@ -1,100 +1,49 @@
-.cover {
-  position: absolute;
-  inset: 0;
-  /* Above the terminal, contained to its stacking context by the deck's `isolation`. */
-  z-index: 30;
+.bar {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 40px;
-  text-align: center;
-  background: var(--soromi-bg-terminal, #0a0a0b);
-}
-
-/* Two overlapping devices: a laptop with a phone in front, the phone lit amber (it holds control). */
-.icon {
-  position: relative;
-  width: 88px;
-  height: 66px;
   flex: none;
-}
-
-.laptopScreen {
-  position: absolute;
-  left: 0;
-  top: 2px;
-  width: 60px;
-  height: 40px;
-  border-radius: 7px;
-  background: #141416;
-  border: 1.5px solid #2c2c31;
-}
-
-.laptopBase {
-  position: absolute;
-  left: 6px;
-  top: 42px;
-  width: 48px;
-  height: 4px;
-  border-radius: 2px;
-  background: #2c2c31;
-}
-
-.phone {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 34px;
-  height: 52px;
-  border-radius: 8px;
-  background: #161618;
-  border: 1.5px solid #37373d;
-  display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: -6px 0 16px rgb(0 0 0 / 50%);
+  gap: 10px;
+  padding: 7px 12px 7px 14px;
+  border-bottom: 1px solid var(--soromi-border, #26262b);
+  background: var(--soromi-bg-hover, #161618);
+  font-size: 12.5px;
+  color: #8a8a8e;
 }
 
-.phoneDot {
-  width: 11px;
-  height: 11px;
+/* Lit amber: another device holds control. */
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #e0b341;
-  box-shadow: 0 0 0 4px rgb(224 179 65 / 15%);
+  box-shadow: 0 0 0 3px rgb(224 179 65 / 15%);
   animation: takeover-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes takeover-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgb(224 179 65 / 15%);
+    box-shadow: 0 0 0 3px rgb(224 179 65 / 15%);
   }
 
   50% {
-    box-shadow: 0 0 0 8px rgb(224 179 65 / 0%);
+    box-shadow: 0 0 0 6px rgb(224 179 65 / 0%);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .phoneDot {
+  .dot {
     animation: none;
   }
 }
 
-.title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--soromi-text, #ededf0);
-}
-
-.desc {
-  margin-top: 6px;
-  max-width: 340px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: #8a8a8e;
+.text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .device {
@@ -103,15 +52,13 @@
 }
 
 .button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 20px;
+  flex: none;
+  padding: 5px 11px;
   border: none;
-  border-radius: 10px;
+  border-radius: 7px;
   background: #e0b341;
   color: #2a1e02;
-  font-size: 13.5px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.12s;

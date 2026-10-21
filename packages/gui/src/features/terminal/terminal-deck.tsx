@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
-import { TakeoverScreen, TerminalSurface, useClientStore } from '@soromi/client'
+import { TakeoverBar, TerminalSurface, useClientStore } from '@soromi/client'
 
 //Store
 import { useAppStore } from '@/stores/app-store'
@@ -111,8 +111,8 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
           )}
         </div>
       )}
-      {/* `isolate` keeps the takeover overlay's z-index contained to the terminal area, so it
-          can't paint over the status bar or its popups (usage / devices). */}
+      {/* Another device is in control: say so, and keep showing the sessions underneath. */}
+      <TakeoverBar />
       <div className="relative isolate flex min-h-0 flex-1 flex-col">
         {visited.map((id) => {
           // Chat panes render their whole transcript (streamdown markdown + shiki highlighting), which
@@ -135,7 +135,6 @@ export function TerminalDeck({ transport }: { transport: Transport }) {
             />
           )
         })}
-        <TakeoverScreen />
       </div>
     </div>
   )

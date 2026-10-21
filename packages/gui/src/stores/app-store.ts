@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 //Packages
+import { repoKey } from '@soromi/client'
 import type { WorkspaceInfo } from '@soromi/client'
 
 //Types
@@ -138,6 +139,8 @@ export type Overlay =
       id: string
       type: 'diff'
       workspace: string
+      /** The repository the file is in: a folder of the workspace, `''` for its root. */
+      folder: string
       path: string
       staged: boolean
       /** The unified diff, or null while it's being fetched. */
@@ -172,7 +175,12 @@ interface UiState {
   treeListings: Record<string, Record<string, DirEntry[]>>
   treeExpanded: Record<string, Record<string, boolean>>
   /** The git working-tree status per workspace (read-only source-control view). */
+  /** Git status per repository, by `repoKey(workspace, folder)`. */
   gitStatus: Record<string, GitStatusInfo>
+  /** The folder whose repository the Git tab shows, per workspace (`''`, the root, until chosen). */
+  gitFolder: Record<string, string>
+  /** The folders of each workspace that are repositories, as the daemon last listed them. */
+  gitRepos: Record<string, string[]>
   /** Ad-hoc shell terminals per workspace (Terminal tab), and the active one — in-memory only. */
   shells: Record<string, ShellTab[]>
   activeShell: Record<string, string>
@@ -201,10 +209,13 @@ interface UiState {
   reconcile: (workspaces: WorkspaceInfo[]) => void
   openFile: (workspace: string, path: string) => void
   /** Open a file's git diff in the docked panel (patch fetched, then filled by `setDiffPatch`). */
-  openDiff: (workspace: string, path: string, staged: boolean) => void
-  setGitStatus: (workspace: string, status: GitStatusInfo) => void
+  openDiff: (workspace: string, folder: string, path: string, staged: boolean) => void
+  setGitStatus: (workspace: string, folder: string, status: GitStatusInfo, repos: string[]) => void
+  /** Shows another of the workspace's repositories in the Git tab. */
+  selectGitFolder: (workspace: string, folder: string) => void
   setDiffPatch: (
     workspace: string,
+    folder: string,
     path: string,
     staged: boolean,
     patch: string,
@@ -244,6 +255,8 @@ export const useAppStore = create<UiState>()((set) => ({
   treeListings: {},
   treeExpanded: {},
   gitStatus: {},
+  gitFolder: {},
+  gitRepos: {},
   shells: {},
   activeShell: {},
   sidebarMode: 'files',
@@ -312,12 +325,13 @@ export const useAppStore = create<UiState>()((set) => ({
         top?.type === 'file' ? [...state.overlays.slice(0, -1), entry] : [...state.overlays, entry]
       return { overlays }
     }),
-  openDiff: (workspace, path, staged) =>
+  openDiff: (workspace, folder, path, staged) =>
     set((state) => {
       const entry: Overlay = {
         id: crypto.randomUUID(),
         type: 'diff',
         workspace,
+        folder,
         path,
         staged,
         patch: null,
@@ -331,8 +345,13 @@ export const useAppStore = create<UiState>()((set) => ({
           : [...state.overlays, entry]
       return { overlays }
     }),
-  setGitStatus: (workspace, status) =>
-    set((state) => ({ gitStatus: { ...state.gitStatus, [workspace]: status } })),
+  setGitStatus: (workspace, folder, status, repos) =>
+    set((state) => ({
+      gitStatus: { ...state.gitStatus, [repoKey(workspace, folder)]: status },
+      gitRepos: { ...state.gitRepos, [workspace]: repos },
+    })),
+  selectGitFolder: (workspace, folder) =>
+    set((state) => ({ gitFolder: { ...state.gitFolder, [workspace]: folder } })),
   openShell: (workspace, folder) => {
     const id = `shell:${crypto.randomUUID()}`
     const title = folder ? (folder.split('/').pop() ?? folder) : 'root'
@@ -374,10 +393,14 @@ export const useAppStore = create<UiState>()((set) => ({
         },
       }
     }),
-  setDiffPatch: (workspace, path, staged, patch, truncated) =>
+  setDiffPatch: (workspace, folder, path, staged, patch, truncated) =>
     set((state) => ({
       overlays: state.overlays.map((o) =>
-        o.type === 'diff' && o.workspace === workspace && o.path === path && o.staged === staged
+        o.type === 'diff' &&
+        o.workspace === workspace &&
+        o.folder === folder &&
+        o.path === path &&
+        o.staged === staged
           ? { ...o, patch, truncated }
           : o,
       ),

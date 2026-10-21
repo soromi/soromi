@@ -3,12 +3,13 @@
 //! ([`ExecChatSession`]). Both expose the same channels, so this enum is a thin dispatcher and the
 //! transport / chat UI never learn which backend a session uses.
 
+use std::sync::Arc;
+
 use tokio::sync::{broadcast, watch};
 
-use soromi_protocol::{
-    ChatEvent, ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval,
-};
+use soromi_protocol::{ChatFile, PermissionMode, SlashCommand, Status, SubAgent, ToolApproval};
 
+use super::chat_log::ChatLog;
 use super::delta::DeltaFrame;
 #[cfg(doc)]
 use super::delta::DeltaStream;
@@ -78,8 +79,9 @@ impl ChatSession {
     pub fn subscribe_status(&self) -> watch::Receiver<Status> {
         dispatch!(self, subscribe_status())
     }
-    pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
-        dispatch!(self, subscribe_chat())
+    /// The transcript, for viewers to follow.
+    pub fn chat_log(&self) -> &Arc<ChatLog> {
+        dispatch!(self, chat_log())
     }
     /// The streaming text so far plus a feed of each change after it (see [`DeltaStream::attach`]).
     pub fn delta_attach(&self) -> (String, broadcast::Receiver<DeltaFrame>) {
@@ -111,15 +113,6 @@ impl ChatSession {
     }
     pub fn subscribe_context(&self) -> watch::Receiver<Option<u32>> {
         dispatch!(self, subscribe_context())
-    }
-    pub fn chat_snapshot(&self) -> Vec<ChatEvent> {
-        dispatch!(self, chat_snapshot())
-    }
-    pub fn chat_tail(&self, limit: usize) -> (Vec<ChatEvent>, bool) {
-        dispatch!(self, chat_tail(limit))
-    }
-    pub fn chat_earlier(&self, loaded: usize, count: usize) -> (Vec<ChatEvent>, bool) {
-        dispatch!(self, chat_earlier(loaded, count))
     }
     pub fn shutdown(&self) {
         dispatch!(self, shutdown())

@@ -25,7 +25,7 @@ async fn main() {
         return;
     }
 
-    let notifications = Arc::new(NotificationController::new(create_notifier()));
+    let notifications = Arc::new(NotificationController::standard(create_notifier()));
     let keep_awake = Arc::new(KeepAwakeController::new(
         create_keep_awake(),
         KeepAwakeMode::Off,
@@ -74,12 +74,14 @@ async fn main() {
     // reach this daemon off-network.
     soromi_daemon::transport::relay::spawn_from_env(hub.clone(), accounts.clone());
 
-    // Paired devices: dial the relay per device; the local link can create/list/revoke them.
+    // Paired devices: dial the relay per device, and listen for them on the network so one nearby
+    // can skip the relay; the local link can create/list/revoke them.
     let pairing = soromi_daemon::pairing::PairingService::new(
         hub.clone(),
         accounts.clone(),
         soromi_daemon::pairing::relay_url(),
         soromi_daemon::pairing::access_key(),
+        soromi_daemon::pairing::direct_settings(),
     );
 
     tokio::select! {

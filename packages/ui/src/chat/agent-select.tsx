@@ -9,17 +9,10 @@ import {
 } from '../components/ui/dropdown-menu'
 import { ProviderIcon } from '../icons/provider-icon'
 
-/** One agent the session can run under: a provider (`claude`, `codex`, …) and the account it binds to. */
-export interface AgentOption {
-  /** The provider key (`claude`, `codex`, `grok`). */
-  agent: string
-  /** The account to bind when switching to it; omit when the workspace already binds this agent. */
-  account?: string
-  /** The account name shown in the menu (e.g. `bookr`). */
-  accountLabel: string
-  /** The provider's display name (e.g. `Claude`). */
-  label: string
-}
+//Types
+import type { AgentOption } from '@soromi/core'
+
+export type { AgentOption }
 
 /**
  * The composer's agent badge — which provider + account the chat runs under. With more than one

@@ -23,8 +23,9 @@ use soromi_protocol::{
 };
 
 use crate::providers::{ChatFrame, Provider};
+use crate::sessions::chat_log::ChatLog;
 use crate::sessions::delta::{DeltaFrame, DeltaStream};
-use crate::sessions::session::track_subagents;
+use crate::sessions::subagents::Subagents;
 
 const CHAT_CAPACITY: usize = 512;
 
@@ -42,8 +43,7 @@ pub struct StreamJsonSession {
     stdin: Arc<tokio::sync::Mutex<ChildStdin>>,
     status_tx: Arc<watch::Sender<Status>>,
     status_rx: watch::Receiver<Status>,
-    chat_tx: broadcast::Sender<ChatEvent>,
-    chat_log: Arc<Mutex<Vec<ChatEvent>>>,
+    chat_log: Arc<ChatLog>,
     // The assistant message currently streaming in, token by token (from `stream_event` deltas). It
     // is not part of `chat_log` — the complete `assistant` frame commits that.
     delta: Arc<DeltaStream>,
@@ -56,11 +56,10 @@ pub struct StreamJsonSession {
     // Set when we send an interrupt; the CLI then reports the stop as a `user` message, which the
     // reader converts to a `Notice` (so the UI knows it was interrupted without matching the text).
     interrupted: Arc<AtomicBool>,
-    // Sub-agents (`Task` calls) running this turn, keyed by tool id. Mirrors the PTY session's
-    // tracking so a chat tab can show "N agents working in the background" over its composer.
-    // Shared with the reader task (which drives them via clones); `send_turn` also clears them to
-    // reset the panel on a fresh turn.
-    active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    // The agents the agent has running beside it. Mirrors the PTY session's tracking so a chat tab
+    // can show "N agents working in the background" over its composer. Shared with the reader task
+    // (which drives it via clones); `send_turn` also settles it when a fresh turn begins.
+    active_subagents: Arc<Mutex<Subagents>>,
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     subagents_rx: watch::Receiver<Vec<SubAgent>>,
     // The provider's slash commands ("actions"), captured once from the `system/init` frame. Empty
@@ -126,14 +125,13 @@ impl StreamJsonSession {
 
         let (status_tx, status_rx) = watch::channel(Status::Idle);
         let status_tx = Arc::new(status_tx);
-        let (chat_tx, _) = broadcast::channel(CHAT_CAPACITY);
-        let chat_log = Arc::new(Mutex::new(seed));
+        let chat_log = Arc::new(ChatLog::new(seed));
         let delta = Arc::new(DeltaStream::new(CHAT_CAPACITY));
         let (approval_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (resolved_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let pending: Arc<Mutex<HashMap<String, Pending>>> = Arc::new(Mutex::new(HashMap::new()));
         let interrupted = Arc::new(AtomicBool::new(false));
-        let active_subagents = Arc::new(Mutex::new(Vec::new()));
+        let active_subagents = Arc::new(Mutex::new(Subagents::default()));
         let (subagents_tx, subagents_rx) = watch::channel(Vec::new());
         let subagents_tx = Arc::new(subagents_tx);
         // Seed the `/` menu with the provider's built-in commands so it works before the first turn —
@@ -166,7 +164,6 @@ impl StreamJsonSession {
         let reader = spawn_reader(
             stdout,
             provider,
-            chat_tx.clone(),
             chat_log.clone(),
             status_tx.clone(),
             delta.clone(),
@@ -186,7 +183,6 @@ impl StreamJsonSession {
             stdin,
             status_tx,
             status_rx,
-            chat_tx,
             chat_log,
             delta,
             approval_tx,
@@ -240,12 +236,11 @@ impl StreamJsonSession {
         // A fresh turn drops any leftover streaming partial; steering leaves the live reply intact.
         if !steering {
             self.delta.reset();
-            // Reset the background sub-agent panel — the last turn's agents don't belong to this one.
+            // The last turn's own agents do not belong to this one. Background ones carry on.
             if let Ok(mut active) = self.active_subagents.lock()
-                && !active.is_empty()
+                && active.settle()
             {
-                active.clear();
-                let _ = self.subagents_tx.send(Vec::new());
+                let _ = self.subagents_tx.send(active.list());
             }
         }
         // Record the prompt with its attachments so the bubble can show inline thumbnails (the wire
@@ -254,10 +249,7 @@ impl StreamJsonSession {
             text: text.to_string(),
             files: files.to_vec(),
         };
-        if let Ok(mut log) = self.chat_log.lock() {
-            log.push(event.clone());
-        }
-        let _ = self.chat_tx.send(event);
+        self.chat_log.push(event);
     }
 
     /// Interrupts the current turn (the composer's stop button): sends the stream-json `interrupt`
@@ -376,7 +368,7 @@ impl StreamJsonSession {
         self.status_rx.clone()
     }
 
-    /// The sub-agents (`Task` calls) running this turn, for the chat tab's "agents working" panel.
+    /// The agents running beside this session's agent, for the chat tab's "agents working" panel.
     pub fn subagents(&self) -> Vec<SubAgent> {
         self.subagents_rx.borrow().clone()
     }
@@ -413,36 +405,10 @@ impl StreamJsonSession {
         let _ = self.status_tx.send(Status::Thinking);
     }
 
-    pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
-        self.chat_tx.subscribe()
-    }
-
-    pub fn chat_snapshot(&self) -> Vec<ChatEvent> {
-        self.chat_log
-            .lock()
-            .map(|log| log.clone())
-            .unwrap_or_default()
-    }
-
-    /// The most recent `limit` events, plus whether older ones remain. The viewport loads only this
-    /// tail on attach (a long transcript is thousands of markdown trees), and pages back on demand.
-    pub fn chat_tail(&self, limit: usize) -> (Vec<ChatEvent>, bool) {
-        let Ok(log) = self.chat_log.lock() else {
-            return (Vec::new(), false);
-        };
-        let start = log.len().saturating_sub(limit);
-        (log[start..].to_vec(), start > 0)
-    }
-
-    /// The `count` events just before the `loaded` most recent the viewport already holds (a contiguous
-    /// suffix), plus whether older ones remain. Serves the "Load earlier" page.
-    pub fn chat_earlier(&self, loaded: usize, count: usize) -> (Vec<ChatEvent>, bool) {
-        let Ok(log) = self.chat_log.lock() else {
-            return (Vec::new(), false);
-        };
-        let oldest = log.len().saturating_sub(loaded);
-        let start = oldest.saturating_sub(count);
-        (log[start..oldest].to_vec(), start > 0)
+    /// The transcript, for viewers to follow. A viewport loads only its tail on attach (a long one
+    /// is thousands of markdown trees) and pages back on demand.
+    pub fn chat_log(&self) -> &Arc<ChatLog> {
+        &self.chat_log
     }
 
     /// The assistant text streaming in right now (empty when nothing is mid-stream) and a feed of how
@@ -477,14 +443,13 @@ impl Drop for StreamJsonSession {
 fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
     stdout: R,
     provider: &'static dyn Provider,
-    chat_tx: broadcast::Sender<ChatEvent>,
-    chat_log: Arc<Mutex<Vec<ChatEvent>>>,
+    chat_log: Arc<ChatLog>,
     status_tx: Arc<watch::Sender<Status>>,
     delta: Arc<DeltaStream>,
     approval_tx: broadcast::Sender<ToolApproval>,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     interrupted: Arc<AtomicBool>,
-    active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    active_subagents: Arc<Mutex<Subagents>>,
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     commands_tx: Arc<watch::Sender<Vec<SlashCommand>>>,
     context_tx: Arc<watch::Sender<Option<u32>>>,
@@ -497,18 +462,18 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
         move || delta.reset()
     };
 
-    // Empties the "agents working in the background" panel. Called when the turn stops actively
-    // thinking (settles Idle, or pauses for a plan/tool approval): background sub-agents shown then are
-    // stale — the ones that fed a plan are done, and any still running re-appear on their next frame.
-    let clear_subagents = {
+    // Drops the agents that ran within the turn from the "agents working" panel. Called when the
+    // turn stops (settles Idle, or pauses for a plan/tool approval): those are done with. An agent
+    // in the background is not, and stays until the provider says it stopped; it is often the very
+    // reason the turn ended ("I'm waiting on the mapping to finish").
+    let settle_subagents = {
         let active_subagents = active_subagents.clone();
         let subagents_tx = subagents_tx.clone();
         move || {
             if let Ok(mut active) = active_subagents.lock()
-                && !active.is_empty()
+                && active.settle()
             {
-                active.clear();
-                let _ = subagents_tx.send(Vec::new());
+                let _ = subagents_tx.send(active.list());
             }
         }
     };
@@ -521,6 +486,15 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
             // The provider owns which of its frames/fields carry this.
             if let Some(update) = provider.context_tokens(&line) {
                 let _ = context_tx.send(update);
+            }
+            // What the frame says of agents in the background, whatever else it is: most such
+            // frames carry nothing for the conversation. Taken in ahead of the frame's own events.
+            let tasks = provider.task_signals(&line);
+            if !tasks.is_empty()
+                && let Ok(mut active) = active_subagents.lock()
+                && active.apply(&tasks, &[])
+            {
+                let _ = subagents_tx.send(active.list());
             }
             match provider.parse_chat_frame(&line) {
                 ChatFrame::Events(events) => {
@@ -550,22 +524,15 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                     {
                         let _ = status_tx.send(Status::Thinking);
                     }
-                    if let Ok(mut log) = chat_log.lock() {
-                        log.extend(events.iter().cloned());
-                    }
-                    // Update the running sub-agent set (a `Task` starts one, its result ends it) so the
-                    // chat tab can show them over the composer. Only republish on a real change.
+                    // Update the running agents (a tool call starts one; its return ends it, unless
+                    // it went to the background) so the chat tab can show them over the composer.
+                    // Only republish on a real change.
                     if let Ok(mut active) = active_subagents.lock()
-                        && track_subagents(&mut active, &events, |t| {
-                            provider.is_subagent_launch_ack(t)
-                        })
+                        && active.apply(&[], &events)
                     {
-                        let list = active.iter().map(|(_, agent)| agent.clone()).collect();
-                        let _ = subagents_tx.send(list);
+                        let _ = subagents_tx.send(active.list());
                     }
-                    for event in events {
-                        let _ = chat_tx.send(event);
-                    }
+                    chat_log.extend(events);
                 }
                 ChatFrame::Delta(text) => {
                     // Streaming tokens mean the agent is generating: restore Thinking if a prior
@@ -580,8 +547,8 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         clear_partial();
                         // Turn ended; don't let a never-delivered interrupt marker leak to the next.
                         interrupted.store(false, Ordering::Relaxed);
-                        // The turn is over: clear any lingering "agents working" entries.
-                        clear_subagents();
+                        // The turn is over, and with it the agents that ran inside it.
+                        settle_subagents();
                     }
                     // Every turn ends with exactly one `result`, so this always settles the status —
                     // it can never get stuck on "working". A follow-up sent mid-turn that the CLI runs
@@ -627,9 +594,9 @@ fn spawn_reader<R: AsyncRead + Unpin + Send + 'static>(
                         }
                         let _ = approval_tx.send(approval);
                         let _ = status_tx.send(Status::WaitingInput);
-                        // Paused for the user (a plan/tool approval): the background sub-agents that
-                        // led here are done, so don't keep showing them as "working".
-                        clear_subagents();
+                        // Paused for the user (a plan/tool approval): the agents that ran within
+                        // the turn so far are done.
+                        settle_subagents();
                     }
                 }
                 ChatFrame::Commands(list) => {

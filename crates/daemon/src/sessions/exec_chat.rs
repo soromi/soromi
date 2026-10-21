@@ -17,6 +17,7 @@ use soromi_protocol::{
 };
 
 use crate::providers::{ChatFrame, Provider};
+use crate::sessions::chat_log::ChatLog;
 use crate::sessions::delta::{DeltaFrame, DeltaStream};
 
 const CHAT_CAPACITY: usize = 512;
@@ -36,8 +37,7 @@ pub struct ExecChatSession {
 
     status_tx: Arc<watch::Sender<Status>>,
     status_rx: watch::Receiver<Status>,
-    chat_tx: broadcast::Sender<ChatEvent>,
-    chat_log: Arc<Mutex<Vec<ChatEvent>>>,
+    chat_log: Arc<ChatLog>,
     delta: DeltaStream,
     // Approvals / sub-agents / slash commands aren't surfaced by a per-turn provider yet — empty
     // channels for interface parity with `StreamJsonSession`.
@@ -65,7 +65,6 @@ impl ExecChatSession {
         effort: Option<String>,
     ) -> anyhow::Result<Self> {
         let (status_tx, status_rx) = watch::channel(Status::Idle);
-        let (chat_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (approval_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (resolved_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (_subagents_tx, subagents_rx) = watch::channel(Vec::new());
@@ -83,8 +82,7 @@ impl ExecChatSession {
             child: Arc::new(tokio::sync::Mutex::new(None)),
             status_tx: Arc::new(status_tx),
             status_rx,
-            chat_tx,
-            chat_log: Arc::new(Mutex::new(seed)),
+            chat_log: Arc::new(ChatLog::new(seed)),
             delta: DeltaStream::new(CHAT_CAPACITY),
             approval_tx,
             resolved_tx,
@@ -102,10 +100,7 @@ impl ExecChatSession {
             text: text.to_string(),
             files: Vec::new(),
         };
-        if let Ok(mut log) = self.chat_log.lock() {
-            log.push(user.clone());
-        }
-        let _ = self.chat_tx.send(user);
+        self.chat_log.push(user);
         let _ = self.status_tx.send(Status::Thinking);
 
         let (model, effort) = self.model.lock().unwrap().clone();
@@ -139,7 +134,7 @@ impl ExecChatSession {
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(error) => {
-                let _ = self.chat_tx.send(ChatEvent::Notice {
+                self.chat_log.push(ChatEvent::Notice {
                     text: format!("Couldn't start {}: {error}", self.program),
                 });
                 let _ = self.status_tx.send(Status::Idle);
@@ -171,12 +166,7 @@ impl ExecChatSession {
             ChatFrame::Events(events) => {
                 // The complete frame commits the message; drop the streaming stand-in.
                 self.delta.reset();
-                if let Ok(mut log) = self.chat_log.lock() {
-                    log.extend(events.iter().cloned());
-                }
-                for event in events {
-                    let _ = self.chat_tx.send(event);
-                }
+                self.chat_log.extend(events);
             }
             ChatFrame::Delta(text) => {
                 self.delta.append(&text);
@@ -227,8 +217,9 @@ impl ExecChatSession {
     pub fn subscribe_status(&self) -> watch::Receiver<Status> {
         self.status_rx.clone()
     }
-    pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
-        self.chat_tx.subscribe()
+    /// The transcript, for viewers to follow.
+    pub fn chat_log(&self) -> &Arc<ChatLog> {
+        &self.chat_log
     }
     pub fn delta_attach(&self) -> (String, broadcast::Receiver<DeltaFrame>) {
         self.delta.attach()
@@ -259,27 +250,6 @@ impl ExecChatSession {
     }
     pub fn subscribe_context(&self) -> watch::Receiver<Option<u32>> {
         self.context_rx.clone()
-    }
-    pub fn chat_snapshot(&self) -> Vec<ChatEvent> {
-        self.chat_log
-            .lock()
-            .map(|log| log.clone())
-            .unwrap_or_default()
-    }
-    pub fn chat_tail(&self, limit: usize) -> (Vec<ChatEvent>, bool) {
-        let Ok(log) = self.chat_log.lock() else {
-            return (Vec::new(), false);
-        };
-        let start = log.len().saturating_sub(limit);
-        (log[start..].to_vec(), start > 0)
-    }
-    pub fn chat_earlier(&self, loaded: usize, count: usize) -> (Vec<ChatEvent>, bool) {
-        let Ok(log) = self.chat_log.lock() else {
-            return (Vec::new(), false);
-        };
-        let oldest = log.len().saturating_sub(loaded);
-        let start = oldest.saturating_sub(count);
-        (log[start..oldest].to_vec(), start > 0)
     }
 
     /// Kills any in-flight turn (best-effort; the process is also `kill_on_drop`).

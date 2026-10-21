@@ -3,5 +3,12 @@
 /**
  * A file pasted or attached to a chat turn: base64 `data` plus its MIME type. Images and PDFs go to
  * the agent as image / document content blocks; text files are inlined as text.
+ *
+ * In chat events sent to a viewport the bytes are left out: `data` is empty and `deferred` is set.
+ * The viewport asks for them with `ChatFetchFile` when it shows the file.
  */
-export type ChatFile = { mediaType: string, data: string, filename?: string, };
+export type ChatFile = { mediaType: string, data: string, filename?: string, 
+/**
+ * The bytes were left out of this copy and are fetched on demand.
+ */
+deferred?: boolean, };

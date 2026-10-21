@@ -23,6 +23,12 @@ const POPUP_BODY = 'flex flex-col gap-2 p-2.5'
 const PRIMARY =
   'cursor-pointer appearance-none rounded-[9px] border-none bg-[var(--soromi-accent)] p-2.5 font-bold text-[13px] text-[var(--soromi-accent-on)]'
 
+/** How a device is connected, in a few words: by which route, or not at all. */
+function deviceState(device: DeviceSummary): string {
+  if (!device.connected) return 'Offline'
+  return device.route === 'direct' ? 'Connected · Local network' : 'Connected · Relay'
+}
+
 /**
  * Connected-devices control on the right of the status bar. Opens a popup upward to list paired
  * devices (revoke them) and pair a new one (name -> QR), all over the local link.
@@ -127,11 +133,11 @@ export function DevicesWidget() {
                               ? 'bg-[var(--soromi-accent)]'
                               : 'bg-[var(--soromi-text-faint)]',
                           )}
-                          title={device.connected ? 'Connected' : 'Offline'}
+                          title={deviceState(device)}
                         />
                         {device.name}
                         <span className="text-[11.5px] text-[var(--soromi-text-faint)]">
-                          {device.connected ? 'Connected' : 'Offline'}
+                          {deviceState(device)}
                         </span>
                       </span>
                       <button

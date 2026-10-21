@@ -1,14 +1,8 @@
+import { commandText, matchCommands } from '@soromi/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 //Types
 import type { SlashCommand } from '@soromi/protocol'
-
-/** The command query while typing a slash command: the text after a leading `/` with no space yet
- * (e.g. "re" for "/re"), or null when the input isn't a bare slash command. */
-function slashQuery(value: string): string | null {
-  const match = /^\/(\S*)$/.exec(value)
-  return match ? match[1] : null
-}
 
 export interface SlashMenuState {
   /** Attach to the composer wrapper: scopes the capture-phase key interception. */
@@ -48,20 +42,18 @@ export function useSlashMenu(
   const [selected, setSelected] = useState(0)
   const [dismissed, setDismissed] = useState(false)
 
-  const query = enabled && commands.length > 0 ? slashQuery(value) : null
-  const matches = useMemo(() => {
-    if (query === null) return []
-    const q = query.toLowerCase()
-    return commands.filter((command) => command.name.toLowerCase().startsWith(q))
-  }, [commands, query])
+  const matches = useMemo(
+    () => (enabled ? matchCommands(commands, value) : []),
+    [commands, enabled, value],
+  )
   const open = matches.length > 0 && !dismissed
   const selectedIndex = Math.min(selected, Math.max(0, matches.length - 1))
 
   const apply = useCallback(
     (command: SlashCommand) => {
       // Trailing space so the user can type arguments right after the command.
-      write(`/${command.name} `)
-      setValue(`/${command.name} `)
+      write(commandText(command))
+      setValue(commandText(command))
       setDismissed(true)
     },
     [write],

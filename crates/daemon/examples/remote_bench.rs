@@ -21,7 +21,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use soromi_daemon::transport::codec::Codec;
+use soromi_daemon::transport::codec::{Codec, Received};
 use soromi_protocol::{PROTOCOL_VERSION, TERMINAL_OUTPUT};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -68,6 +68,8 @@ enum Incoming {
     Terminal(usize),
     /// The relay reporting whether the daemon is in the room.
     Presence(bool),
+    /// The daemon accepting the encrypted session this client asked for.
+    Accepted,
 }
 
 struct Link {
@@ -102,8 +104,10 @@ impl Link {
                     value["peers"].as_u64().unwrap_or(0) > 1,
                 )));
             }
-            let Some(payload) = self.codec.open(frame) else {
-                continue;
+            let payload = match self.codec.receive(frame) {
+                Received::Payload(payload) => payload,
+                Received::Accepted => return Ok(Some(Incoming::Accepted)),
+                _ => continue,
             };
             if payload.first() == Some(&TERMINAL_OUTPUT) {
                 return Ok(Some(Incoming::Terminal(size)));
@@ -138,7 +142,9 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 async fn run(args: Args) -> Result<(), String> {
     let codec = match &args.key {
-        Some(key) => Codec::from_key_base64(key).ok_or("--key is not a base64 32-byte key")?,
+        Some(key) => {
+            Codec::device_from_key_base64(key).ok_or("--key is not a base64 32-byte key")?
+        }
         None => Codec::Plain,
     };
     let through_relay = args.key.is_some();
@@ -160,6 +166,19 @@ async fn run(args: Args) -> Result<(), String> {
             }
         }
         println!("daemon present after {:.0?}", started.elapsed());
+    }
+
+    // An encrypted link carries nothing until the daemon accepts a session.
+    if let Some(open) = link.codec.open_session() {
+        link.socket.send(open).await.map_err(|e| e.to_string())?;
+        loop {
+            match link.next(Duration::from_secs(5)).await? {
+                Some(Incoming::Accepted) => break,
+                Some(_) => continue,
+                None => return Err("the daemon did not accept an encrypted session".to_string()),
+            }
+        }
+        println!("session on after {:.0?}", started.elapsed());
     }
 
     link.send(json!({
@@ -259,7 +278,7 @@ async fn run(args: Args) -> Result<(), String> {
         let left = deadline.saturating_duration_since(Instant::now());
         let (kind, size) = match link.next(left).await? {
             None => break,
-            Some(Incoming::Presence(_)) => continue,
+            Some(Incoming::Presence(_) | Incoming::Accepted) => continue,
             Some(Incoming::Terminal(size)) => ("terminal".to_string(), size),
             Some(Incoming::Json(value, size)) => (
                 value["type"].as_str().unwrap_or("unknown").to_string(),

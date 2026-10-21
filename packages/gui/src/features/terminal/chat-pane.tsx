@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 //Packages
-import { useClientStore } from '@soromi/client'
+import { deferredFiles, useClientStore } from '@soromi/client'
 import { cn } from '@soromi/ui'
 import { ChatView, contextLimitFor } from '@soromi/ui/chat'
 
@@ -36,6 +36,7 @@ export function ChatPane({
   active: boolean
 }) {
   const events = useClientStore((s) => s.chat[session])
+  const cursor = useClientStore((s) => s.chatCursor[session])
   const streaming = useClientStore((s) => s.chatDelta[session])
   const approvals = useClientStore((s) => s.chatApproval[session])
   const canLoadEarlier = useClientStore((s) => s.chatEarlier[session] ?? false)
@@ -71,15 +72,37 @@ export function ChatPane({
   }
   const workingSince = working ? (turnStartedAt.get(session) ?? null) : null
 
-  // Attach so the daemon replays the transcript-so-far and streams new chat/status into the store.
-  // Re-attach whenever the transport (re)opens, so a not-yet-connected mount still lands.
+  // Attach so the daemon brings the chat in the store up to date and streams what follows. The
+  // cursor of what is already held goes along, so a remount or a reconnect is sent only what was
+  // missed. Re-attach whenever the transport (re)opens, so a not-yet-connected mount still lands.
+  const [link, setLink] = useState(0)
   useEffect(() => {
     const doAttach = () => {
-      if (transport.isOpen()) transport.send({ type: 'attach', session })
+      if (!transport.isOpen()) return
+      const chat = useClientStore.getState().chatCursor[session]
+      transport.send({ type: 'attach', session, chat })
     }
     doAttach()
-    return transport.onOpen(doAttach)
+    return transport.onOpen(() => {
+      doAttach()
+      setLink((n) => n + 1)
+    })
   }, [transport, session])
+
+  // Chat events come without the bytes of attached files. Ask for the ones in the messages loaded
+  // here, once the chat is on screen; each is asked for once per connection (an answer lost to a
+  // dropped link is asked for again on the next).
+  const asked = useRef({ link: -1, files: new Set<string>() })
+  useEffect(() => {
+    if (!active || !events || !cursor) return
+    if (asked.current.link !== link) asked.current = { link, files: new Set() }
+    for (const { seq, index } of deferredFiles({ events, cursor })) {
+      const key = `${cursor.log}:${seq}:${index}`
+      if (asked.current.files.has(key)) continue
+      asked.current.files.add(key)
+      transport.send({ type: 'chat-fetch-file', session, log: cursor.log, seq, index })
+    }
+  }, [active, events, cursor, link, transport, session])
 
   return (
     <div className={cn('absolute inset-0', !active && 'hidden')}>

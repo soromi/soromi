@@ -3,13 +3,80 @@
 //! `security`/`osascript`/…); it never mutates the repo. Staging, commit, and friends live behind
 //! the future write path — see `plans/git-tab-readonly.md`.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use soromi_protocol::{GitChange, GitStatusInfo};
 
 /// A single diff won't stream more than this; a larger one is clipped and flagged `truncated`.
 const MAX_DIFF: usize = 400 * 1024;
+/// The most repositories offered for one workspace: past this the list is no longer a choice.
+const MAX_REPOS: usize = 64;
+
+/// The directory `folder` names under `root` ("" or "." = `root` itself), or `None` if it is not a
+/// plain path down from it: absolute, or with a `..` in it.
+pub fn inside(root: &Path, folder: &str) -> Option<PathBuf> {
+    let mut dir = root.to_path_buf();
+    for part in Path::new(folder).components() {
+        match part {
+            Component::Normal(name) => dir.push(name),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(dir)
+}
+
+/// Whether `dir` is in a git working tree: a repository's own folder, or one below it.
+pub fn is_repo(dir: &Path) -> bool {
+    toplevel(dir).is_some()
+}
+
+/// The top of the working tree `dir` is in.
+fn toplevel(dir: &Path) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let top = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!top.is_empty()).then(|| PathBuf::from(top))
+}
+
+/// The repositories of a workspace, as folders relative to `root` ("" = `root`), the root first and
+/// the rest by name: the root if it is in a working tree, and every folder that is a repository
+/// of its own among the ones the workspace is made of (`folders`) and the directories right under
+/// the root. A folder that only sits inside the root's repository is part of that one.
+pub fn repos(root: &Path, folders: &[String]) -> Vec<String> {
+    let own = |dir: &Path| dir.join(".git").exists();
+    let mut found: Vec<String> = folders
+        .iter()
+        .filter(|folder| !folder.is_empty() && folder.as_str() != ".")
+        .filter(|folder| inside(root, folder).is_some_and(|dir| own(&dir)))
+        .cloned()
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if !name.starts_with('.') && own(&entry.path()) {
+                found.push(name);
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    found.truncate(MAX_REPOS);
+    if is_repo(root) {
+        found.insert(0, String::new());
+    }
+    found
+}
 
 /// The git working-tree status for `root`. Returns `is_repo: false` (not an error) when `root` isn't
 /// a git repository, so the caller can render an empty state.
@@ -40,6 +107,9 @@ pub fn status(root: &Path) -> GitStatusInfo {
 /// worktree diff. Untracked files have no diff against the index, so their whole content is shown as
 /// an addition via `--no-index` against `/dev/null`. Returns `(patch, truncated)`.
 pub fn diff(root: &Path, path: &str, staged: bool) -> (String, bool) {
+    // A status lists paths from the top of the working tree, wherever in it it was asked for.
+    let top = toplevel(root);
+    let root = top.as_deref().unwrap_or(root);
     let mut command = Command::new("git");
     command.arg("-C").arg(root).arg("diff");
     if staged {
@@ -168,6 +238,77 @@ fn parse_branch_header(header: &str) -> (Option<String>, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(status.status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn a_folder_is_a_plain_path_down_from_the_root() {
+        let root = Path::new("/code/work");
+        assert_eq!(inside(root, ""), Some(root.to_path_buf()));
+        assert_eq!(inside(root, "."), Some(root.to_path_buf()));
+        assert_eq!(inside(root, "apps/web"), Some(root.join("apps/web")));
+        assert_eq!(inside(root, "../other"), None);
+        assert_eq!(inside(root, "apps/../../other"), None);
+        assert_eq!(inside(root, "/etc"), None);
+    }
+
+    #[test]
+    fn a_folder_of_repositories_lists_each_and_not_itself() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        for name in ["web", "api", "notes", ".hidden"] {
+            std::fs::create_dir(root.join(name)).unwrap();
+        }
+        git(&root.join("web"), &["init", "-q"]);
+        git(&root.join("api"), &["init", "-q"]);
+        git(&root.join(".hidden"), &["init", "-q"]);
+
+        // The root is not a repository; `notes` is a plain folder.
+        assert_eq!(repos(&root, &[".".to_string()]), vec!["api", "web"]);
+        assert!(!status(&root).is_repo);
+        assert!(status(&root.join("web")).is_repo);
+    }
+
+    #[test]
+    fn a_repository_lists_itself_first_then_the_ones_inside_it() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        git(&root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("packages/deep")).unwrap();
+        std::fs::create_dir(root.join("vendor")).unwrap();
+        git(&root.join("vendor"), &["init", "-q"]);
+        git(&root.join("packages/deep"), &["init", "-q"]);
+
+        // `packages` is only a folder of the root's repository. `packages/deep` is found because
+        // the workspace names it, not by looking that far down.
+        let folders = ["packages".to_string(), "packages/deep".to_string()];
+        assert_eq!(repos(&root, &folders), vec!["", "packages/deep", "vendor"]);
+    }
+
+    #[test]
+    fn a_diff_is_found_from_a_folder_below_the_top_of_its_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        git(&root, &["init", "-q"]);
+        std::fs::create_dir(root.join("app")).unwrap();
+        std::fs::write(root.join("app/new.txt"), "hello\n").unwrap();
+        git(&root, &["add", "app/new.txt"]);
+
+        // The status asked for in `app` names the file from the top, and so does its diff.
+        let listed = status(&root.join("app"));
+        assert_eq!(listed.changes[0].path, "app/new.txt");
+        let (patch, truncated) = diff(&root.join("app"), "app/new.txt", true);
+        assert!(patch.contains("+hello"), "{patch}");
+        assert!(!truncated);
+    }
 
     #[test]
     fn parses_branch_header_with_ahead_behind() {

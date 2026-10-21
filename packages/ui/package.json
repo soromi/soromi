@@ -43,6 +43,7 @@
     "@radix-ui/react-slot": "^1.3.0",
     "@radix-ui/react-switch": "^1.3.4",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
+    "@soromi/core": "workspace:*",
     "@soromi/protocol": "workspace:*",
     "ai": "^7.0.51",
     "class-variance-authority": "^0.7.1",
@@ -55,7 +56,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "shiki": "^4.4.2",
-    "streamdown": "^2.5.0",
+    "streamdown": "^2.7.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

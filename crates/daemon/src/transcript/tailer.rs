@@ -14,11 +14,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 /// Follows `path`, parsing complete lines with `parse` as they are appended and passing their
 /// events to `on_events`. Runs until aborted. Waits for the file to appear, and restarts from the
-/// top if it is truncated or replaced (a new conversation).
-pub async fn tail<P, F>(path: PathBuf, parse: P, mut on_events: F)
+/// top if it is truncated or replaced (a new conversation), calling `on_restart` first so that
+/// whatever was built from the old contents can be dropped.
+pub async fn tail<P, F, R>(path: PathBuf, mut parse: P, mut on_events: F, mut on_restart: R)
 where
-    P: Fn(&str) -> Vec<ChatEvent> + Send,
+    P: FnMut(&str) -> Vec<ChatEvent> + Send,
     F: FnMut(Vec<ChatEvent>) + Send,
+    R: FnMut() + Send,
 {
     let mut offset: u64 = 0;
     let mut partial: Vec<u8> = Vec::new();
@@ -29,6 +31,7 @@ where
             if len < offset {
                 offset = 0;
                 partial.clear();
+                on_restart();
             }
 
             if len > offset && file.seek(std::io::SeekFrom::Start(offset)).await.is_ok() {
@@ -36,7 +39,7 @@ where
                 if let Ok(read) = file.read_to_end(&mut chunk).await {
                     offset += read as u64;
                     partial.extend_from_slice(&chunk);
-                    drain_lines(&mut partial, &parse, &mut on_events);
+                    drain_lines(&mut partial, &mut parse, &mut on_events);
                 }
             }
         }
@@ -47,9 +50,9 @@ where
 
 /// Emits every complete (newline-terminated) line's events, leaving any trailing partial line
 /// buffered for the next read (so a line captured mid-write is never parsed half-formed).
-fn drain_lines<P, F>(partial: &mut Vec<u8>, parse: &P, on_events: &mut F)
+fn drain_lines<P, F>(partial: &mut Vec<u8>, parse: &mut P, on_events: &mut F)
 where
-    P: Fn(&str) -> Vec<ChatEvent>,
+    P: FnMut(&str) -> Vec<ChatEvent>,
     F: FnMut(Vec<ChatEvent>),
 {
     while let Some(newline) = partial.iter().position(|&byte| byte == b'\n') {
@@ -70,7 +73,7 @@ mod tests {
     #[test]
     fn drains_complete_lines_and_buffers_the_partial_tail() {
         // Parse through a real provider (Claude) to exercise the format-agnostic seam end to end.
-        let parse = |line: &str| {
+        let mut parse = |line: &str| {
             crate::providers::provider("claude")
                 .unwrap()
                 .parse_transcript_line(line)
@@ -82,7 +85,9 @@ mod tests {
         // Two complete lines plus a partial third with no trailing newline.
         let mut buffer = format!("{}\n{}\n{{\"type\":\"user\"", line("a"), line("b")).into_bytes();
 
-        drain_lines(&mut buffer, &parse, &mut |events| collected.extend(events));
+        drain_lines(&mut buffer, &mut parse, &mut |events| {
+            collected.extend(events)
+        });
 
         assert_eq!(
             collected,

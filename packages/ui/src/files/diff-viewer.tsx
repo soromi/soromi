@@ -1,8 +1,10 @@
+import { isBinaryDiff, parseDiff } from '@soromi/core'
+
 //Utils
 import { cn } from '../lib/utils'
 
-/** One rendered diff row: an added/removed/context line, or a hunk header (`@@ … @@`). */
-type Row = { kind: 'add' | 'del' | 'ctx'; text: string } | { kind: 'hunk'; text: string }
+//Types
+import type { DiffRow as Row } from '@soromi/core'
 
 /**
  * Renders a unified diff (`git diff` output) read-only: hunk headers as subtle bands, additions in
@@ -13,7 +15,7 @@ export function DiffViewer({ patch, truncated }: { patch: string; truncated?: bo
   if (patch.trim() === '') {
     return <div className="p-3 text-[12.5px] text-[var(--soromi-text-faint)]">No changes.</div>
   }
-  if (/^Binary files? .* differ$/m.test(patch)) {
+  if (isBinaryDiff(patch)) {
     return (
       <div className="p-3 text-[12.5px] text-[var(--soromi-text-faint)]">
         Binary file — not shown.
@@ -21,7 +23,7 @@ export function DiffViewer({ patch, truncated }: { patch: string; truncated?: bo
     )
   }
 
-  const rows = parse(patch)
+  const rows = parseDiff(patch)
 
   return (
     <div className="min-h-0 flex-1 overflow-auto text-[12.5px] [font-family:var(--soromi-font-mono)]">
@@ -61,24 +63,4 @@ function DiffRow({ row }: { row: Row }) {
       {row.text === '' ? ' ' : row.text}
     </div>
   )
-}
-
-/** Parses a unified diff into rows, keeping only hunk bodies (and their `@@` headers). */
-function parse(patch: string): Row[] {
-  const rows: Row[] = []
-  let inHunk = false
-  for (const line of patch.split('\n')) {
-    if (line.startsWith('@@')) {
-      inHunk = true
-      rows.push({ kind: 'hunk', text: line })
-      continue
-    }
-    if (!inHunk) continue // file headers before the first hunk
-    if (line.startsWith('+')) rows.push({ kind: 'add', text: line.slice(1) })
-    else if (line.startsWith('-')) rows.push({ kind: 'del', text: line.slice(1) })
-    else if (line.startsWith('\\'))
-      rows.push({ kind: 'ctx', text: line }) // "\ No newline at end"
-    else rows.push({ kind: 'ctx', text: line.startsWith(' ') ? line.slice(1) : line })
-  }
-  return rows
 }

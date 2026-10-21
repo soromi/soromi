@@ -56,12 +56,7 @@ pub fn parse_chat_frame(claude: &super::Claude, line: &str) -> ChatFrame {
                 .pointer("/compact_metadata/trigger")
                 .and_then(Value::as_str)
                 == Some("auto");
-            let text = if auto {
-                "Context was full - automatically compacted to free space".to_string()
-            } else {
-                "Conversation compacted to free up context".to_string()
-            };
-            ChatFrame::Events(vec![ChatEvent::Notice { text }])
+            ChatFrame::Events(vec![super::transcript::compaction_notice(auto)])
         }
         // A turn finished; the agent is idle waiting for the next message.
         Some("result") => ChatFrame::Status(Status::Idle),

@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
-    "dev": "tsx watch src/index.ts",
+    "dev": "RELAY_ACCESS_KEY=\"${RELAY_ACCESS_KEY-soromi}\" tsx watch src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist"

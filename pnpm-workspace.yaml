@@ -1,3 +1,13 @@
 packages:
   - packages/*
   - apps/*
+  # The phone app installs on its own (see apps/mobile/README.md): it is on a newer React than the
+  # desktop, and one install cannot hold both without the desktop's libraries picking up the
+  # wrong React types.
+  - '!apps/mobile'
+
+# pnpm's default, written out. The desktop packager (Electron Forge) refuses to run unless it can
+# read a hoisting setting from pnpm, and newer pnpm no longer reads the one in apps/desktop/.npmrc.
+# Stating the default here changes nothing about how packages are installed.
+hoistPattern:
+  - '*'

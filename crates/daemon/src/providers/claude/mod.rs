@@ -12,6 +12,7 @@ mod chat;
 mod commands;
 mod hooks;
 mod status;
+mod tasks;
 mod transcript;
 mod usage;
 
@@ -140,9 +141,12 @@ impl Provider for Claude {
         transcript::parse_line(line)
     }
 
-    fn is_subagent_launch_ack(&self, text: &str) -> bool {
-        // A background `Task` returns this the instant it starts; the real output comes later.
-        text.contains("Async agent launched")
+    fn transcript_entry_id<'a>(&self, line: &'a str) -> Option<&'a str> {
+        transcript::entry_id(line)
+    }
+
+    fn task_signals(&self, line: &str) -> Vec<super::TaskSignal> {
+        tasks::task_signals(line)
     }
 
     fn plan_approval_body(&self, tool_name: &str, input: &serde_json::Value) -> Option<String> {
@@ -163,6 +167,11 @@ impl Provider for Claude {
         Some(ProviderModels {
             models: vec![
                 // `None` = no explicit model; the daemon launches Opus 5.5 (see `model_commands`).
+                //
+                // `fable`, `sonnet` and `haiku` are the CLI's own aliases: each runs the newest
+                // model of its family that the installed CLI knows, so the version named in the
+                // description is only what that was when this list was last brought up to date
+                // (Claude Code 2.1.286: Fable 5.1, Sonnet 5.5, Haiku 4.5).
                 super::model_option(
                     None,
                     "Default",
@@ -187,14 +196,14 @@ impl Provider for Claude {
                 super::model_option(
                     Some("fable"),
                     "Fable",
-                    "Fable 5 · most capable for your hardest, longest-running tasks",
+                    "Fable 5.1 · most capable for your hardest, longest-running tasks",
                     true,
                     STANDARD,
                 ),
                 super::model_option(
                     Some("sonnet"),
                     "Sonnet",
-                    "Sonnet 5 · efficient for routine tasks",
+                    "Sonnet 5.5 · efficient for routine tasks",
                     false,
                     STANDARD,
                 ),

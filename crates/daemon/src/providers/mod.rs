@@ -35,6 +35,31 @@ pub enum ChatFrame {
     Ignore,
 }
 
+/// What a provider says about an agent running beside the conversation. Each says what is true,
+/// not what changed, so hearing one twice (a stream and a transcript can both carry it) is harmless.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskSignal {
+    /// The agent `task` is at work.
+    Running {
+        /// The id the provider gives the agent for as long as it lives.
+        task: String,
+        /// The tool call that started it, or the message that set it going again, when known.
+        tool: Option<String>,
+        /// What it is doing, in a few words, when the line says.
+        name: Option<String>,
+        /// Whether it carries on after the tool call that started it returns. `None` when the line
+        /// does not say, which leaves what is known as it is.
+        background: Option<bool>,
+    },
+    /// The agent `task` stopped: it finished, failed, or was stopped.
+    Ended {
+        task: String,
+        tool: Option<String>,
+        /// What it was doing, when the line says: kept in case it is set going again.
+        name: Option<String>,
+    },
+}
+
 /// What a provider needs to fetch its plan usage: the endpoint, the bearer token, and any extra
 /// headers (account id, beta opt-ins). Built fresh from the account's credentials each call, so a
 /// re-login is picked up without restart. `plan` is set when the tier is known from the credential
@@ -196,12 +221,25 @@ pub trait Provider: Send + Sync {
         Vec::new()
     }
 
-    /// Whether a sub-agent tool-result is just a *launch* acknowledgement for a background ("async")
-    /// sub-agent rather than its completion. Such an agent keeps running after the ack, so the tracker
-    /// must not drop it from the "agents working" panel. Provider-specific wording; default: no such
-    /// concept, so every result is treated as a real completion.
-    fn is_subagent_launch_ack(&self, _text: &str) -> bool {
-        false
+    /// The id of the entry on one line of this provider's transcript, if its entries have ids.
+    ///
+    /// A transcript is not always a plain log of what happened in order. Claude writes the messages
+    /// it keeps a second time when it compacts a conversation: the same entries, with the same
+    /// ids, appended after everything said since. Read top to bottom, old messages then turn up
+    /// twice, the second time as if they were the latest. An entry's first appearance is where it
+    /// happened, so a reader that takes each id once gets the conversation as it went (see
+    /// `transcript::Reader`). Default: entries have no ids, and every line is read.
+    fn transcript_entry_id<'a>(&self, _line: &'a str) -> Option<&'a str> {
+        None
+    }
+
+    /// What a line of this provider's output (a stream frame, or a transcript entry) says about
+    /// agents running beside the conversation: one started in the background, is still at work, or
+    /// stopped. The session keeps its "agents working" list from these, so an agent that outlives
+    /// the turn that started it stays listed until the provider says it ended. Default: the
+    /// provider has no such agents, and says nothing.
+    fn task_signals(&self, _line: &str) -> Vec<TaskSignal> {
+        Vec::new()
     }
 
     /// If a tool approval is really the agent asking to leave "plan mode" and start executing (not a

@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use soromi_protocol::{ServerMessage, TERMINAL_OUTPUT};
 use tokio::sync::{Notify, mpsc};
 
+use super::codec::SessionStart;
+
 /// How many frames may wait for the socket. A client this far behind is not keeping up: streams
 /// hold back and re-sync, and anything that cannot wait ends the connection so the client starts
 /// clean instead of drifting further out of date.
@@ -23,11 +25,15 @@ pub enum Frame {
     Message(ServerMessage),
     /// Raw terminal output for the session the client was told `slot` belongs to.
     Terminal { slot: u16, data: String },
+    /// The answer to a device that asked for an encrypted session. It holds a place in the queue:
+    /// frames ahead of it belong to the previous session, frames behind it to the new one.
+    Session(SessionStart),
 }
 
 impl Frame {
-    /// The bytes to send and what to call them in the stats: JSON for a message, or
-    /// `[TERMINAL_OUTPUT][slot, big-endian][utf-8]` for terminal output.
+    /// The bytes to send and whether they are JSON: a message, or
+    /// `[TERMINAL_OUTPUT][slot, big-endian][utf-8]` for terminal output. A session's answer is not
+    /// a payload (it is sent as it is, outside any session) and gives `None`.
     pub fn into_payload(self) -> Option<(Vec<u8>, bool)> {
         match self {
             Frame::Message(message) => Some((serde_json::to_vec(&message).ok()?, true)),
@@ -38,6 +44,7 @@ impl Frame {
                 bytes.extend_from_slice(data.as_bytes());
                 Some((bytes, false))
             }
+            Frame::Session(_) => None,
         }
     }
 }
@@ -69,7 +76,11 @@ impl Outbound {
     /// Queues a reply or a one-off notice without waiting. If the queue is full the client is too
     /// far behind to be worth keeping, so the connection is flagged to close.
     pub fn send(&self, message: ServerMessage) -> Result<(), Closed> {
-        match self.tx.try_send(Frame::Message(message)) {
+        self.queue(Frame::Message(message))
+    }
+
+    fn queue(&self, frame: Frame) -> Result<(), Closed> {
+        match self.tx.try_send(frame) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 self.stalled.notify_one();
@@ -77,6 +88,11 @@ impl Outbound {
             }
             Err(mpsc::error::TrySendError::Closed(_)) => Err(Closed),
         }
+    }
+
+    /// Queues the answer to a device's request for a session, without waiting.
+    pub fn session(&self, start: SessionStart) -> Result<(), Closed> {
+        self.queue(Frame::Session(start))
     }
 
     /// Queues a frame from a live stream, waiting for room. While it waits the stream's source
@@ -122,6 +138,11 @@ impl LinkState {
 
     pub fn set_protocol(&self, protocol: u32) {
         self.protocol.store(protocol, Ordering::Relaxed);
+    }
+
+    /// Whether a client is on the other end at all, hello or not.
+    pub fn is_present(&self) -> bool {
+        self.present.load(Ordering::Relaxed)
     }
 
     /// Records whether a client is there; returns whether that changed.

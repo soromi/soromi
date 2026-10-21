@@ -1,32 +1,16 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
 
+import { WORKING_WORDS, WORKING_WORD_MS, formatElapsed, formatTokens } from '@soromi/core'
+
 //Components
 import { Shimmer } from '../components/ai-elements/shimmer'
 import { WorkingMark } from './working-mark'
-
-// Whimsical status words that cycle while a turn runs (à la Claude Code's spinner). Ours, not theirs.
-const WORKING_WORDS = [
-  'Thinking',
-  'Working',
-  'Pondering',
-  'Crunching',
-  'Reasoning',
-  'Digging in',
-  'Noodling',
-  'Cooking',
-  'Untangling',
-  'Percolating',
-  'Synthesizing',
-  'Mulling',
-  'Scheming',
-  'Wrangling',
-]
 
 /** Cycles the working word every few seconds, starting on a random one so each turn reads differently. */
 function useWorkingWord(): string {
   const [index, setIndex] = useState(() => Math.floor(Math.random() * WORKING_WORDS.length))
   useEffect(() => {
-    const id = setInterval(() => setIndex((n) => (n + 1) % WORKING_WORDS.length), 3500)
+    const id = setInterval(() => setIndex((n) => (n + 1) % WORKING_WORDS.length), WORKING_WORD_MS)
     return () => clearInterval(id)
   }, [])
   return WORKING_WORDS[index]
@@ -46,19 +30,6 @@ function useElapsed(since: number | null | undefined): number {
   }, [])
   const start = since ?? fallback.current
   return Math.max(0, Math.floor((now - start) / 1000))
-}
-
-/** Elapsed seconds as a compact clock: `55s` under a minute, else `6m 55s`. */
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-}
-
-/** A token count abbreviated for the running line: `840`, `6.0k`, `1.2M`. */
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 /**

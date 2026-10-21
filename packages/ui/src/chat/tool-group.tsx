@@ -1,6 +1,8 @@
+import { summarizeTools } from '@soromi/core'
+
 //Components
 import { Task, TaskContent, TaskTrigger } from '../components/ai-elements/task'
-import { ToolCall, toolVerb } from './tool-call'
+import { ToolCall } from './tool-call'
 
 //Types
 import type { ToolItem } from './tool-call'
@@ -13,7 +15,7 @@ import type { ToolItem } from './tool-call'
 export function ToolGroup({ tools }: { tools: ToolItem[] }) {
   return (
     <Task defaultOpen={false} className="text-[13px]">
-      <TaskTrigger title={summarize(tools)} />
+      <TaskTrigger title={summarizeTools(tools)} />
       <TaskContent className="[&>div]:mt-1.5 [&>div]:space-y-0.5 [&>div]:border-[var(--soromi-border)]">
         {tools.map((tool, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: tool calls are positional within a group.
@@ -22,14 +24,4 @@ export function ToolGroup({ tools }: { tools: ToolItem[] }) {
       </TaskContent>
     </Task>
   )
-}
-
-/** A short summary of a group: the verbs and how many of each, e.g. "Ran 6 · Read 2". */
-function summarize(tools: ToolItem[]): string {
-  const counts = new Map<string, number>()
-  for (const tool of tools) {
-    const verb = toolVerb(tool.kind, tool.name)
-    counts.set(verb, (counts.get(verb) ?? 0) + 1)
-  }
-  return [...counts].map(([verb, count]) => `${verb} ${count}`).join(' · ')
 }

@@ -53,6 +53,11 @@ impl Daemon {
             accounts.clone(),
             "ws://localhost:8787".to_string(),
             "soromi".to_string(),
+            // Any free port: the machine's own daemon may hold the usual one.
+            soromi_daemon::pairing::DirectSettings {
+                enabled: true,
+                port: 0,
+            },
         );
         tokio::spawn(serve(listener, hub, accounts, pairing));
 
@@ -353,6 +358,136 @@ async fn a_resize_reaches_the_pty() {
         terminal_contains(&mut ws, slot, "40 120").await,
         "the PTY did not report the resized dimensions"
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_second_client_watches_read_only_until_it_takes_control() {
+    let daemon = Daemon::start().await;
+    let mut driver = daemon.connect().await;
+    let session = daemon.create_space(&mut driver, "/bin/cat").await;
+    send(&mut driver, json!({ "type": "attach", "session": session })).await;
+    let slot = read_until(&mut driver, "attached").await["slot"]
+        .as_u64()
+        .expect("slot") as u16;
+    send(
+        &mut driver,
+        json!({ "type": "resize", "session": session, "cols": 90, "rows": 20 }),
+    )
+    .await;
+    let size = read_until(&mut driver, "terminal-size").await;
+    // The first size is the one the terminal started at; the resize follows.
+    let size = if size["cols"] == 90 {
+        size
+    } else {
+        read_until(&mut driver, "terminal-size").await
+    };
+    assert_eq!(
+        (size["cols"].as_u64(), size["rows"].as_u64()),
+        (Some(90), Some(20))
+    );
+
+    // A second client arrives. It is not in control, and is told the terminal's size before any
+    // output, so it can show the terminal as the one in control has it.
+    let mut watcher = daemon.connect().await;
+    send(&mut watcher, json!({ "type": "list-workspaces" })).await;
+    let control = read_until(&mut watcher, "control").await;
+    assert!(
+        control["holder"].is_string(),
+        "the watcher is not in control"
+    );
+    send(
+        &mut watcher,
+        json!({ "type": "attach", "session": session }),
+    )
+    .await;
+    let watcher_slot = read_until(&mut watcher, "attached").await["slot"]
+        .as_u64()
+        .expect("slot") as u16;
+    let size = read_until(&mut watcher, "terminal-size").await;
+    assert_eq!(
+        (size["cols"].as_u64(), size["rows"].as_u64()),
+        (Some(90), Some(20))
+    );
+    assert!(terminal_contains(&mut watcher, watcher_slot, "\u{1b}c").await);
+
+    // What it types and the size of its own pane change nothing.
+    send(
+        &mut watcher,
+        json!({ "type": "resize", "session": session, "cols": 40, "rows": 10 }),
+    )
+    .await;
+    send(
+        &mut watcher,
+        json!({ "type": "input", "session": session, "data": "from the watcher\n" }),
+    )
+    .await;
+    let seen = drain_types(&mut watcher, Duration::from_millis(400)).await;
+    assert!(!seen.iter().any(|ty| ty == "terminal-size"), "got {seen:?}");
+
+    // It sees what the one in control does, live.
+    send(
+        &mut driver,
+        json!({ "type": "input", "session": session, "data": "from the driver\n" }),
+    )
+    .await;
+    assert!(terminal_contains(&mut watcher, watcher_slot, "from the driver").await);
+    assert!(terminal_contains(&mut driver, slot, "from the driver").await);
+
+    // Taking control is explicit; from then on its size and input apply, and the other is told.
+    send(&mut watcher, json!({ "type": "take-control" })).await;
+    let control = read_until(&mut watcher, "control").await;
+    assert!(control["holder"].is_null(), "the watcher is now in control");
+    assert!(read_until(&mut driver, "control").await["holder"].is_string());
+    send(
+        &mut watcher,
+        json!({ "type": "resize", "session": session, "cols": 40, "rows": 10 }),
+    )
+    .await;
+    let size = read_until(&mut driver, "terminal-size").await;
+    assert_eq!(
+        (size["cols"].as_u64(), size["rows"].as_u64()),
+        (Some(40), Some(10))
+    );
+    send(
+        &mut watcher,
+        json!({ "type": "input", "session": session, "data": "now it counts\n" }),
+    )
+    .await;
+    assert!(terminal_contains(&mut driver, slot, "now it counts").await);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_client_that_comes_back_with_its_chat_cursor_is_not_sent_the_chat_again() {
+    let daemon = Daemon::start().await;
+    let mut ws = daemon.connect().await;
+    let session = daemon.create_space(&mut ws, "/bin/cat").await;
+
+    // A first attach has nothing to go on: the chat starts over, and says where it stands.
+    send(&mut ws, json!({ "type": "attach", "session": session })).await;
+    let reset = read_until(&mut ws, "chat-reset").await;
+    let cursor = json!({ "log": reset["log"], "seq": reset["seq"] });
+    assert!(reset["log"].as_str().is_some_and(|log| !log.is_empty()));
+    drain_types(&mut ws, Duration::from_millis(300)).await;
+
+    // Attaching again with that cursor keeps the chat the client holds.
+    send(
+        &mut ws,
+        json!({ "type": "attach", "session": session, "chat": cursor }),
+    )
+    .await;
+    let seen = drain_types(&mut ws, Duration::from_millis(400)).await;
+    assert!(seen.iter().any(|ty| ty == "chat-resumed"), "got {seen:?}");
+    assert!(!seen.iter().any(|ty| ty == "chat-reset"), "got {seen:?}");
+
+    // A cursor into a log this daemon does not have starts it over.
+    send(
+        &mut ws,
+        json!({ "type": "attach", "session": session, "chat": { "log": "gone", "seq": 3 } }),
+    )
+    .await;
+    assert_eq!(read_until(&mut ws, "chat-reset").await["log"], reset["log"]);
 }
 
 #[tokio::test]

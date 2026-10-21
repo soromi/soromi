@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use soromi_protocol::{ClientMessage, IncompatibleAction, PROTOCOL_VERSION, ServerMessage, Status};
-use tokio::sync::broadcast;
+use soromi_protocol::{
+    ChatCursor, ClientMessage, IncompatibleAction, PROTOCOL_VERSION, ServerMessage, Status,
+};
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
 use super::coalesce::{Coalescer, until};
@@ -11,11 +14,13 @@ use super::outbound::{Closed, Frame, LinkState, Outbound};
 use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
 use crate::sessions::chat::ChatSession;
+use crate::sessions::chat_log::{ChatLog, LogFrame, Start};
 use crate::sessions::delta::DeltaFrame;
-use crate::sessions::session::Session;
+use crate::sessions::session::{Output, Session, Snapshot};
 use crate::workspaces::service::{CreateSpaceInput, WorkspaceService};
 
-/// Chat messages sent per page: the recent tail on attach, and each "Load earlier" step.
+/// Chat messages sent per page: the recent tail on attach, and each "Load earlier" step. It is also
+/// how far behind a returning viewport may be and still be caught up event by event.
 const CHAT_PAGE: usize = 80;
 
 /// Terminal output is merged over this window. Short enough to be invisible, long enough that a
@@ -46,11 +51,19 @@ pub struct Connection {
     /// The slot each attached terminal's binary output frames are tagged with.
     slots: HashMap<String, u16>,
     /// Forwards notification banners to this viewport as `Notify` messages, while it has opted into
-    /// native notifications (the Electron shell). Its live broadcast subscription is what tells the
-    /// controller to route banners here instead of firing them via the OS.
+    /// showing them itself (the Electron shell, the phone app). The shell's live broadcast
+    /// subscription is what tells the controller to route banners to it instead of firing them via
+    /// the OS.
     notify_task: Option<JoinHandle<()>>,
     /// This viewport's id, used to gate input/resize to the controller and to claim control.
     viewer_id: u64,
+    /// On a paired device's link: where it can reach this computer without the relay.
+    routes: Option<watch::Receiver<Vec<String>>>,
+    /// On a paired device's link: which device it is.
+    device: Option<String>,
+    /// Whether the client's app is on screen, as far as it has said. A device is sent banners over
+    /// this link only while it is; out of sight it is pushed them, if it takes those.
+    attended: Arc<AtomicBool>,
 }
 
 impl Connection {
@@ -73,7 +86,42 @@ impl Connection {
             slots: HashMap::new(),
             notify_task: None,
             viewer_id,
+            routes: None,
+            device: None,
+            attended: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    /// Tells the settings screen the remote settings as they are set: only what was overridden,
+    /// next to what an empty field falls back to.
+    fn send_remote_config(&self) {
+        self.send(ServerMessage::RemoteConfig {
+            config: crate::config::remote_overrides(),
+            defaults: crate::config::remote_defaults(),
+        });
+    }
+
+    /// Makes this a paired device's connection: it is told the direct routes when it says hello.
+    pub fn set_device(&mut self, device: String, routes: watch::Receiver<Vec<String>>) {
+        self.device = Some(device);
+        self.routes = Some(routes);
+    }
+
+    /// Whether the client is a paired device rather than the app on this computer.
+    fn is_device(&self) -> bool {
+        self.device.is_some()
+    }
+
+    /// Tells the push service whether this device's app is on screen and taking banners over this
+    /// link: while it is, nothing is pushed to it.
+    fn update_watching(&self) {
+        let Some(device) = &self.device else {
+            return;
+        };
+        let watching = self.notify_task.is_some() && self.attended.load(Ordering::Relaxed);
+        self.hub
+            .push()
+            .set_watching(device, self.viewer_id, watching);
     }
 
     pub fn handle(&mut self, message: ClientMessage) {
@@ -100,6 +148,12 @@ impl Connection {
                         protocol: PROTOCOL_VERSION,
                         version: crate::updates::current_version().to_string(),
                     });
+                    // A device learns here where else it can reach this computer; the routes
+                    // task tells it of any change after this.
+                    if let Some(routes) = &mut self.routes {
+                        let routes = routes.borrow_and_update().clone();
+                        self.send(ServerMessage::Routes { routes });
+                    }
                 } else {
                     self.refused = true;
                     self.send(ServerMessage::Incompatible {
@@ -194,7 +248,7 @@ impl Connection {
                 files,
             } => {
                 // A chat turn is "input": only the controlling viewport may drive the agent.
-                if self.hub.is_controller(self.viewer_id)
+                if self.hub.drives(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
                 {
                     tokio::spawn(async move { chat.send_turn(&text, &files).await });
@@ -202,7 +256,7 @@ impl Connection {
             }
             ClientMessage::ChatInterrupt { session } => {
                 // Stop button: interrupt the running turn. Same control gate as a chat turn.
-                if self.hub.is_controller(self.viewer_id)
+                if self.hub.drives(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
                 {
                     tokio::spawn(async move { chat.interrupt().await });
@@ -210,7 +264,7 @@ impl Connection {
             }
             ClientMessage::ChatApprovalResponse { session, id, allow } => {
                 // Allow/deny a pending tool approval — the same control gate as driving the agent.
-                if self.hub.is_controller(self.viewer_id)
+                if self.hub.drives(self.viewer_id)
                     && let Some(chat) = self.hub.get_chat(&session)
                 {
                     tokio::spawn(async move { chat.respond_approval(&id, allow).await });
@@ -218,7 +272,7 @@ impl Connection {
             }
             ClientMessage::ChatPermissionMode { session, mode } => {
                 // The composer's permission dropdown: apply live and persist.
-                if self.hub.is_controller(self.viewer_id) {
+                if self.hub.drives(self.viewer_id) {
                     self.hub.set_permission_mode(&session, mode);
                 }
             }
@@ -228,20 +282,20 @@ impl Connection {
                 effort,
             } => {
                 // The composer's model dropdown: apply live and persist.
-                if self.hub.is_controller(self.viewer_id) {
+                if self.hub.drives(self.viewer_id) {
                     self.hub.set_model(&session, model, effort);
                 }
             }
             ClientMessage::ChatCommand { session, command } => {
                 // The composer's context controls (/compact, /clear).
-                if self.hub.is_controller(self.viewer_id) {
+                if self.hub.drives(self.viewer_id) {
                     self.hub.run_chat_command(&session, command);
                 }
             }
             ClientMessage::ChatLoadEarlier { session, loaded } => {
                 // "Load earlier": send the page of messages just before what the viewport holds.
-                if let Some(chat) = self.hub.get_chat(&session) {
-                    let (events, has_more) = chat.chat_earlier(loaded as usize, CHAT_PAGE);
+                if let Some(log) = self.chat_log(&session) {
+                    let (events, has_more) = log.earlier(loaded as usize, CHAT_PAGE);
                     if !events.is_empty() {
                         self.send(ServerMessage::ChatHistory {
                             session,
@@ -251,9 +305,28 @@ impl Connection {
                     }
                 }
             }
+            ClientMessage::ChatFetchFile {
+                session,
+                log,
+                seq,
+                index,
+            } => {
+                let file = self
+                    .chat_log(&session)
+                    .and_then(|chat| chat.file(&log, seq, index as usize));
+                if let Some(file) = file {
+                    self.send(ServerMessage::ChatFileData {
+                        session,
+                        log,
+                        seq,
+                        index,
+                        file,
+                    });
+                }
+            }
             ClientMessage::SwitchMode { session, mode } => {
                 // Restarts the session in the other backend (resumes the same conversation).
-                if self.hub.is_controller(self.viewer_id) {
+                if self.hub.drives(self.viewer_id) {
                     self.hub.switch_mode(&session, mode);
                 }
             }
@@ -263,7 +336,7 @@ impl Connection {
                 account,
             } => {
                 // Restarts the session under a different agent (fresh conversation). Gated by control.
-                if self.hub.is_controller(self.viewer_id) {
+                if self.hub.drives(self.viewer_id) {
                     self.hub.set_session_agent(&session, agent, account);
                 }
             }
@@ -334,18 +407,26 @@ impl Connection {
                     });
                 }
             }
-            ClientMessage::GitStatus { workspace } => {
-                let status = self.hub.git_status(&workspace);
-                self.send(ServerMessage::GitStatus { workspace, status });
+            ClientMessage::GitStatus { workspace, folder } => {
+                let status = self.hub.git_status(&workspace, &folder);
+                let repos = self.hub.git_repos(&workspace);
+                self.send(ServerMessage::GitStatus {
+                    workspace,
+                    folder,
+                    status,
+                    repos,
+                });
             }
             ClientMessage::GitDiff {
                 workspace,
+                folder,
                 path,
                 staged,
             } => {
-                let (patch, truncated) = self.hub.git_diff(&workspace, &path, staged);
+                let (patch, truncated) = self.hub.git_diff(&workspace, &folder, &path, staged);
                 self.send(ServerMessage::GitDiff {
                     workspace,
+                    folder,
                     path,
                     staged,
                     patch,
@@ -393,9 +474,7 @@ impl Connection {
             ClientMessage::GetRemoteConfig => {
                 // Local-link only, like device management: the relay is a host setting.
                 if self.pairing.is_some() {
-                    self.send(ServerMessage::RemoteConfig {
-                        config: crate::config::remote_config(),
-                    });
+                    self.send_remote_config();
                 }
             }
             ClientMessage::SetRemoteConfig { config } => {
@@ -407,7 +486,8 @@ impl Connection {
                                 resolved.relay_url.clone(),
                                 resolved.access_key.clone(),
                             );
-                            self.send(ServerMessage::RemoteConfig { config: resolved });
+                            pairing.set_direct(resolved.direct);
+                            self.send_remote_config();
                         }
                         Err(error) => self.send(ServerMessage::Error {
                             message: error.to_string(),
@@ -440,14 +520,27 @@ impl Connection {
             }
             ClientMessage::TakeControl => self.hub.take_control(self.viewer_id),
             // The native desktop shell reports its window focus so the daemon suppresses sounds and
-            // banners while the user is looking at the app.
-            ClientMessage::SetFocused { focused } => self.hub.set_focused(focused),
-            // The Electron shell renders banners itself: forward notifications to it as `Notify`
-            // messages (while it stays subscribed, the daemon skips the OS notifier).
+            // banners while the user is looking at the app. That is about this computer's screen:
+            // a paired device's own focus is its own business, and says nothing here.
+            ClientMessage::SetFocused { focused } => {
+                if self.is_device() {
+                    self.attended.store(focused, Ordering::Relaxed);
+                    self.update_watching();
+                } else {
+                    self.hub.set_focused(focused)
+                }
+            }
+            ClientMessage::RegisterPush { token } => {
+                if let Some(device) = &self.device {
+                    self.hub.push().register(device, token);
+                }
+            }
+            // The viewport shows banners itself: forward notifications to it as `Notify` messages.
+            // For the Electron shell, the daemon skips the OS notifier while it stays subscribed.
             ClientMessage::NotificationsNative { enabled } => {
                 self.set_notifications_native(enabled)
             }
-            ClientMessage::Attach { session } => self.attach(&session),
+            ClientMessage::Attach { session, chat } => self.attach(&session, chat),
             ClientMessage::Detach { session } => {
                 if let Some(forwarder) = self.attached.remove(&session) {
                     forwarder.abort();
@@ -455,7 +548,7 @@ impl Connection {
             }
             ClientMessage::Input { session, data } => {
                 // Only the controlling viewport drives the terminal.
-                if self.hub.is_controller(self.viewer_id)
+                if self.hub.drives(self.viewer_id)
                     && let Some(session) = self.hub.get(&session)
                 {
                     session.write(&data);
@@ -485,22 +578,35 @@ impl Connection {
     }
 
     /// Turns native-notification forwarding on or off. While on, a task subscribes to the hub's
-    /// notification broadcast and relays each banner to this viewport as a `Notify` message; the
-    /// subscription's presence is what makes the controller route banners here. Aborting the task
-    /// (here or on disconnect) drops the subscription, so the daemon falls back to the OS notifier.
+    /// notification broadcast and relays each banner to this viewport as a `Notify` message. On
+    /// the local link the subscription's presence is what makes the controller route banners here,
+    /// and aborting the task (here or on disconnect) drops it, so the daemon falls back to the OS
+    /// notifier. A paired device is told beside the computer, never in its place.
     fn set_notifications_native(&mut self, enabled: bool) {
         if let Some(task) = self.notify_task.take() {
             task.abort();
         }
         if !enabled {
+            self.update_watching();
             return;
         }
-        let mut rx = self.hub.subscribe_notifications();
+        let mut rx = self.hub.subscribe_notifications(self.is_device());
         let out = self.out.clone();
+        let attended = self.attended.clone();
+        // A device that takes pushed banners gets each one a single way: over this link while its
+        // app is on screen, pushed otherwise. One that does not only has this link.
+        let pushed = self.device.clone().map(|device| (self.hub.push(), device));
         self.notify_task = Some(tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(banner) => {
+                        let away = !attended.load(Ordering::Relaxed);
+                        if away
+                            && let Some((push, device)) = &pushed
+                            && push.has_token(device)
+                        {
+                            continue;
+                        }
                         if out
                             .send(ServerMessage::Notify {
                                 title: banner.title,
@@ -518,6 +624,7 @@ impl Connection {
                 }
             }
         }));
+        self.update_watching();
     }
 
     /// Sends this viewport its control state: `None` holder when it drives, else the controller's
@@ -547,6 +654,9 @@ impl Connection {
         if let Some(task) = self.notify_task.take() {
             task.abort();
         }
+        // The next client on this link starts as any does: on screen until it says otherwise.
+        self.attended.store(true, Ordering::Relaxed);
+        self.update_watching();
         self.refused = false;
         self.link.reset();
     }
@@ -561,9 +671,20 @@ impl Connection {
         slot
     }
 
+    /// A session's chat log, whichever kind of session it is.
+    fn chat_log(&self, session_id: &str) -> Option<Arc<ChatLog>> {
+        if let Some(session) = self.hub.get(session_id) {
+            return Some(session.chat_log().clone());
+        }
+        self.hub
+            .get_chat(session_id)
+            .map(|chat| chat.chat_log().clone())
+    }
+
     /// Replays a session's current state, then streams it. Re-attaching replaces the prior
-    /// forwarder, so nothing is streamed twice for one session on one connection.
-    fn attach(&mut self, session_id: &str) {
+    /// forwarder, so nothing is streamed twice for one session on one connection. `cursor` is how
+    /// much of the session's chat the viewport says it still holds.
+    fn attach(&mut self, session_id: &str, cursor: Option<ChatCursor>) {
         if let Some(previous) = self.attached.remove(session_id) {
             previous.abort();
         }
@@ -576,11 +697,11 @@ impl Connection {
         let handle = if let Some(session) = self.hub.get(session_id) {
             let slot = self.slot_for(session_id);
             tokio::spawn(async move {
-                let _ = forward_pty(out, id, session, slot).await;
+                let _ = forward_pty(out, id, session, slot, cursor).await;
             })
         } else if let Some(chat) = self.hub.get_chat(session_id) {
             tokio::spawn(async move {
-                let _ = forward_chat(out, id, chat).await;
+                let _ = forward_chat(out, id, chat, cursor).await;
             })
         } else {
             return;
@@ -592,6 +713,7 @@ impl Connection {
 /// Where a terminal's output goes on one connection: binary frames tagged with its slot.
 struct TerminalSink {
     out: Outbound,
+    session: String,
     slot: u16,
 }
 
@@ -605,23 +727,36 @@ impl TerminalSink {
             .await
     }
 
-    /// Wipes the viewport's terminal (`ESC c`) and redraws it from the scrollback: on attach, and
-    /// again whenever the viewport fell too far behind to catch up chunk by chunk.
-    async fn repaint(&self, snapshot: String) -> Result<(), Closed> {
-        self.write(format!("\u{1b}c{snapshot}")).await
+    /// Tells the viewport the terminal's size. Sent ahead of output drawn for that size.
+    async fn size(&self, cols: u16, rows: u16) -> Result<(), Closed> {
+        self.out
+            .stream_message(ServerMessage::TerminalSize {
+                session: self.session.clone(),
+                cols,
+                rows,
+            })
+            .await
+    }
+
+    /// Wipes the viewport's terminal (`ESC c`) and redraws it as it stands, at its size: on attach,
+    /// and again whenever the viewport fell too far behind to catch up chunk by chunk.
+    async fn repaint(&self, snapshot: Snapshot) -> Result<(), Closed> {
+        self.size(snapshot.cols, snapshot.rows).await?;
+        self.write(format!("\u{1b}c{}", snapshot.repaint)).await
     }
 }
 
-/// Streams a PTY terminal to one viewport: the slot its output is tagged with, the screen so far
-/// and its status, then output, status,
-/// and transcript events as they happen. Output is merged over [`OUTPUT_WINDOW`], and every send
-/// waits for room in the connection's queue; a viewport slow enough to miss output is repainted
-/// from the scrollback instead of being sent a backlog it will never catch up on.
+/// Streams a PTY terminal to one viewport: the slot its output is tagged with, its size, the screen
+/// as it stands and its status, then output, changes of size, status and transcript events as they
+/// happen. Output is merged over [`OUTPUT_WINDOW`], and every send waits for room in the
+/// connection's queue; a viewport slow enough to miss output is repainted as the terminal stands
+/// instead of being sent a backlog it will never catch up on.
 async fn forward_pty(
     out: Outbound,
     id: String,
     session: Arc<Session>,
     slot: u16,
+    cursor: Option<ChatCursor>,
 ) -> Result<(), Closed> {
     out.stream_message(ServerMessage::Attached {
         session: id.clone(),
@@ -630,6 +765,7 @@ async fn forward_pty(
     .await?;
     let sink = TerminalSink {
         out: out.clone(),
+        session: id.clone(),
         slot,
     };
     let (snapshot, mut output_rx) = session.attach_output();
@@ -639,20 +775,26 @@ async fn forward_pty(
     let mut last_status = *status_rx.borrow_and_update();
     send_status(&out, &id, last_status).await?;
 
-    // Reset the chat view, then replay the transcript so far. A session with no transcript
-    // (non-Claude, or before its first hook) sends the reset and no events, so the viewport falls
-    // back to the terminal.
-    let mut chat_rx = session.subscribe_chat();
-    send_pty_chat(&out, &id, &session).await?;
+    // Bring the chat view level with the transcript. A session with no transcript (non-Claude, or
+    // before its first hook) gets a reset and no events, so the viewport falls back to the terminal.
+    let chat_log = session.chat_log().clone();
+    let mut chat = ChatFeed::start(&out, &id, &chat_log, cursor.as_ref()).await?;
 
     let mut output = Coalescer::new(OUTPUT_WINDOW, OUTPUT_MAX_BATCH);
     loop {
         tokio::select! {
             chunk = output_rx.recv() => match chunk {
-                Ok(data) => {
+                Ok(Output::Data(data)) => {
                     if let Some(text) = output.push(&data, Instant::now()) {
                         sink.write(text).await?;
                     }
+                }
+                Ok(Output::Resized { cols, rows }) => {
+                    // Output still held was drawn for the old size, so it goes first.
+                    if let Some(text) = output.take(Instant::now()) {
+                        sink.write(text).await?;
+                    }
+                    sink.size(cols, rows).await?;
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     output.clear();
@@ -677,20 +819,11 @@ async fn forward_pty(
                     send_status(&out, &id, status).await?;
                 }
             }
-            event = chat_rx.recv() => match event {
-                Ok(event) => {
-                    out.stream_message(ServerMessage::Chat {
-                        session: id.clone(),
-                        events: vec![event],
-                    })
-                    .await?;
+            frame = chat.rx.recv() => {
+                if chat.forward(&out, &id, &chat_log, frame).await? == Fed::Closed {
+                    break;
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    chat_rx = session.subscribe_chat();
-                    send_pty_chat(&out, &id, &session).await?;
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-            },
+            }
         }
     }
     Ok(())
@@ -700,15 +833,21 @@ async fn forward_pty(
 /// progress, pending approvals and slash commands, then each as it changes. Streaming text is sent
 /// as the new piece only, merged over [`DELTA_WINDOW`]; a viewport that falls behind is re-synced
 /// from the session's current state rather than replayed.
-async fn forward_chat(out: Outbound, id: String, chat: Arc<ChatSession>) -> Result<(), Closed> {
+async fn forward_chat(
+    out: Outbound,
+    id: String,
+    chat: Arc<ChatSession>,
+    cursor: Option<ChatCursor>,
+) -> Result<(), Closed> {
     let mut status_rx = chat.subscribe_status();
     let mut last_status = *status_rx.borrow_and_update();
     send_status(&out, &id, last_status).await?;
 
-    let mut chat_rx = chat.subscribe_chat();
+    let chat_log = chat.chat_log().clone();
     let mut approval_rx = chat.subscribe_approval();
     let mut resolved_rx = chat.subscribe_resolved();
-    send_chat_state(&out, &id, &chat).await?;
+    let mut feed = ChatFeed::start(&out, &id, &chat_log, cursor.as_ref()).await?;
+    send_approvals(&out, &id, &chat).await?;
     let mut delta_rx = send_delta_snapshot(&out, &id, &chat, false).await?;
 
     let mut commands_rx = chat.subscribe_commands();
@@ -734,22 +873,16 @@ async fn forward_chat(out: Outbound, id: String, chat: Arc<ChatSession>) -> Resu
                     send_status(&out, &id, status).await?;
                 }
             }
-            event = chat_rx.recv() => match event {
-                Ok(event) => {
-                    out.stream_message(ServerMessage::Chat {
-                        session: id.clone(),
-                        events: vec![event],
-                    })
-                    .await?;
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Events were missed: start the view over from the session's current state.
-                    chat_rx = chat.subscribe_chat();
-                    send_chat_state(&out, &id, &chat).await?;
+            frame = feed.rx.recv() => match feed.forward(&out, &id, &chat_log, frame).await? {
+                Fed::Event => {}
+                // The view was caught up or started over, which drops the approvals and streaming
+                // text it held: send both again as they stand.
+                Fed::Resynced => {
+                    send_approvals(&out, &id, &chat).await?;
                     delta.clear();
                     delta_rx = send_delta_snapshot(&out, &id, &chat, true).await?;
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
+                Fed::Closed => break,
             },
             frame = delta_rx.recv() => match frame {
                 Ok(DeltaFrame::Append(text)) => {
@@ -833,40 +966,120 @@ async fn send_delta(
     .await
 }
 
-/// Resets a PTY session's chat view and replays its transcript so far.
-async fn send_pty_chat(out: &Outbound, id: &str, session: &Session) -> Result<(), Closed> {
-    out.stream_message(ServerMessage::ChatReset {
-        session: id.to_string(),
-    })
-    .await?;
-    let events = session.chat_snapshot();
-    if !events.is_empty() {
-        out.stream_message(ServerMessage::Chat {
-            session: id.to_string(),
-            events,
-        })
-        .await?;
-    }
-    Ok(())
+/// What forwarding one frame of a chat log came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fed {
+    /// An event went out (or was one the viewport already has).
+    Event,
+    /// The viewport was brought level again, by a catch-up or by starting over.
+    Resynced,
+    /// The log is gone.
+    Closed,
 }
 
-/// Resets a headless chat view and sends what it needs to start from: the recent tail of the
-/// transcript (the viewport pages back with `ChatLoadEarlier`, so a long one doesn't flood the wire)
-/// and any tool approvals still awaiting an answer.
-async fn send_chat_state(out: &Outbound, id: &str, chat: &ChatSession) -> Result<(), Closed> {
-    out.stream_message(ServerMessage::ChatReset {
-        session: id.to_string(),
-    })
-    .await?;
-    let (tail, has_more) = chat.chat_tail(CHAT_PAGE);
-    if !tail.is_empty() || has_more {
-        out.stream_message(ServerMessage::ChatHistory {
-            session: id.to_string(),
-            events: tail,
-            has_more,
-        })
-        .await?;
+/// One viewport's place in a chat log: the feed of what comes next, and how far it has been sent.
+struct ChatFeed {
+    rx: broadcast::Receiver<LogFrame>,
+    /// The run of the log the viewport is following, and the last event of it that was sent.
+    sent: ChatCursor,
+}
+
+impl ChatFeed {
+    /// Brings a viewport level with a chat log, given how much of it the viewport says it holds,
+    /// and returns its feed. A viewport whose cursor still lines up keeps what it has and is sent
+    /// the events after it; any other starts over from the most recent page (it pages back with
+    /// `ChatLoadEarlier`, so a long transcript doesn't flood the wire).
+    async fn start(
+        out: &Outbound,
+        id: &str,
+        log: &ChatLog,
+        cursor: Option<&ChatCursor>,
+    ) -> Result<ChatFeed, Closed> {
+        let (start, rx) = log.attach(cursor, CHAT_PAGE);
+        let sent = match start {
+            Start::Resume { events, seq } => {
+                out.stream_message(ServerMessage::ChatResumed {
+                    session: id.to_string(),
+                })
+                .await?;
+                if !events.is_empty() {
+                    out.stream_message(ServerMessage::Chat {
+                        session: id.to_string(),
+                        events,
+                        seq,
+                    })
+                    .await?;
+                }
+                ChatCursor {
+                    // A resume is only ever offered for the log the cursor named.
+                    log: cursor.map(|cursor| cursor.log.clone()).unwrap_or_default(),
+                    seq,
+                }
+            }
+            Start::Reset {
+                log,
+                seq,
+                tail,
+                has_more,
+            } => {
+                out.stream_message(ServerMessage::ChatReset {
+                    session: id.to_string(),
+                    log: log.clone(),
+                    seq,
+                })
+                .await?;
+                if !tail.is_empty() || has_more {
+                    out.stream_message(ServerMessage::ChatHistory {
+                        session: id.to_string(),
+                        events: tail,
+                        has_more,
+                    })
+                    .await?;
+                }
+                ChatCursor { log, seq }
+            }
+        };
+        Ok(ChatFeed { rx, sent })
     }
+
+    /// Sends on one frame of the feed. A viewport that missed frames is caught up from where it
+    /// was, or started over if that is too far back; one whose log started over starts over too.
+    async fn forward(
+        &mut self,
+        out: &Outbound,
+        id: &str,
+        log: &ChatLog,
+        frame: Result<LogFrame, broadcast::error::RecvError>,
+    ) -> Result<Fed, Closed> {
+        match frame {
+            Ok(LogFrame::Event { seq, event }) => {
+                if seq > self.sent.seq {
+                    self.sent.seq = seq;
+                    out.stream_message(ServerMessage::Chat {
+                        session: id.to_string(),
+                        events: vec![event],
+                        seq,
+                    })
+                    .await?;
+                }
+                Ok(Fed::Event)
+            }
+            Ok(LogFrame::Restarted) => {
+                *self = ChatFeed::start(out, id, log, None).await?;
+                Ok(Fed::Resynced)
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                let held = self.sent.clone();
+                *self = ChatFeed::start(out, id, log, Some(&held)).await?;
+                Ok(Fed::Resynced)
+            }
+            Err(broadcast::error::RecvError::Closed) => Ok(Fed::Closed),
+        }
+    }
+}
+
+/// Sends the tool approvals still awaiting an answer.
+async fn send_approvals(out: &Outbound, id: &str, chat: &ChatSession) -> Result<(), Closed> {
     for approval in chat.approval_snapshot() {
         out.stream_message(ServerMessage::ChatApproval {
             session: id.to_string(),
@@ -905,6 +1118,7 @@ impl Drop for Connection {
         if let Some(task) = self.notify_task.take() {
             task.abort();
         }
+        self.update_watching();
     }
 }
 
@@ -957,6 +1171,120 @@ mod tests {
         Arc::new(ChatSession::StreamJson(session))
     }
 
+    fn says(text: &str) -> ChatEvent {
+        ChatEvent::Assistant { text: text.into() }
+    }
+
+    /// The messages waiting in a queue, each reduced to its kind and what matters about it.
+    fn drain(rx: &mut mpsc::Receiver<Frame>) -> Vec<String> {
+        let mut seen = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            seen.push(match frame {
+                Frame::Message(ServerMessage::ChatReset { seq, .. }) => format!("reset@{seq}"),
+                Frame::Message(ServerMessage::ChatResumed { .. }) => "resumed".to_string(),
+                Frame::Message(ServerMessage::ChatHistory {
+                    events, has_more, ..
+                }) => format!("history x{} more={has_more}", events.len()),
+                Frame::Message(ServerMessage::Chat { events, seq, .. }) => {
+                    format!("chat x{} @{seq}", events.len())
+                }
+                other => format!("{other:?}"),
+            });
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn a_new_viewport_gets_the_last_page_then_each_event_numbered() {
+        let log = ChatLog::new((0..CHAT_PAGE + 5).map(|n| says(&n.to_string())).collect());
+        let (out, mut rx, _stalled) = Outbound::channel();
+        let last = (CHAT_PAGE + 5) as u32;
+
+        let mut feed = ChatFeed::start(&out, "s1", &log, None).await.unwrap();
+        assert_eq!(
+            drain(&mut rx),
+            [
+                format!("reset@{last}"),
+                format!("history x{CHAT_PAGE} more=true")
+            ]
+        );
+
+        log.push(says("new"));
+        let frame = feed.rx.recv().await;
+        assert_eq!(feed.forward(&out, "s1", &log, frame).await, Ok(Fed::Event));
+        assert_eq!(drain(&mut rx), [format!("chat x1 @{}", last + 1)]);
+        assert_eq!(feed.sent.seq, last + 1);
+    }
+
+    #[tokio::test]
+    async fn a_returning_viewport_keeps_its_chat_and_gets_what_it_missed() {
+        let log = ChatLog::new(vec![says("1"), says("2")]);
+        let (out, mut rx, _stalled) = Outbound::channel();
+        let first = ChatFeed::start(&out, "s1", &log, None).await.unwrap();
+        drain(&mut rx);
+
+        // The viewport goes away holding two events; three more are said meanwhile.
+        let held = first.sent.clone();
+        drop(first);
+        log.extend(vec![says("3"), says("4"), says("5")]);
+
+        let feed = ChatFeed::start(&out, "s1", &log, Some(&held))
+            .await
+            .unwrap();
+        assert_eq!(drain(&mut rx), ["resumed", "chat x3 @5"]);
+        assert_eq!(feed.sent, ChatCursor { seq: 5, ..held });
+
+        // Coming back level sends nothing but the acknowledgement.
+        let level = feed.sent.clone();
+        ChatFeed::start(&out, "s1", &log, Some(&level))
+            .await
+            .unwrap();
+        assert_eq!(drain(&mut rx), ["resumed"]);
+    }
+
+    #[tokio::test]
+    async fn a_viewport_with_a_stale_cursor_starts_over() {
+        let log = ChatLog::new(vec![says("1")]);
+        let (out, mut rx, _stalled) = Outbound::channel();
+
+        // A cursor into a log the daemon no longer has (it restarted, or the conversation did).
+        let stale = ChatCursor {
+            log: "gone".into(),
+            seq: 1,
+        };
+        ChatFeed::start(&out, "s1", &log, Some(&stale))
+            .await
+            .unwrap();
+        assert_eq!(drain(&mut rx), ["reset@1", "history x1 more=false"]);
+
+        // An empty log still resets, so the viewport drops what it held and shows no chat.
+        let empty = ChatLog::new(Vec::new());
+        ChatFeed::start(&out, "s1", &empty, Some(&stale))
+            .await
+            .unwrap();
+        assert_eq!(drain(&mut rx), ["reset@0"]);
+    }
+
+    #[tokio::test]
+    async fn a_log_that_starts_over_resets_the_viewport() {
+        let log = ChatLog::new(vec![says("1"), says("2")]);
+        let (out, mut rx, _stalled) = Outbound::channel();
+        let mut feed = ChatFeed::start(&out, "s1", &log, None).await.unwrap();
+        let before = feed.sent.log.clone();
+        drain(&mut rx);
+
+        log.restart();
+        log.push(says("fresh"));
+        let frame = feed.rx.recv().await;
+        assert_eq!(
+            feed.forward(&out, "s1", &log, frame).await,
+            Ok(Fed::Resynced)
+        );
+        // The event said after the restart is in the page that follows the reset, once.
+        assert_eq!(drain(&mut rx), ["reset@1", "history x1 more=false"]);
+        assert_ne!(feed.sent.log, before);
+    }
+
     /// Collects the streaming-text frames sent until the assistant message commits.
     async fn deltas_until_commit(rx: &mut mpsc::Receiver<Frame>) -> Vec<(String, bool)> {
         let mut deltas = Vec::new();
@@ -1004,7 +1332,7 @@ mod tests {
         .join("\n");
         let chat = scripted_chat(&script);
         let (out, mut rx, _stalled) = Outbound::channel();
-        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone()));
+        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone(), None));
 
         chat.send_turn("hi", &[]).await;
         let deltas = deltas_until_commit(&mut rx).await;
@@ -1034,7 +1362,7 @@ mod tests {
         );
         let chat = scripted_chat(&lines.join("\n"));
         let (out, mut rx, _stalled) = Outbound::channel();
-        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone()));
+        tokio::spawn(forward_chat(out, "s1".to_string(), chat.clone(), None));
 
         chat.send_turn("hi", &[]).await;
         let deltas = deltas_until_commit(&mut rx).await;

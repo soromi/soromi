@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@soromi/protocol': resolve(__dirname, 'packages/protocol/src/index.ts'),
+      '@soromi/core': resolve(__dirname, 'packages/core/src/index.ts'),
     },
   },
   test: {

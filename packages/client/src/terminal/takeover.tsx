@@ -8,52 +8,30 @@ import { useClientStore } from '../store/client-store'
 import styles from './takeover.module.css'
 
 /**
- * Covers the terminal when another device is driving it. Only one viewport controls the terminals
- * at a time (it owns input + size); the rest show this and can take over. Renders nothing when this
- * viewport is the controller. Styled with the app's CSS variables, so it fits desktop and web.
+ * Shown above the sessions while another device is driving them. Only one viewport controls the
+ * terminals at a time (it owns input and size); the rest keep watching, read-only, and can take
+ * over from here. Renders nothing when this viewport is the controller. Styled with the app's CSS
+ * variables.
  */
-export function TakeoverScreen() {
+export function TakeoverBar() {
   const transport = useTransport()
   const holder = useClientStore((s) => s.controlHolder)
 
   if (holder === null) return null
 
   return (
-    <div className={styles.cover}>
-      <div className={styles.icon} aria-hidden="true">
-        <div className={styles.laptopScreen} />
-        <div className={styles.laptopBase} />
-        <div className={styles.phone}>
-          <span className={styles.phoneDot} />
-        </div>
-      </div>
-
-      <div>
-        <div className={styles.title}>Active on another device</div>
-        <div className={styles.desc}>
-          This session is being controlled from <span className={styles.device}>{holder}</span>.
-          Take over to continue here. The other device will switch to view-only.
-        </div>
-      </div>
-
+    <div className={styles.bar} role="status">
+      <span className={styles.dot} aria-hidden="true" />
+      <span className={styles.text}>
+        Controlled from <span className={styles.device}>{holder}</span>. You are watching,
+        read-only.
+      </span>
       <button
         type="button"
         className={styles.button}
+        title="The other device switches to watching"
         onClick={() => transport.send({ type: 'take-control' })}
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M17 3l4 4-4 4M21 7H8M7 21l-4-4 4-4M3 17h13" />
-        </svg>
         Take over here
       </button>
     </div>

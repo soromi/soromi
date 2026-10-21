@@ -1,3 +1,4 @@
+import { effortLabel as labelFor, selectedEffort, selectedModel } from '@soromi/core'
 import { Check, ChevronDown, Sparkles } from 'lucide-react'
 
 //Components
@@ -30,10 +31,10 @@ export function ModelSelect({
 }) {
   const catalog = modelCatalog(agent)
   if (!catalog) return null
-  const { models, effortLevels, effortLabels, defaultEffort } = catalog
-  const effortLabel = (s: string) => effortLabels[s] ?? s.charAt(0).toUpperCase() + s.slice(1)
-  const current = models.find((m) => m.value === model) ?? models[0]
-  const activeEffort = effort ?? defaultEffort
+  const { models, effortLevels } = catalog
+  const effortLabel = (level: string) => labelFor(catalog, level)
+  const current = selectedModel(catalog, model)
+  const activeEffort = selectedEffort(catalog, effort)
 
   return (
     <DropdownMenu>

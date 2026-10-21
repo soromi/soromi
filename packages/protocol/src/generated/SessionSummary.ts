@@ -28,7 +28,7 @@ title?: string,
  * Sub-agents the agent spawned this turn (Claude `Task` calls), each with its live status.
  * Kept for the turn (finished ones stay, marked `done`), cleared on the next user prompt.
  */
-subagents: Array<SubAgent>, 
+subagents?: Array<SubAgent>, 
 /**
  * What the agent is currently working on — the latest in-progress tool call, e.g. "Editing
  * config.ts". Absent when it isn't running a tool. Shown as the tab's live subtitle.

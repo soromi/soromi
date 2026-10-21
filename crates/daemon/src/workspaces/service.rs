@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use soromi_protocol::{
     AgentAccount, DirEntry, KeepAwakeMode, PermissionMode, SessionMode, SessionSummary, Status,
-    ToolKind, WorkspaceSummary,
+    SubAgent, ToolKind, WorkspaceSummary,
 };
 use tokio::sync::broadcast;
 
@@ -19,7 +19,7 @@ use crate::files::reader::{FileRead, read_file_within, write_file_within};
 use crate::files::watcher::DirectoryWatcher;
 use crate::home::soromi_home;
 use crate::keep_awake::controller::KeepAwakeController;
-use crate::notifications::controller::NotificationController;
+use crate::notifications::controller::{Audience, NotificationController};
 use crate::sessions::chat::ChatSession;
 use crate::sessions::exec_chat::ExecChatSession;
 use crate::sessions::manager::SessionManager;
@@ -67,6 +67,15 @@ pub enum Change {
     Global,
 }
 
+/// A viewport attached to the daemon: the desktop app, or one of a paired device's links.
+struct Viewer {
+    id: u64,
+    /// Shown to the other viewports while this one is in control.
+    name: String,
+    /// The paired device this is a link of, if it is one.
+    device: Option<String>,
+}
+
 /// Creates and owns spaces. Spaces are created in-app and persisted under `~/.soromi/`, so
 /// they restore when the daemon restarts. A workspace holds one or more terminal sessions
 /// (tabs); each session's account is resolved from the workspace's per-agent account bindings.
@@ -82,7 +91,7 @@ pub struct WorkspaceService {
     /// A newer release than the running build, once the update check finds one.
     update: Mutex<Option<UpdateInfo>>,
     /// Whether the app window is focused. While it is, agent-event sounds and banners are
-    /// suppressed (the user is already looking at the app). Set by the shell; false by default,
+    /// suppressed here (the user is already looking at the app). Set by the shell; false by default,
     /// so the standalone daemon always fires. Shared (`Arc`) so background status watchers can read
     /// it from their own tasks.
     focused: Arc<AtomicBool>,
@@ -102,8 +111,14 @@ pub struct WorkspaceService {
     /// The viewport that currently controls the terminals (`None` = none attached). Only its input
     /// and resizes apply; others see a takeover. Auto-passed to a remaining viewer when it leaves.
     controller: Mutex<Option<u64>>,
-    /// Attached viewports `(id, display name)`, in join order, for control transfer + the takeover label.
-    viewers: Mutex<Vec<(u64, String)>>,
+    /// Attached viewports, in join order, for control transfer + the takeover label.
+    viewers: Mutex<Vec<Viewer>>,
+    /// The paired device whose last link left while it was in control. Control went to another
+    /// viewport so nothing was left undriven, and goes back when the device returns, however long
+    /// that takes: a phone's app is cut off whenever it is put behind another one, and coming back
+    /// to it is not a reason to have lost the sessions it was driving. It stops being owed once
+    /// someone else drives (see [`Self::drives`]) or takes control.
+    control_owed: Mutex<Option<String>>,
     /// Fires when control changes, so each viewport re-derives its own control state.
     control_tx: broadcast::Sender<()>,
     /// The last thing each session did, read from its transcript once on startup (keyed by session
@@ -146,6 +161,7 @@ impl WorkspaceService {
             usage_cache: Mutex::new(HashMap::new()),
             controller: Mutex::new(None),
             viewers: Mutex::new(Vec::new()),
+            control_owed: Mutex::new(None),
             control_tx: broadcast::channel(64).0,
             restored_activity: Mutex::new(HashMap::new()),
         });
@@ -254,9 +270,31 @@ impl WorkspaceService {
 
     /// Registers a viewport `(id, display name)`. The first to attach becomes the controller.
     pub fn register_viewer(&self, id: u64, name: String) {
+        self.add_viewer(Viewer {
+            id,
+            name,
+            device: None,
+        });
+    }
+
+    /// Registers a viewport that is one of a paired device's links. A device can reach the daemon
+    /// by more than one route (the relay, a direct socket) and moves between them as its network
+    /// changes; its links are told apart from other viewports so control can follow the device
+    /// (see [`Self::follow_device`]).
+    pub fn register_device_viewer(&self, id: u64, name: String, device: &str) {
+        self.add_viewer(Viewer {
+            id,
+            name,
+            device: Some(device.to_string()),
+        });
+    }
+
+    fn add_viewer(&self, viewer: Viewer) {
         {
             let mut viewers = self.viewers.lock().unwrap();
-            viewers.push((id, name));
+            let id = viewer.id;
+            viewers.retain(|other| other.id != id);
+            viewers.push(viewer);
             let mut controller = self.controller.lock().unwrap();
             if controller.is_none() {
                 *controller = Some(id);
@@ -265,14 +303,69 @@ impl WorkspaceService {
         let _ = self.control_tx.send(());
     }
 
-    /// Unregisters a viewport. If it held control, control passes to another remaining viewport.
+    /// A paired device has started talking through this viewport's link. Control moves here if it
+    /// is held by another link of the same device (the route it was on a moment ago), or if the
+    /// device held it when its last link dropped and nobody has driven or claimed it since: to the
+    /// user it is one phone, whichever way it is connected, and neither a change of network nor a
+    /// while spent in another app is a reason to lose the session it was driving. Control held by
+    /// anything else stays put.
+    pub fn follow_device(&self, id: u64) {
+        let moved = {
+            let viewers = self.viewers.lock().unwrap();
+            let mut controller = self.controller.lock().unwrap();
+            let mut owed = self.control_owed.lock().unwrap();
+            let device = |viewer: u64| {
+                viewers
+                    .iter()
+                    .find(|other| other.id == viewer)
+                    .and_then(|other| other.device.as_deref())
+            };
+            let Some(mine) = device(id) else {
+                return;
+            };
+            let sibling_holds =
+                matches!(*controller, Some(holder) if holder != id && device(holder) == Some(mine));
+            let is_owed = owed.as_deref() == Some(mine);
+            if is_owed {
+                *owed = None;
+            }
+            if (sibling_holds || is_owed) && *controller != Some(id) {
+                *controller = Some(id);
+                true
+            } else {
+                false
+            }
+        };
+        if moved {
+            let _ = self.control_tx.send(());
+        }
+    }
+
+    /// Unregisters a viewport. If it held control, control passes to another link of the same
+    /// device when there is one (the device only changed route), and otherwise to the viewport
+    /// that has been attached longest. A device that leaves this way is owed control back.
     pub fn unregister_viewer(&self, id: u64) {
         {
             let mut viewers = self.viewers.lock().unwrap();
-            viewers.retain(|(viewer, _)| *viewer != id);
+            let device = viewers
+                .iter()
+                .find(|viewer| viewer.id == id)
+                .and_then(|viewer| viewer.device.clone());
+            viewers.retain(|viewer| viewer.id != id);
             let mut controller = self.controller.lock().unwrap();
             if *controller == Some(id) {
-                *controller = viewers.first().map(|(viewer, _)| *viewer);
+                let sibling = device.as_deref().and_then(|device| {
+                    viewers
+                        .iter()
+                        .rev()
+                        .find(|viewer| viewer.device.as_deref() == Some(device))
+                });
+                if sibling.is_none()
+                    && let Some(device) = device
+                {
+                    *self.control_owed.lock().unwrap() = Some(device);
+                }
+                *controller = sibling.or(viewers.first()).map(|viewer| viewer.id);
             }
         }
         let _ = self.control_tx.send(());
@@ -281,6 +374,8 @@ impl WorkspaceService {
     /// Hands sole terminal control to a viewport (its "Take control" action).
     pub fn take_control(&self, id: u64) {
         *self.controller.lock().unwrap() = Some(id);
+        // Someone chose who drives: nothing is owed to whoever drove before.
+        *self.control_owed.lock().unwrap() = None;
         let _ = self.control_tx.send(());
     }
 
@@ -289,28 +384,54 @@ impl WorkspaceService {
         *self.controller.lock().unwrap() == Some(id)
     }
 
+    /// Whether a viewport may act on the sessions, asked as it does so: typing, sending a message,
+    /// answering an approval. Acting is what settles who drives. A viewport that was only standing
+    /// in for a device that dropped off keeps control from then on, and the device is owed nothing
+    /// when it comes back. Sizing a terminal is not asked through here: a viewport does that by
+    /// being on screen, not by anyone's choice.
+    pub fn drives(&self, id: u64) -> bool {
+        if !self.is_controller(id) {
+            return false;
+        }
+        *self.control_owed.lock().unwrap() = None;
+        true
+    }
+
     /// The controlling viewport's display name (for a viewport that is not itself the controller).
     pub fn controller_name(&self) -> Option<String> {
         let controller = (*self.controller.lock().unwrap())?;
         let viewers = self.viewers.lock().unwrap();
         viewers
             .iter()
-            .find(|(viewer, _)| *viewer == controller)
-            .map(|(_, name)| name.clone())
+            .find(|viewer| viewer.id == controller)
+            .map(|viewer| viewer.name.clone())
     }
 
     /// Sets whether the app window is focused. While focused, agent-event sounds and banners are
-    /// suppressed; they fire only when the user is away from the app.
+    /// suppressed on this computer; they fire only when the user is away from the app. A paired
+    /// device is told either way.
     pub fn set_focused(&self, focused: bool) {
         self.focused.store(focused, Ordering::Relaxed);
     }
 
-    /// Subscribes a native viewer (the Electron shell) to notification banners: while subscribed,
-    /// the daemon routes banners to it as `Notify` messages instead of firing them via the OS.
+    /// Subscribes a viewer that shows notification banners itself. The Electron shell: while it is
+    /// subscribed, the daemon routes this computer's banners to it as `Notify` messages instead of
+    /// firing them via the OS. A paired device (`device`): it gets every banner, whether or not
+    /// someone is looking at the app on the computer.
     pub fn subscribe_notifications(
         &self,
+        device: bool,
     ) -> tokio::sync::broadcast::Receiver<crate::notifications::controller::WireNotification> {
-        self.notifications.subscribe_wire()
+        if device {
+            self.notifications.subscribe_devices()
+        } else {
+            self.notifications.subscribe_wire()
+        }
+    }
+
+    /// The devices that take pushed banners (see [`crate::notifications::push`]).
+    pub fn push(&self) -> Arc<crate::notifications::push::PushService> {
+        self.notifications.push()
     }
 
     /// Records a tab's agent conversation id (from its session-start hook), so a later restore
@@ -889,9 +1010,9 @@ impl WorkspaceService {
 
     /// The git working-tree status for a workspace (read-only source-control view). Falls back to an
     /// empty non-repo status when the workspace is unknown.
-    pub fn git_status(&self, workspace: &str) -> soromi_protocol::GitStatusInfo {
-        match self.workspace_root(workspace) {
-            Some(root) => crate::files::git::status(Path::new(&root)),
+    pub fn git_status(&self, workspace: &str, folder: &str) -> soromi_protocol::GitStatusInfo {
+        match self.workspace_dir(workspace, folder) {
+            Some(dir) => crate::files::git::status(&dir),
             None => soromi_protocol::GitStatusInfo {
                 is_repo: false,
                 branch: None,
@@ -904,11 +1025,41 @@ impl WorkspaceService {
 
     /// The unified diff for one changed file. Returns `(patch, truncated)`; empty for an unknown
     /// workspace.
-    pub fn git_diff(&self, workspace: &str, path: &str, staged: bool) -> (String, bool) {
-        match self.workspace_root(workspace) {
-            Some(root) => crate::files::git::diff(Path::new(&root), path, staged),
+    pub fn git_diff(
+        &self,
+        workspace: &str,
+        folder: &str,
+        path: &str,
+        staged: bool,
+    ) -> (String, bool) {
+        match self.workspace_dir(workspace, folder) {
+            Some(dir) => crate::files::git::diff(&dir, path, staged),
             None => (String::new(), false),
         }
+    }
+
+    /// The folders of a workspace that are git repositories, relative to its root ("" = the root
+    /// itself), the root first. A workspace is often a folder of several repositories, where the
+    /// root has no status of its own: these are what a viewport offers to look at instead.
+    pub fn git_repos(&self, workspace: &str) -> Vec<String> {
+        let found = {
+            let metadata = self.metadata.lock().unwrap();
+            metadata
+                .iter()
+                .find(|(name, _)| name == workspace)
+                .map(|(_, meta)| (meta.root.clone(), meta.folders.clone()))
+        };
+        match found {
+            Some((root, folders)) => crate::files::git::repos(Path::new(&root), &folders),
+            None => Vec::new(),
+        }
+    }
+
+    /// The directory a workspace-relative `folder` names ("" or "." = the root), or `None` for an
+    /// unknown workspace or a folder that would lead out of it.
+    fn workspace_dir(&self, workspace: &str, folder: &str) -> Option<std::path::PathBuf> {
+        let root = self.workspace_root(workspace)?;
+        crate::files::git::inside(Path::new(&root), folder)
     }
 
     /// Spawns an ad-hoc shell PTY for a workspace, rooted at `folder` (relative to the workspace root;
@@ -1095,6 +1246,14 @@ impl WorkspaceService {
     pub fn set_keep_awake_mode(&self, mode: KeepAwakeMode) {
         self.keep_awake.set_mode(mode);
         self.emit_global();
+    }
+
+    /// A paired device connected, or the last one has been gone a while: the machine is held awake
+    /// for as long as one is there, whatever the keep-awake mode (see `KeepAwakeController`).
+    pub fn set_device_connected(&self, connected: bool) {
+        if self.keep_awake.set_device(connected) {
+            self.emit_global();
+        }
     }
 
     pub fn set_muted(&self, workspace: &str, muted: bool) {
@@ -1544,26 +1703,35 @@ impl WorkspaceService {
                     result = status_rx.changed() => {
                         if result.is_err() { break }
                         let status = *status_rx.borrow_and_update();
-                        keep_awake.handle(&session_id, status);
+                        keep_awake.handle(&session_id, awake_status(status, &subagents_rx.borrow()));
                         if status != last_status {
                             last_status = status;
                             changed();
                         }
 
-                        // Notify on entering an attention state, unless muted or the user is here.
+                        // Notify on entering an attention state, unless muted. With the user
+                        // here, only a paired device is told.
                         if let Some(cue) = cue_for(status)
                             && !notifications.is_muted(&workspace)
-                            && !focused.load(Ordering::Relaxed)
                         {
-                            sound.play(cue);
-                            notifications.fire(&workspace, Some(&session_id), cue_text(cue));
+                            let audience = audience_for(focused.load(Ordering::Relaxed));
+                            if audience == Audience::Everyone {
+                                sound.play(cue);
+                            }
+                            notifications.fire(
+                                &workspace,
+                                Some(&session_id),
+                                cue_text(cue),
+                                audience,
+                            );
                         }
                     }
                     // The running sub-agents changed (a Task spawned or finished), so the chat tab's
                     // "agents working" panel updates live.
                     result = subagents_rx.changed() => {
                         if result.is_err() { break }
-                        subagents_rx.borrow_and_update();
+                        let status = awake_status(last_status, &subagents_rx.borrow_and_update());
+                        keep_awake.handle(&session_id, status);
                         changed();
                     }
                     // The context token count changed (a turn reported usage), so the composer's
@@ -1601,7 +1769,7 @@ impl WorkspaceService {
                     result = status_rx.changed() => {
                         if result.is_err() { break }
                         let status = *status_rx.borrow_and_update();
-                        keep_awake.handle(&session_id, status);
+                        keep_awake.handle(&session_id, awake_status(status, &subagents_rx.borrow()));
                         if status != last_status {
                             last_status = status;
                             changed();
@@ -1611,7 +1779,8 @@ impl WorkspaceService {
                     // nests them under the tab live.
                     result = subagents_rx.changed() => {
                         if result.is_err() { break }
-                        subagents_rx.borrow_and_update();
+                        let status = awake_status(last_status, &subagents_rx.borrow_and_update());
+                        keep_awake.handle(&session_id, status);
                         changed();
                     }
                     // The current activity changed (a tool started or finished), so the tab's live
@@ -1654,16 +1823,18 @@ impl WorkspaceService {
         if self.notifications.is_muted(&workspace) {
             return;
         }
-        // While the user is looking at the app, a sound and banner add nothing; only fire when away.
-        if self.focused.load(Ordering::Relaxed) {
-            return;
+        // While the user is looking at the app, a sound and banner here add nothing; only a paired
+        // device is told then.
+        let audience = audience_for(self.focused.load(Ordering::Relaxed));
+        if audience == Audience::Everyone {
+            self.sound.play(cue);
         }
-        self.sound.play(cue);
         let text = match agent {
             Some(agent) => format!("({agent}) {}", cue_text(cue)),
             None => cue_text(cue).to_string(),
         };
-        self.notifications.fire(&workspace, Some(session_id), &text);
+        self.notifications
+            .fire(&workspace, Some(session_id), &text, audience);
     }
 
     /// Records that a session has gone idle (Claude's idle notification). Status only: unlike
@@ -1741,9 +1912,12 @@ fn read_transcript_seed(
     let Ok(contents) = fs::read_to_string(path) else {
         return Vec::new();
     };
+    // Each entry once, where it first appears: the file can hold old messages a second time,
+    // further down than newer ones.
+    let mut reader = crate::transcript::Reader::new(Some(provider));
     contents
         .lines()
-        .flat_map(|line| provider.parse_transcript_line(line))
+        .flat_map(|line| reader.read(line))
         .collect()
 }
 
@@ -1756,7 +1930,11 @@ fn last_transcript_activity(
 ) -> Option<String> {
     use soromi_protocol::ChatEvent;
     let contents = fs::read_to_string(path).ok()?;
-    for line in contents.lines().rev() {
+    // The end of the conversation is its last new entry, which need not be the file's last line.
+    for line in crate::transcript::entries(&contents, provider)
+        .into_iter()
+        .rev()
+    {
         for event in provider.parse_transcript_line(line).into_iter().rev() {
             match event {
                 ChatEvent::Assistant { text } => {
@@ -1887,6 +2065,29 @@ fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: String) {
 }
 
 /// The banner text for an agent-event cue.
+/// What keep-awake is told a session is doing. A session is at work while its own turn runs, and
+/// also while agents it started in the background still do: its turn is over and its status says
+/// idle, but putting the machine to sleep then would stop them halfway.
+fn awake_status(status: Status, subagents: &[SubAgent]) -> Status {
+    if subagents
+        .iter()
+        .any(|agent| agent.status == Status::Thinking)
+    {
+        Status::Thinking
+    } else {
+        status
+    }
+}
+
+/// Who a banner is for, given whether the app window on this computer is being looked at.
+fn audience_for(focused: bool) -> Audience {
+    if focused {
+        Audience::Devices
+    } else {
+        Audience::Everyone
+    }
+}
+
 fn cue_text(cue: Cue) -> &'static str {
     match cue {
         Cue::Request => "needs your permission",
@@ -2014,6 +2215,29 @@ mod tests {
             KeepAwakeMode::Off,
         ));
         WorkspaceService::new(notifications, keep_awake, Arc::new(NoopSoundPlayer), None)
+    }
+
+    #[test]
+    fn a_session_is_at_work_while_its_background_agents_are() {
+        let agent = |status| SubAgent {
+            name: "explore".into(),
+            status,
+            started_at: None,
+        };
+
+        // Its own turn is over, and an agent it started is still going.
+        let running = [agent(Status::Done), agent(Status::Thinking)];
+        assert_eq!(awake_status(Status::Idle, &running), Status::Thinking);
+        assert_eq!(awake_status(Status::Done, &running), Status::Thinking);
+
+        // Agents that have all stopped change nothing, and neither does having none.
+        let stopped = [agent(Status::Done), agent(Status::Blocked)];
+        assert_eq!(awake_status(Status::Done, &stopped), Status::Done);
+        assert_eq!(awake_status(Status::Idle, &[]), Status::Idle);
+        assert_eq!(
+            awake_status(Status::WaitingInput, &[]),
+            Status::WaitingInput
+        );
     }
 
     #[tokio::test]

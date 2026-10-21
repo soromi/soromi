@@ -1,7 +1,13 @@
 import { useEffect, useMemo } from 'react'
 
 //Packages
-import { LocalWebSocketTransport, TransportProvider, useClientStore } from '@soromi/client'
+import {
+  LocalWebSocketTransport,
+  TransportProvider,
+  applyServerMessage,
+  browserClientId,
+  useClientStore,
+} from '@soromi/client'
 import { setModelCatalog } from '@soromi/ui/chat'
 
 //Store
@@ -18,7 +24,10 @@ import { AppLayout } from './app-layout'
 
 /** Root: sets up the theme and transport, routes daemon messages into the store. */
 export function App() {
-  const transport = useMemo(() => new LocalWebSocketTransport(DAEMON_URL), [])
+  const transport = useMemo(
+    () => new LocalWebSocketTransport(DAEMON_URL, { clientId: browserClientId() }),
+    [],
+  )
   const theme = useAppStore((s) => s.theme)
 
   // Apply the appearance as a root class; `theme.css`'s `.so-light` overrides flip every surface.
@@ -58,50 +67,14 @@ export function App() {
     const ui = useAppStore.getState()
 
     const offMessage = transport.onMessage((message) => {
+      // What the daemon's state is goes into the client store, the same way for every client.
+      applyServerMessage(client, message)
+      // What follows is this app's own: navigation, notices, the file tree, native banners.
       switch (message.type) {
         case 'workspace-list':
-          client.setWorkspaces(message.workspaces)
           ui.reconcile(message.workspaces)
           break
-        case 'keep-awake':
-          client.setKeepAwake(message.active)
-          client.setKeepAwakeMode(message.mode)
-          break
-        case 'account-list':
-          client.setAccounts(message.accounts)
-          break
-        case 'provider-status':
-          client.setProviderStatus(message.provider, message.configDir, message.loggedIn)
-          break
-        case 'session-updated':
-          client.updateSession(message.workspace, message.status, message.session)
-          break
-        case 'session-commands':
-          client.setCommands(message.session, message.commands)
-          break
-        case 'status':
-          client.setSessionStatus(message.session, message.status)
-          break
-        case 'chat':
-          client.appendChat(message.session, message.events)
-          break
-        case 'chat-reset':
-          client.resetChat(message.session)
-          break
-        case 'chat-delta':
-          client.applyChatDelta(message.session, message.text, message.replace ?? false)
-          break
-        case 'chat-approval':
-          client.addChatApproval(message.session, message.approval)
-          break
-        case 'chat-approval-resolved':
-          client.removeChatApproval(message.session, message.id)
-          break
-        case 'chat-history':
-          client.prependChatHistory(message.session, message.events, message.hasMore)
-          break
         case 'session-opened':
-          client.addSession(message.workspace, message.session)
           ui.selectSession(message.workspace, message.session.id)
           break
         case 'workspace-opened':
@@ -114,9 +87,6 @@ export function App() {
         case 'dir-listing':
           ui.setListing(message.workspace, message.path, message.entries)
           break
-        case 'skill-list':
-          client.setSkills(message.session, message.skills)
-          break
         case 'model-catalog':
           // The catalog store lives in @soromi/ui (outside React); bump a signal so the composer
           // re-renders once it lands.
@@ -124,11 +94,12 @@ export function App() {
           client.bumpModelCatalog()
           break
         case 'git-status':
-          ui.setGitStatus(message.workspace, message.status)
+          ui.setGitStatus(message.workspace, message.folder, message.status, message.repos)
           break
         case 'git-diff':
           ui.setDiffPatch(
             message.workspace,
+            message.folder,
             message.path,
             message.staged,
             message.patch,
@@ -143,19 +114,11 @@ export function App() {
           })
           break
         case 'update-available':
-          client.setUpdate({
-            version: message.version,
-            url: message.url,
-            notes: message.notes ?? null,
-          })
           // Clear any "Checking for updates…" notice from a manual check.
           ui.setNotice(null)
           break
         case 'up-to-date':
           ui.setNotice("You're on the latest version.")
-          break
-        case 'control':
-          client.setControlHolder(message.holder ?? null)
           break
         case 'notify':
           // Agent banner routed here so the native shell shows it with the app identity (Electron;

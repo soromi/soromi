@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 
 //Types
-import type { Transport } from './transport'
+import type { Transport } from '@soromi/core'
 
 const TransportContext = createContext<Transport | null>(null)
 

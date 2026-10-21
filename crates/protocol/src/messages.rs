@@ -307,6 +307,7 @@ pub struct SessionSummary {
     /// Sub-agents the agent spawned this turn (Claude `Task` calls), each with its live status.
     /// Kept for the turn (finished ones stay, marked `done`), cleared on the next user prompt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<SubAgent>>", optional))]
     pub subagents: Vec<SubAgent>,
     /// What the agent is currently working on — the latest in-progress tool call, e.g. "Editing
     /// config.ts". Absent when it isn't running a tool. Shown as the tab's live subtitle.
@@ -357,9 +358,29 @@ pub struct DeviceSummary {
     #[cfg_attr(feature = "ts", ts(rename = "pairingCode"))]
     #[serde(rename = "pairingCode")]
     pub pairing_code: String,
-    /// Whether this device's phone is currently connected through the relay (live). A paired device
-    /// with no phone attached, or an unreachable relay, is `false`.
+    /// Whether this device's phone is currently connected (live), by either route. A paired device
+    /// with no phone attached is `false`.
     pub connected: bool,
+    /// How the phone is connected, while it is: straight over the local network, or through the
+    /// relay. Absent while it is not connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub route: Option<DeviceRoute>,
+}
+
+/// The way a paired device reaches the daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub enum DeviceRoute {
+    /// A socket straight to the daemon, on a network the two share (the same Wi-Fi, a VPN).
+    Direct,
+    /// Through the relay, from anywhere.
+    Relay,
 }
 
 /// One usage window for an agent (e.g. the 5-hour session or the weekly cap). `percent` is 0-100;
@@ -414,6 +435,30 @@ pub struct RemoteConfig {
     /// Shared secret the daemon presents to the relay to create a room (self-host gate). Held only
     /// on the daemon (never in a pairing code); paired phones join by room id without it.
     pub access_key: String,
+    /// Whether paired devices may connect straight to this computer when they share a network with
+    /// it, instead of through the relay. On unless turned off. The link is end-to-end encrypted
+    /// with the device's key either way, and nothing is served to a socket that does not hold one.
+    #[serde(default = "enabled")]
+    pub direct: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+/// What the relay settings fall back to when left empty: this daemon's environment, or else what
+/// it was built with. Shown in the settings screen in place of an empty field, so a setting the
+/// user never touched reads as "the default" and not as a value they chose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct RemoteDefaults {
+    pub relay_url: String,
+    pub access_key: String,
 }
 
 /// Which side has to update when a client and the daemon speak incompatible protocol versions.
@@ -457,8 +502,15 @@ pub enum ClientMessage {
     Ping {
         nonce: u32,
     },
+    /// Start streaming a session to this viewport: its terminal or chat as it stands, then every
+    /// change. `chat` is how much of the session's chat the viewport still holds from an earlier
+    /// attach (the `log` and `seq` it was last given); the daemon answers `ChatResumed` and sends
+    /// only what came after when that still lines up, and `ChatReset` with a fresh page otherwise.
     Attach {
         session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
+        chat: Option<ChatCursor>,
     },
     /// Stop streaming a session to this viewport (it is no longer on screen). The session keeps
     /// running; attaching again replays its current state.
@@ -534,6 +586,15 @@ pub enum ClientMessage {
         session: String,
         loaded: u32,
     },
+    /// Ask for the bytes of a file attached to a chat message, which chat events leave out
+    /// (`ChatFile::deferred`). `log` and `seq` say which message, `index` which of its files. The
+    /// daemon replies with `ChatFileData`, or not at all if there is no such file.
+    ChatFetchFile {
+        session: String,
+        log: String,
+        seq: u32,
+        index: u32,
+    },
     /// Switch a tab between the terminal and headless chat. The daemon tears down the current backend
     /// and resumes the same conversation in the other. Gated by control.
     SwitchMode {
@@ -604,15 +665,20 @@ pub enum ClientMessage {
         shell: String,
         folder: String,
     },
-    /// The git working-tree status for a workspace (read-only source-control view). Replied with
-    /// `GitStatus`.
+    /// The git working-tree status of one of a workspace's folders (read-only source-control
+    /// view). `folder` is workspace-relative ("" = the root): a workspace made of several
+    /// repositories has one status per folder. Replied with `GitStatus`.
     GitStatus {
         workspace: String,
+        #[serde(default)]
+        folder: String,
     },
-    /// The unified diff for one changed file. `staged` selects the index diff (`--cached`) vs the
-    /// worktree diff. Replied with `GitDiff`.
+    /// The unified diff for one changed file of the repository at `folder`. `staged` selects the
+    /// index diff (`--cached`) vs the worktree diff. Replied with `GitDiff`.
     GitDiff {
         workspace: String,
+        #[serde(default)]
+        folder: String,
         path: String,
         staged: bool,
     },
@@ -682,26 +748,38 @@ pub enum ClientMessage {
     RevokeDevice {
         id: String,
     },
-    /// Ask for the current relay + web URLs (for the settings screen). Replies with `RemoteConfig`.
+    /// Ask for the remote settings (for the settings screen). Replies with `RemoteConfig`.
     GetRemoteConfig,
-    /// Set the relay + web URLs (self-host). Persisted and applied to pairing live. Replies with the
-    /// resolved `RemoteConfig`. Empty fields clear the override (fall back to env / default).
+    /// Set the remote settings (self-host). Persisted and applied to pairing live. Replies with
+    /// `RemoteConfig`. Empty fields clear the override (fall back to env / default).
     SetRemoteConfig {
         config: RemoteConfig,
     },
     /// This viewport claims sole control of the terminals: it drives input and owns the size, and
-    /// every other viewport shows a takeover screen. Triggers a `Control` broadcast.
+    /// every other viewport goes on watching, read-only. Triggers a `Control` broadcast.
     TakeControl,
-    /// The desktop window's focus changed. While focused, the daemon suppresses agent-event sounds
-    /// and banners (the user is already looking at the app). The native shells report this; other
-    /// viewers leave it alone.
+    /// Whether the app is on screen. From the desktop: while its window is focused, the daemon
+    /// suppresses agent-event sounds and banners on this computer (the user is already looking at
+    /// the app). From a paired device: while its app is on screen it is sent banners over its
+    /// link; once it is not, they are pushed to it instead, if it registered for that
+    /// (`RegisterPush`). A client that never says is taken to be on screen.
     SetFocused {
         focused: bool,
     },
-    /// This viewport renders notifications itself (the Electron shell shows native banners with the
-    /// app identity), so the daemon routes them here as `Notify` messages instead of firing its own.
+    /// This viewport shows notifications itself, so the daemon sends them here as `Notify`
+    /// messages. From the Electron shell (native banners with the app identity) that is instead of
+    /// the daemon firing its own. From a paired device it is beside whatever the computer does:
+    /// the device is told of every banner, and decides by its own screen whether to show it.
     NotificationsNative {
         enabled: bool,
+    },
+    /// From a paired device: the token banners can be pushed to it with while its app is closed or
+    /// behind another one, or `None` to stop. The daemon keeps it with the device and hands banners
+    /// to the push service, which passes them on to Apple or Google. Sent again on every
+    /// connection; ignored from anything that is not a paired device.
+    RegisterPush {
+        #[serde(default)]
+        token: Option<String>,
     },
 }
 
@@ -740,13 +818,21 @@ pub enum ServerMessage {
         session: String,
         slot: u16,
     },
+    /// The size of a session's terminal: sent after `Attached`, ahead of the first output, and again
+    /// whenever the viewport in control resizes it. Output is drawn for this size, so a viewport
+    /// that is only watching shows its terminal at it instead of at the size of its own pane.
+    TerminalSize {
+        session: String,
+        cols: u16,
+        rows: u16,
+    },
     Status {
         session: String,
         status: Status,
     },
-    /// A desktop banner to show natively. Routed to a viewer that opted in via
-    /// `NotificationsNative` (the Electron shell), and only while such a viewer is connected —
-    /// otherwise the daemon fires the notification itself. `title` is the app name, `body` the text.
+    /// A banner to show natively. Sent to a viewer that opted in via `NotificationsNative`: the
+    /// Electron shell (and only while it is connected; otherwise the daemon fires the notification
+    /// itself), and a paired device. `title` is the app name, `body` the text.
     /// `workspace`/`session` identify what the banner is about, so clicking it opens that tab.
     Notify {
         title: String,
@@ -807,15 +893,23 @@ pub enum ServerMessage {
         workspace: String,
         path: String,
     },
-    /// A workspace's git working-tree status (reply to `GitStatus`).
+    /// The git working-tree status of a workspace's `folder` (reply to `GitStatus`). `repos` are
+    /// the workspace's folders that are repositories ("" = the root), for a viewport to offer:
+    /// the root, the folders the workspace is made of, and the directories right under the root.
     GitStatus {
         workspace: String,
+        #[serde(default)]
+        folder: String,
         status: GitStatusInfo,
+        #[serde(default)]
+        repos: Vec<String>,
     },
     /// The unified diff for one changed file (reply to `GitDiff`). `patch` is the raw `git diff`
     /// output; `truncated` marks that a very large diff was clipped.
     GitDiff {
         workspace: String,
+        #[serde(default)]
+        folder: String,
         path: String,
         staged: bool,
         patch: String,
@@ -869,29 +963,60 @@ pub enum ServerMessage {
         workspace: String,
         agents: Vec<AgentUsage>,
     },
-    /// The resolved relay + web URLs (reply to `GetRemoteConfig` / `SetRemoteConfig`).
+    /// The remote settings as they are set (reply to `GetRemoteConfig` / `SetRemoteConfig`):
+    /// `config` holds only what the user overrode, with an empty field for anything left alone, and
+    /// `defaults` what an empty field falls back to.
     RemoteConfig {
         config: RemoteConfig,
+        defaults: RemoteDefaults,
+    },
+    /// Where a paired device can reach this computer without the relay: one WebSocket address per
+    /// network the computer is on (`ws://192.168.1.20:8318`), empty when direct access is off. Sent
+    /// to a device after its `Hello` and again whenever the addresses change; the device keeps them
+    /// and tries them next to the relay, preferring one that answers.
+    Routes {
+        routes: Vec<String>,
     },
     /// Who controls the terminals right now, from this viewport's perspective. `holder` is `None`
-    /// when this viewport is the controller (render the terminal); otherwise it names the device in
-    /// control (show a takeover screen). Pushed whenever control changes.
+    /// when this viewport is the controller; otherwise it names the device in control, and this
+    /// viewport watches read-only (its input and resizes are ignored) until it sends
+    /// `TakeControl`. Pushed whenever control changes.
     Control {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "ts", ts(optional))]
         holder: Option<String>,
     },
-    /// Structured transcript events for a session's chat view (the mobile viewport renders these
-    /// instead of the terminal). Sent in a batch on attach (the accumulated log) and one-at-a-time
-    /// as the transcript is tailed. A session with no transcript (no chat) simply never sends these.
+    /// Chat events to add to the end of what the viewport holds: one as it happens, or the run a
+    /// returning viewport missed. Every event has a place in its session's log, counting from 1, and
+    /// `seq` is the place of the last one here — so the viewport knows what it holds up to, and can
+    /// drop an event it was already sent.
     Chat {
         session: String,
         events: Vec<ChatEvent>,
+        seq: u32,
     },
-    /// The session's transcript restarted (a new or resumed conversation); the chat view clears
-    /// before the fresh events arrive.
+    /// The viewport's copy of a session's chat is void (first attach, a new or resumed conversation,
+    /// or it fell too far behind): it clears the chat, approvals and streaming text it held. `log`
+    /// names this run of the log and `seq` is the place of its last event; the events themselves
+    /// follow as a `ChatHistory` page ending there. Both go back to the daemon in the next `Attach`.
     ChatReset {
         session: String,
+        log: String,
+        seq: u32,
+    },
+    /// Reply to an `Attach` whose `chat` cursor still lined up: the viewport keeps the events it
+    /// holds (a `Chat` with what it missed follows if there is any) and drops the approvals and
+    /// streaming text it held, which are sent again as they stand now.
+    ChatResumed {
+        session: String,
+    },
+    /// Reply to `ChatFetchFile`: the file, with its bytes.
+    ChatFileData {
+        session: String,
+        log: String,
+        seq: u32,
+        index: u32,
+        file: ChatFile,
     },
     /// Text for the assistant message currently streaming in. By default `text` is appended to what
     /// the viewport already holds; with `replace` it replaces it (sent on attach, on a resync, and
@@ -951,6 +1076,9 @@ pub struct ToolApproval {
 
 /// A file pasted or attached to a chat turn: base64 `data` plus its MIME type. Images and PDFs go to
 /// the agent as image / document content blocks; text files are inlined as text.
+///
+/// In chat events sent to a viewport the bytes are left out: `data` is empty and `deferred` is set.
+/// The viewport asks for them with `ChatFetchFile` when it shows the file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -964,6 +1092,25 @@ pub struct ChatFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub filename: Option<String>,
+    /// The bytes were left out of this copy and are fetched on demand.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub deferred: bool,
+}
+
+/// How much of a session's chat a viewport holds: everything up to event `seq` of the run of the
+/// log named `log`. Both come from the daemon (`ChatReset`, then each `Chat`), and go back to it in
+/// `Attach` so a returning viewport is sent only what it missed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../packages/protocol/src/generated/")
+)]
+pub struct ChatCursor {
+    pub log: String,
+    pub seq: u32,
 }
 
 /// The provider-agnostic category of a tool call, assigned by each provider from its own raw tool
@@ -1018,7 +1165,9 @@ pub enum ChatEvent {
     /// A prompt the user sent, with any attached files (images/documents) for inline thumbnails.
     User {
         text: String,
+        // Left off the wire when empty, so the generated type has to say it may be missing.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[cfg_attr(feature = "ts", ts(as = "Option<Vec<ChatFile>>", optional))]
         files: Vec<ChatFile>,
     },
     /// Assistant prose (markdown).

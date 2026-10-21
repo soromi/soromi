@@ -5,27 +5,73 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, accept_async};
 
-use soromi_protocol::{KeepAwakeMode, ServerMessage};
+use soromi_protocol::{ClientMessage, KeepAwakeMode, ServerMessage};
 
 use super::coalesce::until;
-use super::codec::Codec;
+use super::codec::{Codec, Received};
 use super::connection::Connection;
 use super::outbound::{Closed, Frame, LinkState, Outbound, WireStats, message_kind};
 use crate::accounts::store::FileAccountManager;
 use crate::pairing::PairingService;
 use crate::workspaces::service::{Change, WorkspaceService};
 
-/// Called with a relay link's live peer presence (`true` once the phone attaches, `false` when it
-/// drops). Set only for relay device links; local links pass `None`.
+/// Called with a device link's live presence (`true` once the phone is there, `false` when it
+/// drops).
 pub(crate) type PresenceSink = Arc<dyn Fn(bool) + Send + Sync>;
+
+/// What a paired device's link carries besides the socket: which device it is, where to report
+/// that it is there, and the direct routes to tell it about.
+#[derive(Clone)]
+pub(crate) struct DeviceLink {
+    /// The device's id, so its links are known to be the same phone.
+    pub id: String,
+    pub on_presence: PresenceSink,
+    /// Where the device can reach this computer without the relay; it is told on `Hello` and again
+    /// whenever this changes.
+    pub routes: watch::Receiver<Vec<String>>,
+}
+
+/// How a connection reaches its client, which decides when a client counts as being there.
+#[derive(Clone)]
+pub(crate) enum Link {
+    /// A client is on the other end from the first byte: the desktop app on this machine.
+    Local,
+    /// The daemon's standing connection to a device's relay room. A device is on the other end
+    /// only while the relay says so.
+    Relay(DeviceLink),
+    /// A socket a device opened straight to this machine. Anyone on the network can open one, so
+    /// it counts for nothing until it sends a frame sealed with the device's key.
+    Direct(DeviceLink),
+}
+
+impl Link {
+    fn device(&self) -> Option<&DeviceLink> {
+        match self {
+            Link::Local => None,
+            Link::Relay(device) | Link::Direct(device) => Some(device),
+        }
+    }
+}
+
+/// How long a direct socket has to send a frame sealed with its device's key. Past that it is
+/// someone who does not hold the key, and is dropped.
+const PROOF_LIMIT: Duration = Duration::from_secs(10);
 
 /// How often the connection sends a keepalive ping. Shorter than the relay's heartbeat, so an idle
 /// link stays alive and any queued pong is flushed before the relay would drop it.
 const KEEPALIVE: Duration = Duration::from_secs(20);
+
+/// How long a link may stay silent before it is taken for dead. Every ping is answered with a pong,
+/// so a live link is heard from at least once per [`KEEPALIVE`]; two missed in a row means the other
+/// end is gone even though the socket has not said so (a dropped network, a suspended relay).
+const SILENCE_LIMIT: Duration = Duration::from_secs(45);
+
+/// The close code a relay sends a socket whose place in the room was taken by another one.
+pub(crate) const CLOSE_REPLACED: u16 = 4002;
 
 /// The shortest gap between two rounds of state updates to one viewport. The first change after a
 /// quiet spell goes out at once; changes that pile up inside the gap are merged into one round.
@@ -85,40 +131,66 @@ pub async fn serve(
         let pairing = pairing.clone();
         let name = device_name.clone();
         tokio::spawn(async move {
+            // A keystroke and its echo are tiny packets; never hold one back to batch it.
+            let _ = stream.set_nodelay(true);
             if let Ok(ws) = accept_async(stream).await {
                 // Local links are trusted, so they run plaintext and can manage devices.
-                handle_connection(ws, hub, accounts, Codec::Plain, Some(pairing), None, name).await;
+                handle_connection(
+                    ws,
+                    hub,
+                    accounts,
+                    Codec::Plain,
+                    Some(pairing),
+                    Link::Local,
+                    name,
+                )
+                .await;
             }
         });
     }
 }
 
 /// Runs one viewport connection over a WebSocket, whichever way it arrived: accepted locally
-/// (`serve`) or dialed out to a relay. Generic over the stream so both share this exact routing.
-/// The `codec` decides plaintext (local) vs encrypted (relay) framing; `pairing` is `Some` only
-/// for the trusted local link, so only the desktop can create/list/revoke devices.
+/// (`serve`), dialed out to a relay, or accepted from a device on the network. Generic over the
+/// stream so all share this exact routing. The `codec` decides plaintext (local) vs encrypted
+/// (device) framing; `pairing` is `Some` only for the trusted local link, so only the desktop can
+/// create/list/revoke devices; `link` says when a client counts as being there.
+///
+/// Returns the close code the other end gave, if it closed the link with one.
 pub(crate) async fn handle_connection<S>(
     ws: WebSocketStream<S>,
     hub: Arc<WorkspaceService>,
     accounts: Arc<FileAccountManager>,
     codec: Codec,
     pairing: Option<Arc<PairingService>>,
-    on_presence: Option<PresenceSink>,
+    link_kind: Link,
     viewer_name: String,
-) where
+) -> Option<u16>
+where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let viewer_id = NEXT_VIEWER.fetch_add(1, Ordering::Relaxed);
     // A local link has its client from the first byte. A relay link is the daemon's standing
     // connection to the relay: it counts as a viewport only while a device is actually on the other
-    // end, so an absent phone neither holds terminal control nor has state uploaded for it.
-    let is_relay = on_presence.is_some();
-    let link = Arc::new(LinkState::new(!is_relay));
+    // end, so an absent phone neither holds terminal control nor has state uploaded for it. A direct
+    // socket counts only once it has proved it holds the device's key.
+    let local = matches!(link_kind, Link::Local);
+    let link = Arc::new(LinkState::new(local));
     let mut control_changes = hub.subscribe_control();
-    if !is_relay {
+    // Registers this connection as a viewport: on its own, or as one of a device's links.
+    let register = {
+        let hub = hub.clone();
+        let name = viewer_name.clone();
+        let device = link_kind.device().map(|device| device.id.clone());
+        move || match &device {
+            Some(device) => hub.register_device_viewer(viewer_id, name.clone(), device),
+            None => hub.register_viewer(viewer_id, name.clone()),
+        }
+    };
+    if local {
         // The first viewport to attach controls the terminals; a later one sees a takeover until it
         // takes control.
-        hub.register_viewer(viewer_id, viewer_name.clone());
+        register();
     }
 
     let codec = Arc::new(codec);
@@ -269,13 +341,28 @@ pub(crate) async fn handle_connection<S>(
         }
     });
 
+    // Routes task (device links only): when the addresses this computer can be reached at change
+    // (it joined another network, direct access was turned off), tell the device.
+    let routes_task = link_kind.device().map(|device| {
+        let routes_out = out.clone();
+        let routes_link = link.clone();
+        let mut routes = device.routes.clone();
+        tokio::spawn(async move {
+            while routes.changed().await.is_ok() {
+                if routes_link.is_ready() {
+                    let routes = routes.borrow_and_update().clone();
+                    let _ = routes_out.send(ServerMessage::Routes { routes });
+                }
+            }
+        })
+    });
+
     // All this connection's background tasks. The guard aborts them and releases control on scope
     // exit, and crucially also on cancellation: revoking a device aborts this connection's task, so
     // the cleanup must run from `Drop`, not from code after the loop (which cancellation skips).
     let mut tasks = vec![writer, change_task, dir_task, reset_task, control_task];
-    if let Some(task) = devices_task {
-        tasks.push(task);
-    }
+    tasks.extend(devices_task);
+    tasks.extend(routes_task);
     let _guard = ConnectionGuard {
         hub: hub.clone(),
         viewer_id,
@@ -283,8 +370,28 @@ pub(crate) async fn handle_connection<S>(
         stats,
     };
 
-    let mut connection =
-        Connection::new(hub.clone(), accounts, pairing, out, link.clone(), viewer_id);
+    let mut connection = Connection::new(
+        hub.clone(),
+        accounts,
+        pairing,
+        out.clone(),
+        link.clone(),
+        viewer_id,
+    );
+    if let Some(device) = link_kind.device() {
+        connection.set_device(device.id.clone(), device.routes.clone());
+    }
+    // A link that leaves this machine does not survive its sleep: the other end gave up on it
+    // while it was frozen. The desktop's own link is on this machine and sleeps with it.
+    let mut wakes = crate::power::wakes();
+    // On the runtime's clock, like the timer that checks it.
+    let mut last_heard = tokio::time::Instant::now();
+    // A direct socket is on trial until it sends a frame only its device could have sealed.
+    let proof_due =
+        matches!(link_kind, Link::Direct(_)).then(|| tokio::time::Instant::now() + PROOF_LIMIT);
+    // Whether the device has yet to speak in the session it last started: its first message there
+    // is what says it now talks through this link.
+    let mut fresh_session = true;
     loop {
         let message = tokio::select! {
             message = source.next() => message,
@@ -294,43 +401,107 @@ pub(crate) async fn handle_connection<S>(
                 eprintln!("soromi: dropping viewer {viewer_id}: it fell too far behind");
                 break;
             }
+            // Not even a pong: the link is dead. Dropping it lets a relay link dial again.
+            _ = tokio::time::sleep_until(last_heard + SILENCE_LIMIT) => {
+                eprintln!("soromi: dropping viewer {viewer_id}: the link went silent");
+                break;
+            }
+            // A direct socket that never proved it holds the key.
+            _ = until_proof(proof_due, &link) => break,
+            // The machine slept. Whatever this socket was, it is dead on the far side; ending it
+            // here lets a relay link dial again now instead of once the silence is noticed.
+            Ok(()) = wakes.changed(), if !local => {
+                eprintln!("soromi: dropping viewer {viewer_id}: the machine woke from sleep");
+                break;
+            }
         };
         let Some(Ok(message)) = message else {
             break;
         };
-        if matches!(message, Message::Close(_)) {
-            break;
+        last_heard = tokio::time::Instant::now();
+        if let Message::Close(frame) = message {
+            return frame.map(|frame| frame.code.into());
         }
         // Relay control frames (peer presence) arrive as text and are not client messages; on a
-        // device link they report whether the phone is attached.
-        if let (Some(sink), Message::Text(text)) = (&on_presence, &message)
+        // device's relay link they report whether the phone is attached.
+        if let (Link::Relay(device), Message::Text(text)) = (&link_kind, &message)
             && let Some(present) = parse_presence(text)
         {
-            sink(present);
+            (device.on_presence)(present);
             if link.set_present(present) {
                 if present {
-                    hub.register_viewer(viewer_id, viewer_name.clone());
+                    register();
                 } else {
-                    // The device left: stop streaming to it and give up its control claim.
+                    // The device left: stop streaming to it, end its encrypted session, and give
+                    // up its control claim.
                     connection.reset_client();
+                    codec.end_session();
                     hub.unregister_viewer(viewer_id);
                 }
             }
             continue;
         }
-        if let Some(client) = codec.decode(message) {
+        let received = codec.receive(message);
+        match &link_kind {
+            Link::Local => {}
             // A relay that never announces presence still proves a device is there by delivering
-            // its messages.
-            if is_relay && link.set_present(true) {
-                hub.register_viewer(viewer_id, viewer_name.clone());
+            // what it sends.
+            Link::Relay(_) => {
+                if matches!(received, Received::Payload(_) | Received::Opened(_))
+                    && link.set_present(true)
+                {
+                    register();
+                }
             }
-            connection.handle(client);
+            // On a direct socket only a frame that opened with the session's keys is proof: asking
+            // for a session takes no key at all.
+            Link::Direct(device) => {
+                if matches!(received, Received::Payload(_)) && link.set_present(true) {
+                    register();
+                    (device.on_presence)(true);
+                }
+            }
         }
+        match received {
+            Received::Payload(payload) => {
+                if fresh_session && link_kind.device().is_some() {
+                    fresh_session = false;
+                    hub.follow_device(viewer_id);
+                }
+                if let Ok(client) = serde_json::from_slice::<ClientMessage>(&payload) {
+                    connection.handle(client);
+                }
+            }
+            // A device started an encrypted session, so it is starting over: what the last session
+            // had attached is void, and its answer takes its place in the queue.
+            Received::Opened(start) => {
+                fresh_session = true;
+                connection.reset_client();
+                if out.session(start).is_err() {
+                    break;
+                }
+            }
+            Received::Accepted | Received::Nothing => {}
+        }
+    }
+    None
+}
+
+/// Resolves when a direct socket's time to prove itself is up and it has not; never for a link
+/// that has, or that is not on trial.
+async fn until_proof(due: Option<tokio::time::Instant>, link: &LinkState) {
+    match due {
+        Some(due) if !link.is_present() => tokio::time::sleep_until(due).await,
+        _ => std::future::pending().await,
     }
 }
 
 /// Turns a queued frame into a WebSocket message, tallying it when stats are on.
 fn encode(codec: &Codec, frame: Frame, stats: Option<&Arc<Mutex<WireStats>>>) -> Option<Message> {
+    let frame = match frame {
+        Frame::Session(start) => return Some(codec.begin(start)),
+        frame => frame,
+    };
     let (payload, text) = frame.into_payload()?;
     let kind = stats.map(|_| {
         if text {
@@ -552,14 +723,18 @@ mod tests {
         let codec = Codec::from_key_base64(key).unwrap();
         tokio::spawn(async move {
             let ws = accept_async(near).await.unwrap();
-            let on_presence: PresenceSink = Arc::new(|_| {});
+            let device = DeviceLink {
+                id: "d1".to_string(),
+                on_presence: Arc::new(|_| {}),
+                routes: watch::channel(Vec::new()).1,
+            };
             handle_connection(
                 ws,
                 handler_hub,
                 Arc::new(FileAccountManager),
                 codec,
                 None,
-                Some(on_presence),
+                Link::Relay(device),
                 "Phone".to_string(),
             )
             .await;
@@ -570,12 +745,42 @@ mod tests {
         (hub, far)
     }
 
+    /// How many data frames arrive until the link has been quiet for 200 ms.
+    async fn frames(far: &mut Far) -> usize {
+        let mut count = 0;
+        while let Ok(Some(Ok(frame))) =
+            tokio::time::timeout(Duration::from_millis(200), far.next()).await
+        {
+            if matches!(frame, Message::Text(_) | Message::Binary(_)) {
+                count += 1;
+            }
+        }
+        count
+    }
+
     async fn presence(far: &mut Far, peers: u8) {
         far.send(Message::Text(format!(
             r#"{{"__relay":"presence","peers":{peers}}}"#
         )))
         .await
         .unwrap();
+    }
+
+    /// Starts an encrypted session from the far end, as a paired device does on arriving, and
+    /// returns the device's end of it.
+    async fn open_session(far: &mut Far, key: &str) -> Codec {
+        let device = Codec::device_from_key_base64(key).unwrap();
+        far.send(device.open_session().unwrap()).await.unwrap();
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(2), far.next())
+                .await
+                .expect("the daemon did not answer the session request")
+                .unwrap()
+                .unwrap();
+            if matches!(device.receive(frame), Received::Accepted) {
+                return device;
+            }
+        }
     }
 
     /// The types of the messages that arrive until the link has been quiet for 200 ms.
@@ -597,17 +802,18 @@ mod tests {
         const KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
         let home = tempfile::tempdir().unwrap();
         crate::home::set_soromi_home(Some(home.path().to_path_buf()));
-        let codec = Codec::from_key_base64(KEY).unwrap();
         let (hub, mut far) = relay_link(KEY).await;
 
-        // Only the daemon is in the room: the link holds no control and is sent nothing.
+        // Only the daemon is in the room: the link holds no control and nothing crosses it.
         presence(&mut far, 1).await;
         hub.set_keep_awake_mode(KeepAwakeMode::Always);
-        assert_eq!(received(&mut far, &codec).await, Vec::<String>::new());
+        assert_eq!(frames(&mut far).await, 0);
         assert_eq!(hub.controller_name(), None);
 
-        // A device joins: it becomes a viewport, but is sent nothing until it says hello.
+        // A device joins and starts its session: it becomes a viewport, but is sent nothing until
+        // it says hello.
         presence(&mut far, 2).await;
+        let codec = open_session(&mut far, KEY).await;
         hub.set_keep_awake_mode(KeepAwakeMode::Off);
         assert_eq!(received(&mut far, &codec).await, Vec::<String>::new());
         assert_eq!(hub.controller_name().as_deref(), Some("Phone"));
@@ -628,17 +834,86 @@ mod tests {
         far.send(say(ask)).await.unwrap();
         assert_eq!(
             received(&mut far, &codec).await,
-            vec!["welcome", "workspace-list", "keep-awake", "control"]
+            // Its welcome comes with the direct routes it can also try (none here).
+            vec![
+                "welcome",
+                "routes",
+                "workspace-list",
+                "keep-awake",
+                "control"
+            ]
         );
         hub.set_keep_awake_mode(KeepAwakeMode::Always);
         assert_eq!(received(&mut far, &codec).await, vec!["keep-awake"]);
 
-        // The device leaves: control is released and the uploads stop.
+        // The device leaves: control is released, its session ends, and the uploads stop.
         presence(&mut far, 1).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(hub.controller_name(), None);
         hub.set_keep_awake_mode(KeepAwakeMode::Off);
-        assert_eq!(received(&mut far, &codec).await, Vec::<String>::new());
+        assert_eq!(frames(&mut far).await, 0);
+
+        // What the device sent before is noise now, even while a device is in the room again: a
+        // recording of an old session gets no answer.
+        presence(&mut far, 2).await;
+        let replayed = format!(
+            r#"{{"type":"hello","protocol":{},"clientId":"phone"}}"#,
+            soromi_protocol::PROTOCOL_VERSION
+        );
+        far.send(say(replayed)).await.unwrap();
+        assert_eq!(frames(&mut far).await, 0);
+
+        // A new session serves it again from scratch.
+        let codec = open_session(&mut far, KEY).await;
+        let say = |text: String| codec.seal(text.into_bytes(), true).unwrap();
+        let hello = format!(
+            r#"{{"type":"hello","protocol":{},"clientId":"phone"}}"#,
+            soromi_protocol::PROTOCOL_VERSION
+        );
+        far.send(say(hello)).await.unwrap();
+        assert_eq!(received(&mut far, &codec).await, vec!["welcome", "routes"]);
+
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[serial_test::serial]
+    async fn a_link_that_goes_silent_is_dropped() {
+        const KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let (_hub, mut far) = relay_link(KEY).await;
+
+        // The far end stops reading, so the daemon's pings go unanswered.
+        tokio::time::sleep(SILENCE_LIMIT + Duration::from_secs(1)).await;
+
+        // All that is left on the link is the pings it ignored, then the end of the stream.
+        let ended = loop {
+            match tokio::time::timeout(Duration::from_secs(1), far.next()).await {
+                Ok(Some(Ok(_))) => continue,
+                Ok(None) | Ok(Some(Err(_))) => break true,
+                Err(_) => break false,
+            }
+        };
+        assert!(ended, "a silent link was kept open");
+
+        crate::home::set_soromi_home(None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[serial_test::serial]
+    async fn a_quiet_link_that_answers_pings_is_kept() {
+        const KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        let home = tempfile::tempdir().unwrap();
+        crate::home::set_soromi_home(Some(home.path().to_path_buf()));
+        let (_hub, mut far) = relay_link(KEY).await;
+
+        // Reading is what answers pings. Nothing else crosses the link, well past the limit.
+        let open = tokio::time::timeout(SILENCE_LIMIT * 3, async {
+            while let Some(Ok(_)) = far.next().await {}
+        })
+        .await;
+        assert!(open.is_err(), "a link that answers pings was dropped");
 
         crate::home::set_soromi_home(None);
     }

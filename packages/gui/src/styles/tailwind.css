@@ -38,6 +38,64 @@
 @source "../../../ui/node_modules/streamdown/dist/**/*.js";
 
 /*
+ * Streamdown opens a table full screen in a layer of its own, appended to the page and so outside
+ * the message it came from. Two things go missing there, and are put back here:
+ *
+ * - The message's text colour and size: the layer inherits the page's, which has none set, so the
+ *   cells came out near-black on the dark background.
+ * - Clicks along the top: the layer sits over the window's draggable title strip, which takes
+ *   them. The layer is marked not draggable, which makes its buttons work, and gets a strip of its
+ *   own to drag the window by, kept clear of the buttons.
+ *
+ * The buttons also get a hit area the size of the app's other toolbar buttons. (Copying and
+ * downloading from this view need streamdown 2.7 or later; before that they found no table.)
+ */
+[data-streamdown="table-fullscreen"] {
+  color: var(--soromi-text);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-app-region: no-drag;
+}
+[data-streamdown="table-fullscreen"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 160px;
+  height: 36px;
+  -webkit-app-region: drag;
+}
+/* The layer's toolbar: its first row. Below the window's title strip, with room around it. */
+[data-streamdown="table-fullscreen"] > div > div:first-child {
+  gap: 6px;
+  padding: 10px 16px;
+}
+/* The buttons themselves: closing is one, copying and downloading each sit in a wrapper that
+   also holds their menu, whose items are left as they are. */
+[data-streamdown="table-fullscreen"] > div > div:first-child > button,
+[data-streamdown="table-fullscreen"] > div > div:first-child > div > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--soromi-text-dim);
+}
+[data-streamdown="table-fullscreen"] > div > div:first-child > button:hover,
+[data-streamdown="table-fullscreen"] > div > div:first-child > div > button:hover {
+  background: var(--soromi-bg-hover);
+  color: var(--soromi-text);
+}
+[data-streamdown="table-fullscreen"] > div > div:first-child > button svg,
+[data-streamdown="table-fullscreen"] > div > div:first-child > div > button svg {
+  width: 17px;
+  height: 17px;
+}
+
+/*
  * shadcn's semantic tokens, aliased to Soromi's palette (the single source of truth in
  * @soromi/ui/theme.css), so shadcn components match the app with no visual drift. Dark-only.
  */

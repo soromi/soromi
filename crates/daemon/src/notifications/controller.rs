@@ -6,17 +6,73 @@ use soromi_protocol::Status;
 use tokio::sync::broadcast;
 
 use super::notifier::{Notification, Notifier};
+use super::push::{ExpoGateway, PushService};
 
-const DEBOUNCE: Duration = Duration::from_millis(3500);
+pub const DEBOUNCE: Duration = Duration::from_millis(3500);
+/// Every banner's title: the app's name.
+const TITLE: &str = "Soromi";
 
-/// A banner routed to a native viewer (the Electron shell) instead of fired locally. Carries the
-/// `workspace` (and `session`, when known) it is about, so a click can open that tab.
+/// A banner routed to a viewer that shows it itself (the Electron shell, a paired device) instead
+/// of fired locally. Carries the `workspace` (and `session`, when known) it is about, so a click
+/// can open that tab.
 #[derive(Clone)]
 pub struct WireNotification {
     pub title: String,
     pub body: String,
     pub workspace: String,
     pub session: Option<String>,
+    /// Who it is for. A device is sent every banner over its link, and shows it or not by what is
+    /// on its own screen; what is pushed to a phone that is put away is only what is for everyone.
+    pub audience: Audience,
+}
+
+/// Who a banner is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    /// Nobody is looking at the app on this computer: it shows the banner, and so does every
+    /// paired device.
+    Everyone,
+    /// Someone is looking at the app on this computer, where a banner adds nothing. A paired
+    /// device whose app is open is still told: it may be in the hands of someone who is not at
+    /// the computer, and only the device knows whether its own screen is being looked at. A phone
+    /// that is put away is left alone: the person is at the computer.
+    Devices,
+}
+
+/// Where a banner can go: this machine's notifier, the desktop shell, the paired devices.
+#[derive(Clone)]
+struct Outlets {
+    notifier: Arc<dyn Notifier>,
+    /// Native viewers on this computer (the Electron shell) subscribe here; while any are, its
+    /// banners route to them as `Notify` wire messages instead of firing through `notifier` (so
+    /// they carry the app identity).
+    wire_tx: broadcast::Sender<WireNotification>,
+    /// Paired devices that show banners subscribe here.
+    device_tx: broadcast::Sender<WireNotification>,
+    /// For the devices that are not there to be told over their link.
+    push: Arc<PushService>,
+}
+
+impl Outlets {
+    fn send(&self, banner: WireNotification) {
+        // A send with nobody subscribed is an error that means just that.
+        let _ = self.device_tx.send(banner.clone());
+        if banner.audience == Audience::Devices {
+            return;
+        }
+        self.push.deliver(&banner);
+        if self.wire_tx.receiver_count() > 0 {
+            let _ = self.wire_tx.send(banner);
+        } else {
+            self.notifier.notify(Notification {
+                title: banner.title,
+                // Silent: the sound player owns the audio cue (immediate, per event), so the
+                // banner does not double it up.
+                message: banner.body,
+                sound: false,
+            });
+        }
+    }
 }
 
 fn is_attention(status: Status) -> bool {
@@ -46,12 +102,9 @@ struct Inner {
 /// when the session leaves the attention states). State is per session; mute is per workspace.
 /// Timers run as tokio tasks, so it must be used within a runtime.
 pub struct NotificationController {
-    notifier: Arc<dyn Notifier>,
+    outlets: Outlets,
     debounce: Duration,
     inner: Arc<Mutex<Inner>>,
-    /// Native viewers (the Electron shell) subscribe here; while any are, banners route to them as
-    /// `Notify` wire messages instead of firing through `notifier` (so they carry the app identity).
-    wire_tx: broadcast::Sender<WireNotification>,
 }
 
 impl NotificationController {
@@ -59,22 +112,52 @@ impl NotificationController {
         Self::with_debounce(notifier, DEBOUNCE)
     }
 
+    /// The controller as the daemon runs it: with the push tokens kept under the Soromi home.
+    /// Every other constructor starts with none and keeps none, so nothing built for a test can
+    /// reach a real phone.
+    pub fn standard(notifier: Arc<dyn Notifier>) -> Self {
+        Self::with_push(notifier, DEBOUNCE, Arc::new(PushService::standard()))
+    }
+
     pub fn with_debounce(notifier: Arc<dyn Notifier>, debounce: Duration) -> Self {
+        let push = PushService::new(Arc::new(ExpoGateway), None);
+        Self::with_push(notifier, debounce, Arc::new(push))
+    }
+
+    pub fn with_push(
+        notifier: Arc<dyn Notifier>,
+        debounce: Duration,
+        push: Arc<PushService>,
+    ) -> Self {
         Self {
-            notifier,
+            outlets: Outlets {
+                notifier,
+                wire_tx: broadcast::channel(64).0,
+                device_tx: broadcast::channel(64).0,
+                push,
+            },
             debounce,
             inner: Arc::new(Mutex::new(Inner {
                 states: HashMap::new(),
                 muted: HashSet::new(),
             })),
-            wire_tx: broadcast::channel(64).0,
         }
     }
 
-    /// Subscribes a native viewer: while it (or any) is subscribed, banners are delivered over this
-    /// channel rather than fired locally.
+    /// Subscribes a native viewer on this computer: while it (or any) is subscribed, the
+    /// computer's banners are delivered over this channel rather than fired locally.
     pub fn subscribe_wire(&self) -> broadcast::Receiver<WireNotification> {
-        self.wire_tx.subscribe()
+        self.outlets.wire_tx.subscribe()
+    }
+
+    /// Subscribes a paired device, which gets every banner whoever is at the computer.
+    pub fn subscribe_devices(&self) -> broadcast::Receiver<WireNotification> {
+        self.outlets.device_tx.subscribe()
+    }
+
+    /// The devices that take pushed banners, for when they are not connected to be told.
+    pub fn push(&self) -> Arc<PushService> {
+        self.outlets.push.clone()
     }
 
     pub fn set_muted(&self, workspace: &str, muted: bool) {
@@ -92,27 +175,19 @@ impl NotificationController {
 
     /// Fires a banner immediately for a discrete agent event (silent, since the sound player
     /// owns the audio), unless the workspace is muted. `session` (when known) rides along so a
-    /// native click can open that tab. Routes to a native viewer if one is subscribed, else the OS.
-    pub fn fire(&self, workspace: &str, session: Option<&str>, text: &str) {
+    /// native click can open that tab. On this computer it routes to a native viewer if one is
+    /// subscribed, else the OS; `audience` says whether the computer shows it at all.
+    pub fn fire(&self, workspace: &str, session: Option<&str>, text: &str, audience: Audience) {
         if self.is_muted(workspace) {
             return;
         }
-        let title = "Soromi".to_string();
-        let body = format!("\"{workspace}\" {text}");
-        if self.wire_tx.receiver_count() > 0 {
-            let _ = self.wire_tx.send(WireNotification {
-                title,
-                body,
-                workspace: workspace.to_string(),
-                session: session.map(str::to_string),
-            });
-        } else {
-            self.notifier.notify(Notification {
-                title,
-                message: body,
-                sound: false,
-            });
-        }
+        self.outlets.send(WireNotification {
+            title: TITLE.to_string(),
+            body: format!("\"{workspace}\" {text}"),
+            workspace: workspace.to_string(),
+            session: session.map(str::to_string),
+            audience,
+        });
     }
 
     pub fn handle(&self, workspace: &str, session: &str, status: Status) {
@@ -143,8 +218,7 @@ impl NotificationController {
         drop(inner);
 
         let inner = self.inner.clone();
-        let notifier = self.notifier.clone();
-        let wire_tx = self.wire_tx.clone();
+        let outlets = self.outlets.clone();
         let debounce = self.debounce;
         let workspace = workspace.to_string();
         let session = session.to_string();
@@ -166,17 +240,13 @@ impl NotificationController {
                 (state.status, guard.muted.contains(&workspace))
             };
             if !muted {
-                let notification = message_for(&workspace, status);
-                if wire_tx.receiver_count() > 0 {
-                    let _ = wire_tx.send(WireNotification {
-                        title: notification.title,
-                        body: notification.message,
-                        workspace: workspace.clone(),
-                        session: Some(session.clone()),
-                    });
-                } else {
-                    notifier.notify(notification);
-                }
+                outlets.send(WireNotification {
+                    title: TITLE.to_string(),
+                    body: format!("\"{workspace}\" {}", text_for(status)),
+                    workspace,
+                    session: Some(session),
+                    audience: Audience::Everyone,
+                });
             }
         });
     }
@@ -191,18 +261,11 @@ impl NotificationController {
     }
 }
 
-fn message_for(workspace: &str, status: Status) -> Notification {
-    let text = match status {
+fn text_for(status: Status) -> &'static str {
+    match status {
         Status::WaitingInput => "needs your input",
         Status::Blocked => "is blocked",
         _ => "finished",
-    };
-    Notification {
-        title: "Soromi".into(),
-        // Silent: the sound player owns the audio cue (immediate, per event), so the banner
-        // does not double it up.
-        message: format!("\"{workspace}\" {text}"),
-        sound: false,
     }
 }
 
@@ -238,6 +301,61 @@ mod tests {
         ctrl.handle("kazomi", "s1", Status::Thinking);
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert!(rec.messages.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_device_is_told_even_with_someone_at_the_computer() {
+        let rec = Arc::new(Recording::default());
+        let ctrl = NotificationController::new(rec.clone());
+        let mut device = ctrl.subscribe_devices();
+
+        ctrl.fire("kazomi", Some("s1"), "finished", Audience::Devices);
+
+        let banner = device.try_recv().expect("the device's banner");
+        assert_eq!(banner.body, "\"kazomi\" finished");
+        assert_eq!(banner.session.as_deref(), Some("s1"));
+        assert!(rec.messages.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn with_nobody_at_the_computer_it_shows_the_banner_and_so_does_a_device() {
+        let rec = Arc::new(Recording::default());
+        let ctrl = NotificationController::new(rec.clone());
+        let mut device = ctrl.subscribe_devices();
+
+        ctrl.fire("kazomi", None, "finished", Audience::Everyone);
+
+        assert!(device.try_recv().is_ok());
+        assert_eq!(rec.messages.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_device_does_not_take_the_banner_away_from_the_computer() {
+        let rec = Arc::new(Recording::default());
+        let ctrl = NotificationController::new(rec.clone());
+        let _device = ctrl.subscribe_devices();
+        let mut shell = ctrl.subscribe_wire();
+
+        ctrl.fire("kazomi", None, "finished", Audience::Everyone);
+        // The shell shows it, in place of the OS notifier.
+        assert!(shell.try_recv().is_ok());
+        assert!(rec.messages.lock().unwrap().is_empty());
+
+        // And nothing reaches it while the app is being looked at.
+        ctrl.fire("kazomi", None, "finished", Audience::Devices);
+        assert!(shell.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_muted_workspace_tells_no_device() {
+        let rec = Arc::new(Recording::default());
+        let ctrl = NotificationController::new(rec);
+        let mut device = ctrl.subscribe_devices();
+        ctrl.set_muted("kazomi", true);
+
+        ctrl.fire("kazomi", None, "finished", Audience::Devices);
+
+        assert!(device.try_recv().is_err());
     }
 
     #[tokio::test]

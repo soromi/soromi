@@ -11,15 +11,15 @@ use tokio::task::AbortHandle;
 
 use soromi_protocol::{ChatEvent, Status, SubAgent, ToolKind};
 
+use super::chat_log::ChatLog;
 use super::decoder::Utf8Decoder;
-use super::scrollback::ScrollbackBuffer;
+use super::screen::Screen;
+use super::subagents::Subagents;
 use crate::providers::{self, Provider};
 use crate::status::state::StatusState;
-use crate::transcript::tailer;
+use crate::transcript::{self, tailer};
 
-const SCROLLBACK_BYTES: usize = 256 * 1024;
 const OUTPUT_CAPACITY: usize = 2048;
-const CHAT_CAPACITY: usize = 512;
 
 /// How long a `Thinking` session may go without any PTY output before the idle-decay safety net
 /// falls it back to `Idle`. Agents (Claude) repaint an animated status line roughly once a second
@@ -42,7 +42,25 @@ pub struct SessionOptions {
     pub rows: u16,
 }
 
-/// Owns one PTY. A reader thread pumps output into capped scrollback and a broadcast channel,
+/// One step of a terminal's output, in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Output {
+    /// Text the program wrote.
+    Data(String),
+    /// The terminal changed size; what follows is drawn for the new one.
+    Resized { cols: u16, rows: u16 },
+}
+
+/// A terminal as it stands, for a viewer to start from.
+pub struct Snapshot {
+    pub cols: u16,
+    pub rows: u16,
+    /// Output that redraws the terminal (its history, screen, cursor and modes) on a viewport's
+    /// terminal of this size that was just reset.
+    pub repaint: String,
+}
+
+/// Owns one PTY. A reader thread pumps output into a headless screen and a broadcast channel,
 /// and derives the agent status from that output (exposed as a watch channel). Cheap to clone
 /// via `Arc` so the transport can share it across connections.
 pub struct Session {
@@ -52,8 +70,9 @@ pub struct Session {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
-    scrollback: Arc<Mutex<ScrollbackBuffer>>,
-    output_tx: broadcast::Sender<String>,
+    /// The terminal as the program sees it, kept up to date with every byte of output.
+    screen: Arc<Mutex<Screen>>,
+    output_tx: broadcast::Sender<Output>,
     status_tx: Arc<watch::Sender<Status>>,
     status_rx: watch::Receiver<Status>,
     /// Set when a hook reported an authoritative status (done / waiting-input). While set, the PTY
@@ -71,15 +90,14 @@ pub struct Session {
     reader_handle: Option<JoinHandle<()>>,
     /// The idle-decay task, aborted on Drop.
     decay_handle: Option<AbortHandle>,
-    /// Structured chat events parsed from the agent's transcript: a live feed plus an accumulated
-    /// log replayed to a viewport on attach. Empty until a transcript is attached (Claude only).
-    chat_tx: broadcast::Sender<ChatEvent>,
-    chat_log: Arc<Mutex<Vec<ChatEvent>>>,
+    /// Structured chat events parsed from the agent's transcript, for viewers to follow. Empty
+    /// until a transcript is attached (Claude only).
+    chat_log: Arc<ChatLog>,
     /// Sub-agents the agent has spawned this turn, as `(tool_use_id, sub-agent)`, derived from
     /// `Task` tool-uses in the transcript: a use adds a running one, its result marks it done (or
     /// blocked on error), and a new user prompt clears the lot. Surfaced per-tab in the sidebar; the
     /// watch channel mirrors the list so a change can trigger a workspace re-broadcast.
-    active_subagents: Arc<Mutex<Vec<(String, SubAgent)>>>,
+    active_subagents: Arc<Mutex<Subagents>>,
     subagents_tx: Arc<watch::Sender<Vec<SubAgent>>>,
     subagents_rx: watch::Receiver<Vec<SubAgent>>,
     /// The agent's current activity — the latest in-progress non-`Task` tool call, as `(tool_use_id,
@@ -134,7 +152,7 @@ impl Session {
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
-        let scrollback = Arc::new(Mutex::new(ScrollbackBuffer::new(SCROLLBACK_BYTES)));
+        let screen = Arc::new(Mutex::new(Screen::new(opts.cols, opts.rows)));
         let (output_tx, _) = broadcast::channel(OUTPUT_CAPACITY);
         let (status_tx, status_rx) = watch::channel(Status::Idle);
         let status_tx = Arc::new(status_tx);
@@ -145,7 +163,7 @@ impl Session {
         let reader_handle = spawn_reader(
             reader,
             provider,
-            scrollback.clone(),
+            screen.clone(),
             output_tx.clone(),
             status_tx.clone(),
             settled.clone(),
@@ -159,7 +177,6 @@ impl Session {
             last_activity.clone(),
         );
 
-        let (chat_tx, _) = broadcast::channel(CHAT_CAPACITY);
         let (subagents_tx, subagents_rx) = watch::channel(Vec::new());
         let (activity_tx, activity_rx) = watch::channel(None);
 
@@ -168,7 +185,7 @@ impl Session {
             master: Arc::new(Mutex::new(pair.master)),
             writer: Arc::new(Mutex::new(writer)),
             child: Arc::new(Mutex::new(child)),
-            scrollback,
+            screen,
             output_tx,
             status_tx,
             status_rx,
@@ -177,9 +194,8 @@ impl Session {
             last_activity,
             reader_handle: Some(reader_handle),
             decay_handle,
-            chat_tx,
-            chat_log: Arc::new(Mutex::new(Vec::new())),
-            active_subagents: Arc::new(Mutex::new(Vec::new())),
+            chat_log: Arc::new(ChatLog::new(Vec::new())),
+            active_subagents: Arc::new(Mutex::new(Subagents::default())),
             subagents_tx: Arc::new(subagents_tx),
             subagents_rx,
             pending_tools: Arc::new(Mutex::new(Vec::new())),
@@ -190,11 +206,20 @@ impl Session {
         })
     }
 
-    /// The recent screen, replayed to a viewport on attach.
+    /// Output that redraws the terminal as it stands (its history, screen, cursor and modes) on a
+    /// viewport's terminal that was just reset.
     pub fn snapshot(&self) -> String {
-        self.scrollback
+        self.screen
             .lock()
-            .map(|buffer| buffer.snapshot())
+            .map(|screen| screen.repaint())
+            .unwrap_or_default()
+    }
+
+    /// The terminal's size, as `(columns, rows)`.
+    pub fn size(&self) -> (u16, u16) {
+        self.screen
+            .lock()
+            .map(|screen| screen.size())
             .unwrap_or_default()
     }
 
@@ -237,17 +262,33 @@ impl Session {
     }
 
     /// A live feed of output frames produced after this call.
-    pub fn subscribe_output(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe_output(&self) -> broadcast::Receiver<Output> {
         self.output_tx.subscribe()
     }
 
-    /// The recent screen and a feed of everything written after it, taken together: the receiver
-    /// starts exactly where the snapshot ends, so replaying one then the other neither drops nor
-    /// repeats output. Used on attach, and again to repaint a viewer that fell too far behind.
-    pub fn attach_output(&self) -> (String, broadcast::Receiver<String>) {
-        match self.scrollback.lock() {
-            Ok(buffer) => (buffer.snapshot(), self.output_tx.subscribe()),
-            Err(_) => (String::new(), self.output_tx.subscribe()),
+    /// The terminal as it stands and a feed of everything after it, taken together: the receiver
+    /// starts exactly where the snapshot ends, so applying one then the other neither drops nor
+    /// repeats output, and a later change of size arrives in its place among the output. Used on
+    /// attach, and again to repaint a viewer that fell too far behind.
+    pub fn attach_output(&self) -> (Snapshot, broadcast::Receiver<Output>) {
+        match self.screen.lock() {
+            Ok(screen) => {
+                let (cols, rows) = screen.size();
+                let snapshot = Snapshot {
+                    cols,
+                    rows,
+                    repaint: screen.repaint(),
+                };
+                (snapshot, self.output_tx.subscribe())
+            }
+            Err(_) => {
+                let snapshot = Snapshot {
+                    cols: 0,
+                    rows: 0,
+                    repaint: String::new(),
+                };
+                (snapshot, self.output_tx.subscribe())
+            }
         }
     }
 
@@ -256,17 +297,9 @@ impl Session {
         self.status_rx.clone()
     }
 
-    /// A live feed of chat events parsed from the transcript after this call.
-    pub fn subscribe_chat(&self) -> broadcast::Receiver<ChatEvent> {
-        self.chat_tx.subscribe()
-    }
-
-    /// The chat events accumulated so far, replayed to a viewport on attach.
-    pub fn chat_snapshot(&self) -> Vec<ChatEvent> {
-        self.chat_log
-            .lock()
-            .map(|log| log.clone())
-            .unwrap_or_default()
+    /// The chat events parsed from the transcript, for viewers to follow.
+    pub fn chat_log(&self) -> &Arc<ChatLog> {
+        &self.chat_log
     }
 
     /// The sub-agents spawned this turn (Claude `Task` calls), each with its live status.
@@ -308,9 +341,7 @@ impl Session {
         {
             handle.abort();
         }
-        if let Ok(mut log) = self.chat_log.lock() {
-            log.clear();
-        }
+        self.chat_log.restart();
         // A fresh conversation starts with no running sub-agents and no activity.
         if let Ok(mut active) = self.active_subagents.lock() {
             active.clear();
@@ -321,7 +352,6 @@ impl Session {
         let _ = self.subagents_tx.send(Vec::new());
         let _ = self.activity_tx.send(None);
 
-        let chat_tx = self.chat_tx.clone();
         let chat_log = self.chat_log.clone();
         let active_subagents = self.active_subagents.clone();
         let subagents_tx = self.subagents_tx.clone();
@@ -330,16 +360,41 @@ impl Session {
         let last_activity = self.last_activity.clone();
         let provider = self.provider;
         // The provider owns the transcript format; an unknown provider parses nothing (no chat).
-        let parse = move |line: &str| {
-            provider
-                .map(|p| p.parse_transcript_line(line))
-                .unwrap_or_default()
+        // Each entry is read once, where it first appears: a provider may write old messages again
+        // further down (Claude does when it compacts), and those are not new.
+        let reader = Arc::new(Mutex::new(transcript::Reader::new(provider)));
+        let parse = {
+            let reader = reader.clone();
+            let active_subagents = active_subagents.clone();
+            let subagents_tx = subagents_tx.clone();
+            move |line: &str| {
+                let (events, tasks) = reader
+                    .lock()
+                    .map(|mut reader| reader.read_with_tasks(line))
+                    .unwrap_or_default();
+                // What the line says of background agents is taken in here, ahead of its events:
+                // each line is parsed and then handed on, so the order of the transcript holds.
+                if !tasks.is_empty()
+                    && let Ok(mut active) = active_subagents.lock()
+                    && active.apply(&tasks, &[])
+                {
+                    let _ = subagents_tx.send(active.list());
+                }
+                events
+            }
+        };
+        // The file was replaced under us: what was read from the old one is void.
+        let restart = {
+            let chat_log = chat_log.clone();
+            move || {
+                if let Ok(mut reader) = reader.lock() {
+                    reader.restart();
+                }
+                chat_log.restart();
+            }
         };
         let handle = tokio::spawn(async move {
-            tailer::tail(path, parse, |events| {
-                if let Ok(mut log) = chat_log.lock() {
-                    log.extend(events.iter().cloned());
-                }
+            let on_events = |events: Vec<ChatEvent>| {
                 // A growing transcript means the agent is alive: keep the idle-decay clock fresh even
                 // when the terminal isn't repainting (e.g. a long, silent high-effort thinking pass),
                 // so the safety net only trips on a genuinely finished turn whose Stop hook was missed.
@@ -350,12 +405,9 @@ impl Session {
                 }
                 // Update the sub-agent set; publish the list only when it changed.
                 if let Ok(mut active) = active_subagents.lock()
-                    && track_subagents(&mut active, &events, |t| {
-                        provider.is_some_and(|p| p.is_subagent_launch_ack(t))
-                    })
+                    && active.apply(&[], &events)
                 {
-                    let list = active.iter().map(|(_, sub)| sub.clone()).collect();
-                    let _ = subagents_tx.send(list);
+                    let _ = subagents_tx.send(active.list());
                 }
                 // Update the current activity (latest in-progress tool); publish on change.
                 if let Ok(mut pending) = pending_tools.lock()
@@ -363,11 +415,9 @@ impl Session {
                 {
                     let _ = activity_tx.send(pending.last().map(|(_, label)| label.clone()));
                 }
-                for event in events {
-                    let _ = chat_tx.send(event);
-                }
-            })
-            .await;
+                chat_log.extend(events);
+            };
+            tailer::tail(path, parse, on_events, restart).await;
         })
         .abort_handle();
 
@@ -393,6 +443,14 @@ impl Session {
                 pixel_width: 0,
                 pixel_height: 0,
             });
+        }
+        // The headless screen follows, re-wrapping its history to the new width, and viewers are
+        // told in step with the output: what the program draws next is for the new size.
+        if let Ok(mut screen) = self.screen.lock()
+            && screen.resize(cols, rows)
+        {
+            let (cols, rows) = screen.size();
+            let _ = self.output_tx.send(Output::Resized { cols, rows });
         }
     }
 
@@ -425,8 +483,8 @@ impl Drop for Session {
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
     provider: Option<&'static dyn Provider>,
-    scrollback: Arc<Mutex<ScrollbackBuffer>>,
-    output_tx: broadcast::Sender<String>,
+    screen: Arc<Mutex<Screen>>,
+    output_tx: broadcast::Sender<Output>,
     status_tx: Arc<watch::Sender<Status>>,
     settled: Arc<AtomicBool>,
     activated: Arc<AtomicBool>,
@@ -444,11 +502,11 @@ fn spawn_reader(
                     if text.is_empty() {
                         continue;
                     }
-                    // Record and publish under one lock, so a viewer that takes the scrollback and a
+                    // Apply and publish under one lock, so a viewer that takes the screen and a
                     // receiver together (`attach_output`) sees this chunk exactly once.
-                    if let Ok(mut sb) = scrollback.lock() {
-                        sb.append(&text);
-                        let _ = output_tx.send(text.clone());
+                    if let Ok(mut screen) = screen.lock() {
+                        screen.feed(&text);
+                        let _ = output_tx.send(Output::Data(text.clone()));
                     }
                     // Output means the agent is doing something: keep the idle-decay clock fresh.
                     if let Ok(mut at) = last_activity.lock() {
@@ -509,59 +567,6 @@ pub(crate) fn now_secs() -> u32 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as u32)
         .unwrap_or(0)
-}
-
-/// Applies transcript events to the sub-agent set for the current turn: a new user prompt clears it,
-/// a sub-agent tool-use adds a running one (keyed by its id, labelled by its parsed body — the task
-/// description), and its tool-result *removes* it (the card shows only what's still running, so a
-/// finished sub-agent drops off). Returns whether the set changed, so the caller only republishes on
-/// a real change.
-pub(crate) fn track_subagents(
-    active: &mut Vec<(String, SubAgent)>,
-    events: &[ChatEvent],
-    // Whether a sub-agent result is only a launch ack (background agent still running), not a
-    // completion — provider-specific, so the caller supplies it (see `Provider::is_subagent_launch_ack`).
-    is_launch_ack: impl Fn(&str) -> bool,
-) -> bool {
-    let mut changed = false;
-    for event in events {
-        match event {
-            // A real user prompt (not a tool result) starts a new turn.
-            ChatEvent::User { .. } => {
-                if !active.is_empty() {
-                    active.clear();
-                    changed = true;
-                }
-            }
-            ChatEvent::Tool {
-                id,
-                body,
-                tool_kind: ToolKind::Agent,
-                ..
-            } => {
-                let name = body.clone().unwrap_or_else(|| "sub-agent".to_string());
-                active.push((
-                    id.clone(),
-                    SubAgent {
-                        name,
-                        status: Status::Thinking,
-                        started_at: Some(now_secs()),
-                    },
-                ));
-                changed = true;
-            }
-            // The sub-agent finished (or errored): drop it. But a *background* ("async") sub-agent's
-            // result is only a launch ack — it's still running — so keep it (the panel is exactly for
-            // these background agents; it's cleared on the next fresh turn instead).
-            ChatEvent::ToolResult { id, text, .. } if !is_launch_ack(text) => {
-                let before = active.len();
-                active.retain(|(tool_id, _)| tool_id != id);
-                changed |= active.len() != before;
-            }
-            _ => {}
-        }
-    }
-    changed
 }
 
 /// Tracks the in-progress non-`Task` tool calls (the last one is the agent's current activity): a
@@ -660,119 +665,6 @@ mod tests {
     }
 
     #[test]
-    fn tracks_subagents_with_status_across_a_turn() {
-        let mut active: Vec<(String, SubAgent)> = Vec::new();
-        let labels = |active: &[(String, SubAgent)]| {
-            active
-                .iter()
-                .map(|(_, s)| (s.name.clone(), s.status))
-                .collect::<Vec<_>>()
-        };
-
-        // Two Task calls spawn two running sub-agents, labelled by their description.
-        assert!(track_subagents(
-            &mut active,
-            &[
-                ChatEvent::Tool {
-                    id: "t1".into(),
-                    name: "Task".into(),
-                    path: None,
-                    body: Some("Map v1 to v2".into()),
-                    tool_kind: ToolKind::Agent,
-                },
-                ChatEvent::Tool {
-                    id: "t2".into(),
-                    name: "Task".into(),
-                    path: None,
-                    body: Some("Rewrite encoder".into()),
-                    tool_kind: ToolKind::Agent,
-                },
-            ],
-            |_| false,
-        ));
-        assert_eq!(
-            labels(&active),
-            vec![
-                ("Map v1 to v2".to_string(), Status::Thinking),
-                ("Rewrite encoder".to_string(), Status::Thinking),
-            ]
-        );
-
-        // A non-Task tool doesn't add a sub-agent.
-        assert!(!track_subagents(
-            &mut active,
-            &[ChatEvent::Tool {
-                id: "b1".into(),
-                name: "Bash".into(),
-                path: None,
-                body: Some("ls".into()),
-                tool_kind: ToolKind::Run,
-            }],
-            |_| false,
-        ));
-
-        // One sub-agent finishes: it drops off the list (the card shows only what's still running).
-        assert!(track_subagents(
-            &mut active,
-            &[ChatEvent::ToolResult {
-                id: "t1".into(),
-                ok: true,
-                text: "done".into(),
-            }],
-            |_| false,
-        ));
-        assert_eq!(
-            labels(&active),
-            vec![("Rewrite encoder".to_string(), Status::Thinking)]
-        );
-
-        // A new user prompt starts a fresh turn and clears the set.
-        assert!(track_subagents(
-            &mut active,
-            &[ChatEvent::User {
-                text: "now do the next thing".into(),
-                files: Vec::new(),
-            }],
-            |_| false,
-        ));
-        assert!(active.is_empty());
-    }
-
-    #[test]
-    fn tracks_the_renamed_agent_tool_as_a_subagent() {
-        // Claude Code 2.1 renamed the sub-agent tool `Task` -> `Agent`; both must be tracked.
-        let mut active: Vec<(String, SubAgent)> = Vec::new();
-        assert!(track_subagents(
-            &mut active,
-            &[ChatEvent::Tool {
-                id: "a1".into(),
-                name: "Agent".into(),
-                path: None,
-                body: Some("Find gift card features".into()),
-                tool_kind: ToolKind::Agent,
-            }],
-            |_| false,
-        ));
-        assert_eq!(active.len(), 1);
-        assert_eq!(active[0].1.name, "Find gift card features");
-        assert_eq!(active[0].1.status, Status::Thinking);
-
-        // And it must NOT be counted as the tab's own activity (it has its own row).
-        let mut pending: Vec<(String, String)> = Vec::new();
-        assert!(!track_activity(
-            &mut pending,
-            &[ChatEvent::Tool {
-                id: "a1".into(),
-                name: "Agent".into(),
-                path: None,
-                body: Some("Find gift card features".into()),
-                tool_kind: ToolKind::Agent,
-            }],
-        ));
-        assert!(pending.is_empty());
-    }
-
-    #[test]
     fn idle_decay_fires_only_for_a_quiet_unsettled_thinking() {
         // The one case that decays: working, no hook settled it, and the PTY has gone quiet.
         assert!(idle_decay_due(Status::Thinking, false, true));
@@ -802,6 +694,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_resize_is_announced_among_the_output_and_only_when_it_changes_the_size() {
+        let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
+        let (snapshot, mut rx) = session.attach_output();
+        assert_eq!((snapshot.cols, snapshot.rows), (80, 24));
+
+        session.resize(80, 24);
+        session.resize(100, 30);
+        session.resize(100, 30);
+        assert_eq!(session.size(), (100, 30));
+
+        let resized = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut seen = Vec::new();
+            // Anything the shell printed comes first or after; exactly one resize is among it.
+            while seen.is_empty() {
+                match rx.recv().await {
+                    Ok(Output::Resized { cols, rows }) => seen.push((cols, rows)),
+                    Ok(Output::Data(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+            seen
+        })
+        .await
+        .unwrap_or_default();
+        assert_eq!(resized, [(100, 30)]);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty) | Ok(Output::Data(_))
+        ));
+
+        // A viewer arriving now starts from the new size.
+        let (snapshot, _) = session.attach_output();
+        assert_eq!((snapshot.cols, snapshot.rows), (100, 30));
+        session.shutdown();
+    }
+
+    #[tokio::test]
     async fn streams_output_and_accepts_input() {
         let session = Session::spawn(opts("/bin/cat", vec![])).unwrap();
         let mut rx = session.subscribe_output();
@@ -810,7 +739,7 @@ mod tests {
         let echoed = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 match rx.recv().await {
-                    Ok(chunk) if chunk.contains("ping") => break true,
+                    Ok(Output::Data(chunk)) if chunk.contains("ping") => break true,
                     Ok(_) => continue,
                     Err(_) => break false,
                 }
@@ -846,7 +775,8 @@ mod tests {
         let mut found = false;
         for _ in 0..40 {
             if session
-                .chat_snapshot()
+                .chat_log()
+                .snapshot()
                 .iter()
                 .any(|event| matches!(event, ChatEvent::User { text, .. } if text == "hi"))
             {
@@ -855,7 +785,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(found, "chat was {:?}", session.chat_snapshot());
+        assert!(found, "chat was {:?}", session.chat_log().snapshot());
         session.shutdown();
     }
 
@@ -921,70 +851,5 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(found, "snapshot was {:?}", session.snapshot());
-    }
-}
-
-#[cfg(test)]
-mod subagent_lifecycle {
-    use super::*;
-    use crate::providers::Provider;
-    use crate::providers::claude::Claude;
-
-    /// The real Claude launch-ack predicate, so these tests exercise the actual provider behavior.
-    fn ack(text: &str) -> bool {
-        Claude.is_subagent_launch_ack(text)
-    }
-
-    fn tool(id: &str) -> ChatEvent {
-        ChatEvent::Tool {
-            id: id.into(),
-            name: "Task".into(),
-            path: None,
-            body: Some("Explore RN app architecture".into()),
-            tool_kind: ToolKind::Agent,
-        }
-    }
-    fn result(id: &str, text: &str) -> ChatEvent {
-        ChatEvent::ToolResult {
-            id: id.into(),
-            ok: true,
-            text: text.into(),
-        }
-    }
-
-    #[test]
-    fn async_launch_ack_keeps_the_agent_running() {
-        let mut active = Vec::new();
-        track_subagents(&mut active, &[tool("t1")], ack);
-        assert_eq!(active.len(), 1, "the Task use adds a sub-agent");
-        // The launch ack must NOT drop it — the background agent is still working.
-        track_subagents(
-            &mut active,
-            &[result(
-                "t1",
-                "Async agent launched successfully. (internal)",
-            )],
-            ack,
-        );
-        assert_eq!(
-            active.len(),
-            1,
-            "the launch ack should not remove a background sub-agent"
-        );
-    }
-
-    #[test]
-    fn a_real_result_removes_a_synchronous_subagent() {
-        let mut active = Vec::new();
-        track_subagents(&mut active, &[tool("t2")], ack);
-        track_subagents(
-            &mut active,
-            &[result("t2", "Here are my findings: ...")],
-            ack,
-        );
-        assert!(
-            active.is_empty(),
-            "a real completion result removes the sub-agent"
-        );
     }
 }

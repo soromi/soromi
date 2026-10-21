@@ -5,22 +5,11 @@ import { FileIcon, FolderIcon } from './file-icon'
 import { cn } from '../lib/utils'
 
 //Types
+import type { FileNode } from '@soromi/core'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-/** One row of the tree, already flattened in render order by the host (respecting expansion). */
-export interface FileNode {
-  /** Full path, unique per row and used as the React key. */
-  path: string
-  name: string
-  type: 'file' | 'dir'
-  ignored: boolean
-  /** Nesting level, 0 at the root; drives the indent. */
-  depth: number
-  /** Directories: whether they are open (rotates the chevron). */
-  expanded?: boolean
-  /** Files: whether this is the open file (highlighted). */
-  selected?: boolean
-}
+// One row of the tree, already flattened in render order by the host (respecting expansion).
+export type { FileNode } from '@soromi/core'
 
 export interface FileTreeProps {
   /** The visible rows, flattened top-to-bottom. `undefined` while the root listing loads. */

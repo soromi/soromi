@@ -1,3 +1,4 @@
+import { PERMISSION_MODES, permissionLabel } from '@soromi/core'
 import { ChevronDown, ShieldCheck } from 'lucide-react'
 
 //Components
@@ -11,13 +12,6 @@ import {
 //Types
 import type { PermissionMode } from '@soromi/protocol'
 
-const MODES: { value: PermissionMode; label: string; hint: string }[] = [
-  { value: 'default', label: 'Ask', hint: 'Approve tools before they run' },
-  { value: 'acceptEdits', label: 'Auto-accept edits', hint: 'Edits run; ask for the rest' },
-  { value: 'bypassPermissions', label: 'Bypass', hint: 'Run everything without asking' },
-  { value: 'plan', label: 'Plan', hint: 'Propose only, no changes' },
-]
-
 /**
  * The composer's permission-mode picker: chooses whether the headless agent asks before running
  * tools (Ask), auto-accepts edits, bypasses entirely, or only plans. Applied live + persisted.
@@ -29,7 +23,7 @@ export function PermissionSelect({
   mode: PermissionMode
   onChange: (mode: PermissionMode) => void
 }) {
-  const label = MODES.find((m) => m.value === mode)?.label ?? 'Ask'
+  const label = permissionLabel(mode)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -44,7 +38,7 @@ export function PermissionSelect({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        {MODES.map((option) => (
+        {PERMISSION_MODES.map((option) => (
           <DropdownMenuItem
             key={option.value}
             onClick={() => onChange(option.value)}

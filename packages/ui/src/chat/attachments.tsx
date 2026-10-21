@@ -183,6 +183,16 @@ const KIND_META: Record<
 
 /** An image attachment: a square thumbnail (hover for the filename). */
 export function ImagePreview({ file }: { file: ChatFile }) {
+  // The bytes are fetched after the message; hold the thumbnail's place until they arrive.
+  if (file.deferred) {
+    return (
+      <div
+        title={file.filename ?? undefined}
+        className="h-24 w-24 animate-pulse rounded-lg border border-[var(--soromi-border)] bg-[var(--soromi-bg-hover)]"
+      />
+    )
+  }
+
   return (
     <img
       src={dataUrl(file)}

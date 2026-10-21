@@ -11,7 +11,7 @@ const REFRESH_MS = 15 * 60 * 1000
 
 /**
  * Loads plan usage for a workspace and keeps it fresh. Served from the daemon's cache on open, then
- * refreshed on a timer; `refresh()` forces a live fetch. Shared by the desktop and web status bars.
+ * refreshed on a timer; `refresh()` forces a live fetch. Used by the status bar.
  */
 export function useUsage(workspace: string | null): {
   agents: AgentUsage[]

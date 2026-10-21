@@ -13,8 +13,11 @@ export interface Transport {
   onOutput(listener: (session: string, data: string) => void): () => void
   /** Fires each time the connection (re)opens. */
   onOpen(listener: () => void): () => void
-  /** Fires each time the connection drops. */
-  onClose(listener: () => void): () => void
+  /**
+   * Fires each time the connection drops, with the WebSocket close code. A relay says why it
+   * turned a peer away through that code (see `relayClose`).
+   */
+  onClose(listener: (code: number) => void): () => void
   /**
    * Fires when the daemon peer attaches (`true`) or drops (`false`) on a relay link. A relay client
    * stays socket-connected to the relay even after the daemon quits, so this is how a remote

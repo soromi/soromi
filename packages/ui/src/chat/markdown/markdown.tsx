@@ -40,6 +40,9 @@ export function Markdown({
       animated={{ animation: 'fadeIn', duration: 220, easing: 'ease-out', sep: 'word' }}
       isAnimating={animate}
       components={codeComponents}
+      // A table is shown whole, as long as it is: the library would otherwise cap it and scroll it
+      // inside the message. Its full-screen view is there for one too wide or long to read in place.
+      tableMaxHeight="none"
       className={cn(
         'text-[12.5px] text-[var(--soromi-text)] leading-[1.55] [overflow-wrap:anywhere]',
         // Tighten default block spacing so a message reads as one bubble, not a document.

@@ -7,6 +7,8 @@ use super::backend::KeepAwake;
 
 struct Inner {
     working: HashSet<String>,
+    /// Whether a paired device is connected.
+    device: bool,
     active: bool,
     mode: KeepAwakeMode,
 }
@@ -16,6 +18,10 @@ struct Inner {
 /// - `off`: never.
 /// - `working`: while any session's agent is actively thinking.
 /// - `always`: unconditionally.
+///
+/// And, whatever the mode, while a paired device is connected: someone is using this computer
+/// from their phone, and a computer that falls asleep under them is a connection that keeps
+/// dropping. It is what the system itself does for a remote login session.
 ///
 /// Engages/releases the backend only on a real transition. Interior-mutable so it can be
 /// shared across the status watchers and the connection.
@@ -30,6 +36,7 @@ impl KeepAwakeController {
             backend,
             inner: Mutex::new(Inner {
                 working: HashSet::new(),
+                device: false,
                 active: false,
                 mode,
             }),
@@ -44,6 +51,13 @@ impl KeepAwakeController {
         } else {
             inner.working.remove(session);
         }
+        self.recompute(&mut inner)
+    }
+
+    /// A paired device connected, or the last one left; returns true if the engaged state changed.
+    pub fn set_device(&self, connected: bool) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        inner.device = connected;
         self.recompute(&mut inner)
     }
 
@@ -72,11 +86,12 @@ impl KeepAwakeController {
     }
 
     fn recompute(&self, inner: &mut Inner) -> bool {
-        let next = match inner.mode {
-            KeepAwakeMode::Always => true,
-            KeepAwakeMode::Off => false,
-            KeepAwakeMode::Working => !inner.working.is_empty(),
-        };
+        let next = inner.device
+            || match inner.mode {
+                KeepAwakeMode::Always => true,
+                KeepAwakeMode::Off => false,
+                KeepAwakeMode::Working => !inner.working.is_empty(),
+            };
         if next == inner.active {
             return false;
         }
@@ -136,6 +151,26 @@ mod tests {
         assert!(ctrl.handle("a", Status::Idle));
         assert!(ctrl.is_active());
         assert!(!ctrl.handle("a", Status::Thinking));
+        assert_eq!(*rec.calls.lock().unwrap(), vec!["engage"]);
+    }
+
+    #[test]
+    fn a_connected_device_holds_the_machine_awake_in_any_mode() {
+        let (ctrl, rec) = controller(KeepAwakeMode::Off);
+        assert!(ctrl.set_device(true));
+        assert!(ctrl.is_active());
+        // Hearing it again changes nothing.
+        assert!(!ctrl.set_device(true));
+        assert!(ctrl.set_device(false));
+        assert!(!ctrl.is_active());
+        assert_eq!(*rec.calls.lock().unwrap(), vec!["engage", "release"]);
+
+        // With an agent at work as well, the device leaving releases nothing.
+        let (ctrl, rec) = controller(KeepAwakeMode::Working);
+        ctrl.handle("a", Status::Thinking);
+        assert!(!ctrl.set_device(true));
+        assert!(!ctrl.set_device(false));
+        assert!(ctrl.is_active());
         assert_eq!(*rec.calls.lock().unwrap(), vec!["engage"]);
     }
 

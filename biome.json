@@ -10,6 +10,7 @@
     "includes": [
       "**",
       "!packages/protocol/src/generated/**",
+      "!apps/mobile/src/components/terminal/page.generated.ts",
       "!apps/desktop/.vite/**",
       "!.agents/**",
       "!packages/ui/src/components/ai-elements/**"

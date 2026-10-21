@@ -16,13 +16,19 @@ export interface Relay {
 export interface RelayOptions {
   port: number
   host?: string
+  /**
+   * The secret a daemon must present (the `x-soromi-access` header) to open a room. Only the daemon
+   * holds it; a phone joins an existing room by id without it. Empty leaves the relay open: anyone
+   * may open rooms.
+   */
+  accessKey: string
 }
 
 /**
- * Builds and starts the relay: a stateless, content-blind pipe. Two peers dial in with the same
- * `?room=<id>` and their frames are cross-forwarded verbatim (the protocol's JSON now, E2EE blobs
- * later). No storage, no keys, security comes from the room id being secret and, next, the frames
- * being encrypted.
+ * Builds and starts the relay: a stateless, content-blind pipe. A daemon and its paired device dial
+ * in with the same `?room=<id>` and their frames are cross-forwarded verbatim. No storage and no
+ * end-to-end keys: the frames are encrypted between the two peers, and the relay only ever sees
+ * ciphertext.
  */
 export async function createRelay(options: RelayOptions): Promise<Relay> {
   const app = Fastify({ logger: false })
@@ -31,7 +37,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   const registry = new RoomRegistry()
   const heartbeat = new Heartbeat()
   await app.register(healthController)
-  await app.register(relayController(registry, heartbeat))
+  await app.register(relayController(registry, heartbeat, options.accessKey))
 
   const stopHeartbeat = heartbeat.start(app.websocketServer)
   app.addHook('onClose', async () => stopHeartbeat())

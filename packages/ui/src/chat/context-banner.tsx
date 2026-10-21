@@ -1,3 +1,4 @@
+import { contextPercent, isContextFilling } from '@soromi/core'
 import { useState } from 'react'
 
 //Components
@@ -43,9 +44,9 @@ export function ContextBanner({
 }) {
   const [dismissed, setDismissed] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
-  const pct = Math.min(100, Math.round((tokens / limit) * 100))
+  const pct = contextPercent(tokens, limit)
 
-  if (pct < 80 || dismissed) return null
+  if (!isContextFilling(tokens, limit) || dismissed) return null
 
   return (
     <div className="mb-2 flex items-center gap-3 rounded-[12px] border border-[rgb(224_179_65/0.4)] bg-[rgb(224_179_65/0.1)] px-4 py-2.5">

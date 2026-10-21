@@ -2,7 +2,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 //Packages
-import { useClientStore, useTransport } from '@soromi/client'
+import {
+  runningAgents,
+  sessionAgentFor,
+  sessionStatus,
+  useClientStore,
+  useTransport,
+} from '@soromi/client'
 import {
   Dialog,
   DialogContent,
@@ -189,11 +195,7 @@ export function Sidebar() {
       const ws = workspaces.find((w) => w.name === name)
       // `choice` is the agent picked from the New-session menu (when the workspace has more than one);
       // otherwise fall back to the workspace's first bound agent.
-      const agent = choice?.agent ?? ws?.accounts[0]?.agent ?? 'claude'
-      const bound = ws?.accounts.some((a) => a.agent === agent) ?? false
-      const account =
-        choice?.account ??
-        (bound ? undefined : (accounts.find((a) => agent in a.providers)?.name ?? 'personal'))
+      const { agent, account } = sessionAgentFor(ws?.accounts ?? [], accounts, choice)
       transport.send({ type: 'open-session', workspace: name, agent, account, mode })
       select(name)
       setExpanded((prev) => new Set(prev).add(name))
@@ -601,7 +603,7 @@ function TopBar() {
             <MugSvg width={17} height={17} />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[200px]">
+        <DropdownMenuContent align="end" className="w-[230px]">
           <DropdownMenuLabel>Keep awake</DropdownMenuLabel>
           {KEEP_AWAKE_MODES.map(({ mode, label }) => (
             <DropdownMenuItem key={mode} onClick={() => selectKeepAwake(mode)}>
@@ -613,6 +615,10 @@ function TopBar() {
               {label}
             </DropdownMenuItem>
           ))}
+          <p className="px-2 pt-1.5 pb-1 text-[11px] text-[var(--soromi-text-faint)] leading-snug">
+            In every mode, this computer also stays awake while a paired phone is connected. A
+            sleeping computer cannot be reached from a phone.
+          </p>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -691,11 +697,12 @@ const WorkspaceGroup = memo(function WorkspaceGroup({
   const openWorkspaceSettings = useAppStore((s) => s.openWorkspaceSettings)
   const sessions = workspace.sessions
   // Aggregate header pills: amber = sessions still working / waiting, green = done (needs review).
+  // A session with agents still running in the background counts as working, not as finished.
   const runCount = sessions.filter((s) => {
-    const tone = statusTone(s.status)
+    const tone = statusTone(sessionStatus(s))
     return tone === 'running' || tone === 'attention'
   }).length
-  const reviewCount = sessions.filter((s) => s.status === 'done').length
+  const reviewCount = sessions.filter((s) => sessionStatus(s) === 'done').length
   const kbd = index < 9 ? `${modLabel}${index + 1}` : null
   // The agents the New-session menu offers: the workspace's *real* bound agents (phantom bindings
   // filtered out via the account profiles). More than one turns the menu into a provider picker;
@@ -899,10 +906,16 @@ const SessionRow = memo(function SessionRow({
   onRenameSession: (id: string, title: string) => void
   onCloseSession: (id: string) => void
 }) {
-  const state = AGENT_STATE[session.status]
+  // Its turn may be over with agents still running in the background: it is working until they stop.
+  const state = AGENT_STATE[sessionStatus(session)]
+  const background = runningAgents(session)
   // The subtitle is always shown so the two-line rhythm holds across the list: what the provider is
-  // working on, or "New session" for one that hasn't done anything yet.
-  const subtitle = session.activity || 'New session'
+  // working on, the agents it left running, or "New session" for one that hasn't done anything yet.
+  const subtitle =
+    session.activity ||
+    (background > 0
+      ? `${background} ${background === 1 ? 'agent' : 'agents'} working in the background`
+      : 'New session')
   // Sub-agents nest under the tab only for terminal sessions; chat sessions surface them in the
   // panel above the composer instead (so they aren't shown twice).
   const subagents = session.mode === 'chat' ? [] : (session.subagents ?? [])

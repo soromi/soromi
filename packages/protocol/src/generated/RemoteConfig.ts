@@ -14,4 +14,10 @@ relayUrl: string,
  * Shared secret the daemon presents to the relay to create a room (self-host gate). Held only
  * on the daemon (never in a pairing code); paired phones join by room id without it.
  */
-accessKey: string, };
+accessKey: string, 
+/**
+ * Whether paired devices may connect straight to this computer when they share a network with
+ * it, instead of through the relay. On unless turned off. The link is end-to-end encrypted
+ * with the device's key either way, and nothing is served to a socket that does not hold one.
+ */
+direct: boolean, };
