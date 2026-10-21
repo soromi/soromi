@@ -1,5 +1,11 @@
 # @soromi/desktop
 
+## 2.0.0
+
+### Major Changes
+
+- 0f9ccb0: Remote, re-architected: a native phone app, a standalone Linux server, and a hardened relay.
+
 ## 1.0.0
 
 ### Major Changes
