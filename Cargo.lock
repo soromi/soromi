@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-daemon"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1838,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "soromi-protocol"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",

@@ -1,5 +1,17 @@
 # @soromi/desktop
 
+## 2.0.0
+
+### Major Changes
+
+- - Improve release flow and cleanup
+  - Improve relay and mobile app, support Linux
+  - Issues and Improve UI
+  - Initial mobile version
+  - Support mobile and improve remote service
+  - Removing web remote app, moving to mobile
+  - Isolate providers and improve UI
+
 ## 1.0.0
 
 ### Major Changes
