@@ -1,0 +1,22 @@
+/**
+ * How the app lays itself out by the width it is given. A phone gets one thing at a time, full
+ * width; a tablet (or a large phone on its side) gets columns, as the desktop has.
+ */
+export const layout = {
+  breakpoints: {
+    /** From here up the sessions stay in a column of their own beside whatever is open. */
+    wide: 768,
+    /** From here up a session's panel sits beside the conversation; below, it slides over it. */
+    docked: 1100,
+  },
+  /** The width of the sessions column. */
+  sidebar: 320,
+  /** The width of a session's panel (files, skills, changes) when it is beside the conversation. */
+  panel: 380,
+  /** The widest a conversation's column grows: past this, lines are too long to read. */
+  column: 820,
+  /** The widest a sheet grows, however wide the screen. */
+  sheet: 520,
+  /** The least room a session's card takes in the home's grid: what decides how many fit a row. */
+  card: 170,
+} as const

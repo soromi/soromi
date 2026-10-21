@@ -1,0 +1,3 @@
+# This app is its own install root, apart from the repo's workspace (see README.md). The shared
+# packages are linked from ../../packages.
+packages: []

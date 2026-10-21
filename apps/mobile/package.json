@@ -1,0 +1,50 @@
+{
+  "name": "@soromi/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "typecheck": "tsc --noEmit",
+    "bundle": "expo export --platform ios --platform android --output-dir dist",
+    "doctor": "expo-doctor",
+    "test": "vitest run",
+    "build:android": "eas build --platform android --profile production",
+    "build:android:preview": "eas build --platform android --profile preview",
+    "eas-build-post-install": "pnpm --dir ../.. install --frozen-lockfile --filter @soromi/core... --filter @soromi/protocol... && pnpm --dir ../.. --filter @soromi/protocol build",
+    "gen:terminal": "node scripts/gen-terminal.mjs"
+  },
+  "dependencies": {
+    "@soromi/core": "link:../../packages/core",
+    "@soromi/protocol": "link:../../packages/protocol",
+    "expo": "~57.0.26",
+    "expo-build-properties": "~57.0.22",
+    "expo-camera": "~57.0.6",
+    "expo-clipboard": "~57.0.2",
+    "expo-constants": "~57.0.20",
+    "expo-crypto": "~57.0.3",
+    "expo-image-picker": "~57.0.20",
+    "expo-linking": "~57.0.11",
+    "expo-network": "~57.0.2",
+    "expo-notifications": "~57.0.22",
+    "expo-router": "~57.0.24",
+    "expo-secure-store": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "lucide-react-native": "^1.52.0",
+    "marked": "^18.1.0",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.2",
+    "react-native-svg": "15.15.4",
+    "react-native-webview": "13.16.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.3"
+  }
+}

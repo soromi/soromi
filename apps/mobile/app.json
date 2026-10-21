@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "Soromi",
+    "slug": "soromi",
+    "version": "1.0.0",
+    "scheme": "soromi",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#121213",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.soromi.mobile",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Soromi connects straight to your computer when both are on the same network, instead of going through the relay.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "dev.soromi.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Soromi uses the camera to scan the pairing code shown on your computer."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Soromi sends the pictures you pick to the agent on your computer.",
+          "cameraPermission": "Soromi uses the camera to scan the pairing code shown on your computer.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2fae6a"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ec50cbb3-6d03-49e6-a570-9fa0771e3c55"
+      }
+    },
+    "owner": "juandl"
+  }
+}

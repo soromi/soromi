@@ -23,6 +23,22 @@ jobs:
       - run: pnpm test
       - run: pnpm exec turbo run build --filter='!@soromi/desktop'
 
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # The app installs on its own, but links the shared packages from the repo, whose own
+      # dependencies come from the repo's install.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @soromi/protocol build
+      - run: pnpm --dir apps/mobile install --frozen-lockfile
+      - run: pnpm check:mobile
+
   rust:
     runs-on: ubuntu-latest
     steps:

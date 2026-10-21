@@ -1,0 +1,58 @@
+//Config
+import { defineStyles } from '@/config/theme'
+
+export const makeStyles = defineStyles((theme) => ({
+  root: { gap: theme.spacing.sm },
+  blocks: { gap: theme.spacing.sm },
+  paragraph: { ...theme.typography.body, color: theme.text.heading },
+  heading1: { ...theme.typography.heading1, color: theme.text.heading },
+  heading2: { ...theme.typography.heading2, color: theme.text.heading },
+  heading3: { ...theme.typography.heading3, color: theme.text.heading },
+  strong: theme.inline.strong,
+  em: theme.inline.em,
+  del: theme.inline.del,
+  link: { ...theme.inline.link, color: theme.text.action },
+  codespan: { ...theme.inline.code, backgroundColor: theme.surface.raised },
+  quote: {
+    gap: theme.spacing.sm,
+    paddingLeft: theme.spacing.sm2,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.border.default,
+  },
+  list: { gap: theme.spacing.xs },
+  item: { flexDirection: 'row', gap: theme.spacing.sm },
+  marker: { ...theme.typography.body, color: theme.text.muted, minWidth: 16 },
+  itemBody: { flex: 1, gap: theme.spacing.xs },
+  rule: { height: theme.borderWidth.hairline, backgroundColor: theme.border.default },
+  code: {
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth.hairline,
+    borderColor: theme.border.default,
+    backgroundColor: theme.surface.sunken,
+  },
+  codeLang: {
+    ...theme.typography.caption,
+    color: theme.text.muted,
+    paddingHorizontal: theme.spacing.sm2,
+    paddingTop: theme.spacing.sm,
+  },
+  codeScroll: { padding: theme.spacing.sm2 },
+  codeText: { ...theme.typography.mono, color: theme.text.body },
+  table: {
+    borderRadius: theme.borderRadius.md,
+    borderWidth: theme.borderWidth.hairline,
+    borderColor: theme.border.default,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderTopWidth: theme.borderWidth.hairline,
+    borderTopColor: theme.border.default,
+  },
+  tableHeader: { borderTopWidth: 0, backgroundColor: theme.surface.raised },
+  tableCell: { paddingHorizontal: theme.spacing.sm2, paddingVertical: theme.spacing.sm },
+  cellText: { ...theme.typography.bodySm, color: theme.text.body },
+  cellHeader: { ...theme.typography.bodySmSemiBold, color: theme.text.heading },
+  left: { textAlign: 'left' },
+  center: { textAlign: 'center' },
+  right: { textAlign: 'right' },
+}))
