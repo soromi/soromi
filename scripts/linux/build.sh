@@ -28,16 +28,32 @@ apt_install() {
   for package in "$@"; do
     dpkg -s "$package" >/dev/null 2>&1 || missing+=("$package")
   done
-  if [ ${#missing[@]} -gt 0 ]; then
+  [ ${#missing[@]} -gt 0 ] || return 0
+  debian_sources http://deb.debian.org
+  if ! { apt-get -qq update && apt-get -qq install -y "${missing[@]}"; } >/dev/null; then
+    echo "deb.debian.org failed; installing ${missing[*]} from archive.debian.org (slower)"
+    debian_sources http://archive.debian.org
     apt-get -qq update >/dev/null
     apt-get -qq install -y "${missing[@]}" >/dev/null
   fi
 }
 
-apt_install rsync
+# Debian 11 is past its end of life. Its security suite on deb.debian.org lists files that were
+# already moved to archive.debian.org (apt fails with a 404), so it is left out: these are
+# throwaway build tools. Once deb.debian.org drops Debian 11 altogether, the archive takes over.
+debian_sources() {
+  grep -q '^VERSION_CODENAME=bullseye' /etc/os-release || return 0
+  rm -f /etc/apt/sources.list.d/debian.sources
+  printf 'deb %s/debian bullseye main\ndeb %s/debian bullseye-updates main\n' "$1" "$1" \
+    > /etc/apt/sources.list
+  echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-eol
+}
+
+# A copy of SRC without what the build makes or installs. WORK is kept between runs, so a second
+# step (the desktop after the CLI) reuses the daemon already compiled in WORK/target.
 mkdir -p "$WORK" "$OUT"
-rsync -a --delete --exclude node_modules --exclude target --exclude out --exclude dist \
-  --exclude .turbo --exclude apps/mobile "$SRC/" "$WORK/"
+tar -C "$SRC" --exclude=node_modules --exclude=target --exclude=out --exclude=dist \
+  --exclude=.turbo --exclude=./apps/mobile -cf - . | tar -C "$WORK" -xf -
 cd "$WORK"
 
 case "$KIND" in
